@@ -60,24 +60,16 @@ flutter run -d chrome
 flutter run -d emulator-5554
 flutter run -d windows
 
-📝 About This Repository
+## 📝 About This Repository
 
 This repo documents my journey into Flutter app development, covering:
 
-UI layouts
-
-State management
-
-API handling
-
-Real-device testing
-
-Android/iOS optimization
-
-Package integration
-
+- 🎨 UI layouts and widget structure  
+- 🔄 State management fundamentals  
+- 🌐 API handling & JSON parsing  
+- 📱 Real-device testing & debugging  
+- 🧩 Android/iOS optimization techniques  
+- 📦 Using and integrating external packages  
+- 🏗️ Project architecture & clean code practices
+  
 Every project is intentionally built to learn one new concept at a time.
-
-
-flutter pub get
-flutter run
