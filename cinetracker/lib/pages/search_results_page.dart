@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../model/movie_model.dart';
 import '../service/movie_service.dart';
 import 'movie_details_page.dart';
+import 'package:iconsax_plus/iconsax_plus.dart';
+import 'package:iconsax/iconsax.dart';
 
 class SearchResultsPage extends StatelessWidget {
   final List<Movie> movies;
@@ -18,41 +20,43 @@ class SearchResultsPage extends StatelessWidget {
     final service = MovieService();
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Results for \"$query\""),
-      ),
+      appBar: AppBar(title: Text('Results for "$query"')),
 
       body: ListView.builder(
         itemCount: movies.length,
         itemBuilder: (context, index) {
           final movie = movies[index];
+          final posterUrl = movie.poster != 'N/A' ? movie.poster : null;
 
           return ListTile(
-            leading: movie.poster != "N/A"
+            leading: posterUrl != null
                 ? ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Image.network(
-                movie.poster,
-                width: 50,
-                fit: BoxFit.cover,
-              ),
-            )
-                : const Icon(Icons.movie),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.network(
+                      posterUrl,
+                      width: 50,
+                      height: 75,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _smallPosterPlaceholder(),
+                    ),
+                  )
+                : _smallPosterPlaceholder(),
 
             title: Text(movie.title),
             subtitle: Text(movie.year),
-
+            trailing: Icon(Iconsax.heart),
             onTap: () async {
               showDialog(
                 context: context,
                 barrierDismissible: false,
-                builder: (_) => const Center(
-                  child: CircularProgressIndicator(),
-                ),
+                builder: (_) =>
+                    const Center(child: CircularProgressIndicator()),
               );
 
               try {
                 final fullMovie = await service.getMovieById(movie.imdbId);
+
+                if (!context.mounted) return;
                 Navigator.pop(context);
 
                 Navigator.push(
@@ -61,18 +65,26 @@ class SearchResultsPage extends StatelessWidget {
                     builder: (_) => MovieDetailsPage(movie: fullMovie),
                   ),
                 );
-              } catch (e) {
+              } catch (_) {
+                if (!context.mounted) return;
                 Navigator.pop(context);
+
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Failed to load movie details."),
-                  ),
+                  const SnackBar(content: Text('failed to load movie details')),
                 );
               }
             },
           );
         },
       ),
+    );
+  }
+
+  Widget _smallPosterPlaceholder() {
+    return const SizedBox(
+      width: 50,
+      height: 75,
+      child: Icon(Icons.movie, color: Colors.grey),
     );
   }
 }

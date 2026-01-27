@@ -35,6 +35,8 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
       // get list of movies
       final results = await service.searchMovies(query);
 
+      if (!mounted) return;
+
       if (results.isEmpty) {
         setState(() {
           errorMessage = "no movies found.";
@@ -44,10 +46,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => SearchResultsPage(
-              movies: results,
-              query: query,
-            ),
+            builder: (_) => SearchResultsPage(movies: results, query: query),
           ),
         );
       }
@@ -63,9 +62,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("cinetracker"),
-      ),
+      appBar: AppBar(title: const Text("CineTracker")),
 
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -77,14 +74,14 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => searchMovie(),
 
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
 
               decoration: InputDecoration(
                 hintText: "search for a movie...",
                 hintStyle: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha:0.6),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
 
                 filled: true,
@@ -98,10 +95,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
             const SizedBox(height: 16),
 
-            ElevatedButton(
-              onPressed: searchMovie,
-              child: const Text("search"),
-            ),
+            ElevatedButton(onPressed: searchMovie, child: const Text("search")),
 
             const SizedBox(height: 20),
 
@@ -115,7 +109,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha:0.2),
+                  color: Colors.red.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(

@@ -42,8 +42,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final posterUrl =
-    widget.movie.poster != "N/A" ? widget.movie.poster : null;
+    final posterUrl = widget.movie.poster != "N/A" ? widget.movie.poster : null;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -62,9 +61,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
               child: Image.network(
                 posterUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Colors.black,
-                ),
+                errorBuilder: (_, __, ___) => Container(color: Colors.black),
               ),
             ),
 
@@ -84,9 +81,9 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha:0.85),
-                    Colors.black.withValues(alpha:0.55),
-                    Colors.black.withValues(alpha:0.85),
+                    Colors.black.withValues(alpha: 0.85),
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.85),
                   ],
                 ),
               ),
@@ -94,10 +91,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
           ),
 
           // loading
-          if (isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
-            ),
+          if (isLoading) const Center(child: CircularProgressIndicator()),
 
           // error
           if (!isLoading && errorMessage != null)
@@ -156,10 +150,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                   // rating
                   Text(
                     "imdb rating: ${fullMovie!.imdbRating}",
-                    style: const TextStyle(
-                      fontSize: 18,
-                      color: Colors.white70,
-                    ),
+                    style: const TextStyle(fontSize: 18, color: Colors.white70),
                   ),
 
                   const SizedBox(height: 24),
@@ -168,7 +159,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      "plot",
+                      "Plot",
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -182,10 +173,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                   // plot text
                   Text(
                     fullMovie!.plot,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.white70,
-                    ),
+                    style: const TextStyle(fontSize: 16, color: Colors.white70),
                   ),
 
                   const SizedBox(height: 24),
@@ -209,7 +197,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha:0.35),
+        color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -226,10 +214,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.white70,
-              ),
+              style: const TextStyle(fontSize: 16, color: Colors.white70),
             ),
           ),
         ],

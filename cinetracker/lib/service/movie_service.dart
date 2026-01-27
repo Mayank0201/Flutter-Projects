@@ -23,7 +23,7 @@ class MovieService {
       throw Exception("Movie not found");
     }
 
-    return Movie.fromJson(data);  // full movie details
+    return Movie.fromJson(data); // full movie details
   }
 
   // used by search page to fetch list of movies
