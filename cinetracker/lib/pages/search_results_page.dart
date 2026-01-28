@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import '../model/movie_model.dart';
 import '../service/movie_service.dart';
 import 'movie_details_page.dart';
-import 'package:iconsax_plus/iconsax_plus.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:provider/provider.dart';
+import 'package:cinetracker/provider/wishlist_provider.dart';
 
 class SearchResultsPage extends StatelessWidget {
   final List<Movie> movies;
@@ -44,7 +45,21 @@ class SearchResultsPage extends StatelessWidget {
 
             title: Text(movie.title),
             subtitle: Text(movie.year),
-            trailing: Icon(Iconsax.heart),
+            trailing: Consumer<WishlistProvider>(
+              builder: (context, wishlistProvider, _) {
+                final isFavorite = wishlistProvider.isFavorite(movie.imdbId);
+
+                return IconButton(
+                  icon: Icon(
+                    isFavorite ? Iconsax.heart5 : Iconsax.heart,
+                    color: isFavorite ? Colors.red : Colors.grey,
+                  ),
+                  onPressed: () {
+                    wishlistProvider.toggleFavorite(movie);
+                  },
+                );
+              },
+            ),
             onTap: () async {
               showDialog(
                 context: context,

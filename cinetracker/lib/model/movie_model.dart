@@ -1,16 +1,32 @@
+import 'package:hive/hive.dart';
+
+part 'movie_model.g.dart';
+
+@HiveType(typeId: 0)
 class Movie {
+  @HiveField(0)
   final String title;
+  @HiveField(1)
   final String year;
+  @HiveField(2)
   final String imdbId;
+  @HiveField(3)
   final String poster;
 
   // detailed fields (available only in full fetch)
+  @HiveField(4)
   final String plot;
+  @HiveField(5)
   final String genre;
+  @HiveField(6)
   final String director;
+  @HiveField(7)
   final String actors;
+  @HiveField(8)
   final String runtime;
+  @HiveField(9)
   final String released;
+  @HiveField(10)
   final String imdbRating;
 
   Movie({
