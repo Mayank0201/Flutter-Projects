@@ -28,13 +28,14 @@ class MovieAdapter extends TypeAdapter<Movie> {
       runtime: fields[8] as String,
       released: fields[9] as String,
       imdbRating: fields[10] as String,
+      tmdbId: fields[11] as int,
     );
   }
 
   @override
   void write(BinaryWriter writer, Movie obj) {
     writer
-      ..writeByte(11)
+      ..writeByte(12)
       ..writeByte(0)
       ..write(obj.title)
       ..writeByte(1)
@@ -56,7 +57,9 @@ class MovieAdapter extends TypeAdapter<Movie> {
       ..writeByte(9)
       ..write(obj.released)
       ..writeByte(10)
-      ..write(obj.imdbRating);
+      ..write(obj.imdbRating)
+      ..writeByte(11)
+      ..write(obj.tmdbId);
   }
 
   @override

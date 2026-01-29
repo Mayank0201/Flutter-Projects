@@ -1,10 +1,12 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+
 import '../model/movie_model.dart';
-import '../service/movie_service.dart';
+import '../service/omdb_service.dart';
+import '../service/tmdb_service.dart';
 
 class MovieDetailsPage extends StatefulWidget {
-  final Movie movie;
+  final Movie movie; // tmdb movie (has tmdbId)
 
   const MovieDetailsPage({super.key, required this.movie});
 
@@ -13,7 +15,8 @@ class MovieDetailsPage extends StatefulWidget {
 }
 
 class _MovieDetailsPageState extends State<MovieDetailsPage> {
-  final MovieService service = MovieService();
+  final OMDBService omdbService = OMDBService();
+  final TMDBService tmdbService = TMDBService();
 
   Movie? fullMovie;
   bool isLoading = true;
@@ -25,9 +28,22 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
     fetchFullDetails();
   }
 
+  // tmdb -> imdb -> omdb
   Future<void> fetchFullDetails() async {
     try {
-      final result = await service.getMovieById(widget.movie.imdbId);
+      // step 1: get imdb id from tmdb
+      final imdbId = await tmdbService.getImdbId(widget.movie.tmdbId);
+
+      if (imdbId == null || imdbId.isEmpty) {
+        throw Exception('imdb id not found');
+      }
+
+      // step 2: fetch full movie details from omdb
+      final result = await omdbService.getMovieById(
+        imdbId,
+        tmdbId: widget.movie.tmdbId,
+      );
+
       setState(() {
         fullMovie = result;
       });
@@ -42,7 +58,9 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final posterUrl = widget.movie.poster != "N/A" ? widget.movie.poster : null;
+    final posterUrl = widget.movie.poster.isNotEmpty
+        ? widget.movie.poster
+        : null;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -73,7 +91,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
             ),
           ),
 
-          // gradient overlay for readability
+          // gradient overlay
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
@@ -90,10 +108,10 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
             ),
           ),
 
-          // loading
+          // loading state
           if (isLoading) const Center(child: CircularProgressIndicator()),
 
-          // error
+          // error state
           if (!isLoading && errorMessage != null)
             Center(
               child: Text(
@@ -109,7 +127,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // poster image
+                  // poster
                   if (posterUrl != null)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(16),
@@ -155,7 +173,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   const SizedBox(height: 24),
 
-                  // plot title
+                  // plot section
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -170,7 +188,6 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   const SizedBox(height: 8),
 
-                  // plot text
                   Text(
                     fullMovie!.plot,
                     style: const TextStyle(fontSize: 16, color: Colors.white70),

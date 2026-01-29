@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../service/movie_service.dart';
+import '../service/omdb_service.dart';
 import 'search_results_page.dart';
 
 class MovieSearchPage extends StatefulWidget {
@@ -11,7 +11,7 @@ class MovieSearchPage extends StatefulWidget {
 
 class _MovieSearchPageState extends State<MovieSearchPage> {
   final TextEditingController controller = TextEditingController();
-  final MovieService service = MovieService();
+  final OMDBService service = OMDBService();
 
   bool isLoading = false;
   String? errorMessage;

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../model/movie_model.dart';
-import '../service/movie_service.dart';
+import '../service/omdb_service.dart';
 import 'movie_details_page.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:provider/provider.dart';
@@ -18,7 +18,7 @@ class SearchResultsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final service = MovieService();
+    final service = OMDBService();
 
     return Scaffold(
       appBar: AppBar(title: Text('Results for "$query"')),
@@ -69,7 +69,10 @@ class SearchResultsPage extends StatelessWidget {
               );
 
               try {
-                final fullMovie = await service.getMovieById(movie.imdbId);
+                final fullMovie = await service.getMovieById(
+                  movie.imdbId,
+                  tmdbId: movie.tmdbId,
+                );
 
                 if (!context.mounted) return;
                 Navigator.pop(context);

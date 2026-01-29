@@ -13,7 +13,7 @@ class Movie {
   @HiveField(3)
   final String poster;
 
-  // detailed fields (available only in full fetch)
+  // detailed fields
   @HiveField(4)
   final String plot;
   @HiveField(5)
@@ -29,6 +29,10 @@ class Movie {
   @HiveField(10)
   final String imdbRating;
 
+  // tmdb id (used as bridge)
+  @HiveField(11)
+  final int tmdbId;
+
   Movie({
     required this.title,
     required this.year,
@@ -41,15 +45,16 @@ class Movie {
     required this.runtime,
     required this.released,
     required this.imdbRating,
+    required this.tmdbId,
   });
 
-  // used when fetching full movie details with ?i=ID
-  factory Movie.fromJson(Map<String, dynamic> json) {
+  // full movie from omdb (tmdbId passed manually)
+  factory Movie.fromJson(Map<String, dynamic> json, {required int tmdbId}) {
     return Movie(
       title: json["Title"] ?? "",
       year: json["Year"] ?? "",
       imdbId: json["imdbID"] ?? "",
-      poster: json["Poster"] ?? "N/A",
+      poster: json["Poster"] ?? "",
       plot: json["Plot"] ?? "",
       genre: json["Genre"] ?? "",
       director: json["Director"] ?? "",
@@ -57,18 +62,18 @@ class Movie {
       runtime: json["Runtime"] ?? "",
       released: json["Released"] ?? "",
       imdbRating: json["imdbRating"] ?? "",
+      tmdbId: tmdbId,
     );
   }
 
-  // used for search results (lightweight)
+  // omdb search result (no tmdb id available)
   factory Movie.fromSearchJson(Map<String, dynamic> json) {
     return Movie(
       title: json["Title"] ?? "",
       year: json["Year"] ?? "",
       imdbId: json["imdbID"] ?? "",
-      poster: json["Poster"] ?? "N/A",
+      poster: json["Poster"] ?? "",
 
-      // empty placeholders (details loaded later)
       plot: "",
       genre: "",
       director: "",
@@ -76,6 +81,30 @@ class Movie {
       runtime: "",
       released: "",
       imdbRating: "",
+
+      tmdbId: 0, // ✅ safe placeholder
+    );
+  }
+
+  // tmdb discover result
+  factory Movie.fromTMDBJson(Map<String, dynamic> json) {
+    return Movie(
+      title: json['title'] ?? "",
+      year: json['release_date']?.substring(0, 4) ?? "",
+      poster: json['poster_path'] != null
+          ? 'https://image.tmdb.org/t/p/w500${json['poster_path']}'
+          : "",
+      imdbId: "",
+
+      plot: "",
+      genre: "",
+      director: "",
+      actors: "",
+      runtime: "",
+      released: "",
+      imdbRating: "",
+
+      tmdbId: json['id'], // ✅ tmdb id comes from tmdb only
     );
   }
 }

@@ -1,19 +1,35 @@
 import 'package:flutter/material.dart';
-import '../service/movie_service.dart';
+import 'package:cinetracker/service/tmdb_service.dart';
+import 'package:cinetracker/service/omdb_service.dart';
 import '../model/movie_model.dart';
 import 'movie_details_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
+  // Genres supported by TMDB genre map
   static const List<String> genres = ['Action', 'Thriller', 'Comedy', 'Drama'];
 
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: genres.length,
+      itemCount: genres.length + 1, // footer included
       itemBuilder: (context, index) {
+        // footer item
+        if (index == genres.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                "Movie data provided by TMDB",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ),
+          );
+        }
+
+        // normal genre sections
         final genre = genres[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
@@ -35,67 +51,59 @@ class _GenreSection extends StatefulWidget {
 
 class _GenreSectionState extends State<_GenreSection> {
   late Future<List<Movie>> _future;
-  final MovieService _service = MovieService();
 
-  // curated keywords since omdb does not support genre discovery
-  String get _query {
-    switch (widget.genre) {
-      case 'Action':
-        return 'Avengers';
-      case 'Thriller':
-        return 'Batman';
-      case 'Comedy':
-        return 'Hangover';
-      case 'Drama':
-        return 'Inception';
-      default:
-        return widget.genre;
-    }
-  }
+  // TMDB service for genre-based discovery
+  final TMDBService _tmdbService = TMDBService();
 
   @override
   void initState() {
     super.initState();
-    _future = _service.searchMovies(_query);
+
+    // Fetch movies for the given genre using TMDB
+    _future = _tmdbService.getGenreMovies(widget.genre);
   }
 
+  // Retry API call on error
   void _retry() {
     setState(() {
-      _future = _service.searchMovies(_query);
+      _future = _tmdbService.getGenreMovies(widget.genre);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_service.apiKey.isEmpty) {
+    // Guard in case TMDB API key is missing
+    if (_tmdbService.tmdbApiKey.isEmpty) {
       return _sectionTitle(
         'Latest ${widget.genre} Movies',
-        const Center(child: Text('api key not configured')),
+        const Center(child: Text('API key not configured')),
       );
     }
 
     return _sectionTitle(
       'Latest ${widget.genre} Movies',
       SizedBox(
-        height: 240, // increased to prevent overflow
+        height: 240, // Fixed height for horizontal list
         child: FutureBuilder<List<Movie>>(
           future: _future,
           builder: (context, snapshot) {
+            // Loading state
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
 
+            // Error state
             if (snapshot.hasError) {
               return Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'unable to load ${widget.genre.toLowerCase()} movies',
+                      'Unable to load ${widget.genre.toLowerCase()} movies',
                       style: const TextStyle(color: Colors.grey),
                     ),
                     const SizedBox(height: 8),
-                    TextButton(onPressed: _retry, child: const Text('retry')),
+                    TextButton(onPressed: _retry, child: const Text('Retry')),
                   ],
                 ),
               );
@@ -103,10 +111,12 @@ class _GenreSectionState extends State<_GenreSection> {
 
             final movies = snapshot.data ?? [];
 
+            // Empty state
             if (movies.isEmpty) {
-              return const Center(child: Text('no movies found'));
+              return const Center(child: Text('No movies found'));
             }
 
+            // Horizontal movie list
             return ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -114,10 +124,13 @@ class _GenreSectionState extends State<_GenreSection> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
                 final movie = movies[index];
-                final posterUrl = movie.poster != 'N/A' ? movie.poster : null;
+
+                // TMDB poster is empty string if unavailable
+                final posterUrl = movie.poster.isNotEmpty ? movie.poster : null;
 
                 return GestureDetector(
                   onTap: () {
+                    // Navigate to details page (OMDb fetch happens there)
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -129,7 +142,6 @@ class _GenreSectionState extends State<_GenreSection> {
                     width: 140,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min, // prevents overflow
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(10),
@@ -174,6 +186,7 @@ class _GenreSectionState extends State<_GenreSection> {
     );
   }
 
+  // Section title + content wrapper
   Widget _sectionTitle(String title, Widget child) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,6 +204,7 @@ class _GenreSectionState extends State<_GenreSection> {
     );
   }
 
+  // Fallback UI when poster image is missing
   Widget _posterPlaceholder() {
     return Container(
       width: 140,
