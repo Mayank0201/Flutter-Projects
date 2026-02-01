@@ -1,12 +1,12 @@
-/// A centralized class to define constants for Hive box names.
-/// This helps avoid hardcoding box names throughout the app.
-class HiveBoxes {
-  /// Box name for storing `Workout` objects.
+/// This file contains constants for Hive keys.
+
+class HiveKeys {
+  /// Key for the workouts box.
   static const String workoutsBox = 'workouts';
 
-  /// Box name for storing `Exercise` objects.
+  /// Key for the exercises box.
   static const String exercisesBox = 'exercises';
 
-  /// Box name for storing `WorkoutSet` objects.
+  /// Key for the workout sets box.
   static const String workoutSetsBox = 'workout_sets';
 }
