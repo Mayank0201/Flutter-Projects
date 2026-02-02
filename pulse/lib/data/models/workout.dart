@@ -20,22 +20,26 @@ class Workout extends HiveObject {
   final String id;
 
   @HiveField(1)
-  final DateTime startedAt;
+  final String name;
 
   @HiveField(2)
-  final DateTime? endedAt;
+  final DateTime startedAt;
 
   @HiveField(3)
-  final WorkoutStatus status;
+  final DateTime? endedAt;
 
   @HiveField(4)
-  final String? notes;
+  final WorkoutStatus status;
 
   @HiveField(5)
+  final String? notes;
+
+  @HiveField(6)
   final List<Exercise> exercises;
 
   Workout({
     required this.id,
+    required this.name,
     required this.startedAt,
     this.endedAt,
     required this.status,

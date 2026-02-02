@@ -64,6 +64,7 @@ class WorkoutProvider extends ChangeNotifier {
         (w) => w.id == id,
         orElse: () => Workout(
           id: '',
+          name: '',
           startedAt: DateTime.now(),
           status: WorkoutStatus.inProgress,
           exercises: [],
