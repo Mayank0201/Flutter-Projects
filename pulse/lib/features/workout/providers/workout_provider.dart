@@ -60,16 +60,9 @@ class WorkoutProvider extends ChangeNotifier {
 
   Workout? getWorkoutById(String id) {
     try {
-      return _workouts.firstWhere(
-        (w) => w.id == id,
-        orElse: () => Workout(
-          id: '',
-          name: '',
-          startedAt: DateTime.now(),
-          status: WorkoutStatus.inProgress,
-          exercises: [],
-        ),
-      );
+      final index = _workouts.indexWhere((w) => w.id == id);
+      if (index == -1) return null;
+      return _workouts[index];
     } catch (e) {
       print('Error getting workout by ID: $e');
       return null;
