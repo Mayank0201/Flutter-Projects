@@ -13,6 +13,7 @@ class WeatherPage extends StatefulWidget {
 
 class _WeatherPageState extends State<WeatherPage> {
   Weather? weather;
+  List<Weather> forecast = [];
   bool isLoading = true;
 
   final service = WeatherService();
@@ -28,9 +29,9 @@ class _WeatherPageState extends State<WeatherPage> {
 
     try {
       weather = await service.getWeather(city);
+      forecast = await service.getForecast(city);
     } catch (e) {
       debugPrint("Weather error: $e");
-      weather = null;
     }
 
     setState(() => isLoading = false);
@@ -69,7 +70,7 @@ class _WeatherPageState extends State<WeatherPage> {
   }
 
   IconData getWeatherIcon(Weather w) {
-    if (w.description.toLowerCase().contains("rain")) {
+    if (w.description.toLowerCase().contains("rain") || w.windSpeed > 10) {
       return Icons.cloudy_snowing;
     }
 
@@ -85,7 +86,10 @@ class _WeatherPageState extends State<WeatherPage> {
   }
 
   String formatTime(String timestamp) {
-    return timestamp.substring(11, 16); // HH:mm
+    if (timestamp.length >= 16) {
+      return timestamp.substring(11, 16); // HH:mm
+    }
+    return timestamp;
   }
 
   @override
@@ -100,9 +104,7 @@ class _WeatherPageState extends State<WeatherPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              Navigator.pop(context);
-            },
+            onPressed: () => fetchWeatherData(widget.city),
           ),
         ],
       ),
@@ -153,15 +155,31 @@ class _WeatherPageState extends State<WeatherPage> {
           const SizedBox(height: 24),
 
           const Text(
-            "Forecast",
+            "Next Hours Forecast",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
 
           const SizedBox(height: 12),
 
-          const Text(
-            "Forecast coming soon...",
-            style: TextStyle(color: Colors.grey),
+          // REAL FORECAST DISPLAY
+          SizedBox(
+            height: 120,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: forecast.length,
+              itemBuilder: (context, index) {
+                final item = forecast[index];
+                final timeStr = item.time ?? item.searchedAt;
+                final time = timeStr.length >= 16 
+                    ? timeStr.substring(11, 16) 
+                    : timeStr.isNotEmpty ? timeStr : "00:00"; 
+                return ForecastCard(
+                  time: time,
+                  temp: item.temperature.toString(),
+                  icon: getWeatherIcon(item),
+                );
+              },
+            ),
           ),
 
           const SizedBox(height: 24),
@@ -193,6 +211,41 @@ class _WeatherPageState extends State<WeatherPage> {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// FORECAST CARD
+class ForecastCard extends StatelessWidget {
+  final String time;
+  final String temp;
+  final IconData icon;
+
+  const ForecastCard({
+    super.key,
+    required this.time,
+    required this.temp,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 80,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A2833),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(time),
+          Icon(icon, size: 28),
+          Text("$temp°C"),
         ],
       ),
     );
