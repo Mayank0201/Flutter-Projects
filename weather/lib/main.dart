@@ -14,25 +14,37 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ColorScheme.fromSeed(
+    final lightScheme = ColorScheme.fromSeed(
+      seedColor: Colors.deepPurple,
+      brightness: Brightness.light,
+    );
+
+    final darkScheme = ColorScheme.fromSeed(
       seedColor: Colors.deepPurple,
       brightness: Brightness.dark,
     );
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      themeMode: ThemeMode.system,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: scheme,
-
-        // global font (poppins)
-        textTheme: GoogleFonts.poppinsTextTheme(
-          ThemeData.dark().textTheme,
-        ),
-
+        colorScheme: lightScheme,
+        textTheme: GoogleFonts.poppinsTextTheme(ThemeData.light().textTheme),
         appBarTheme: AppBarTheme(
-          backgroundColor: scheme.primary,
-          foregroundColor: scheme.onPrimary,
+          backgroundColor: lightScheme.primary,
+          foregroundColor: lightScheme.onPrimary,
+          centerTitle: true,
+          elevation: 2,
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: darkScheme,
+        textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
+        appBarTheme: AppBarTheme(
+          backgroundColor: darkScheme.primary,
+          foregroundColor: darkScheme.onPrimary,
           centerTitle: true,
           elevation: 2,
         ),

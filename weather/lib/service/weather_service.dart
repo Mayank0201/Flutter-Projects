@@ -15,7 +15,7 @@ class WeatherService {
           headers: {"Content-Type": "application/json"},
           body: jsonEncode({"city": city}),
         )
-        .timeout(const Duration(seconds: 30));
+        .timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 200) {
       return Weather.fromJson(jsonDecode(response.body));
@@ -28,7 +28,7 @@ class WeatherService {
   Future<List<Weather>> getForecast(String city) async {
     final url = Uri.parse("$currentUrl/api/forecast?city=$city");
 
-    final response = await http.get(url).timeout(const Duration(seconds: 30));
+    final response = await http.get(url).timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 200) {
       final decoded = jsonDecode(response.body);
