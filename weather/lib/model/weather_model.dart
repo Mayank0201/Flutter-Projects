@@ -36,4 +36,15 @@ class Weather {
       time: json['dt_txt'],
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'city': city,
+      'temperature': temperature,
+      'description': description,
+      'searchedAt': searchedAt,
+      'windSpeed': windSpeed,
+      'dateTime': time,
+    };
+  }
 }

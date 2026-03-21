@@ -71,4 +71,5 @@ class WeatherService {
       throw Exception("Failed to load forecast data");
     }
   }
+
 }

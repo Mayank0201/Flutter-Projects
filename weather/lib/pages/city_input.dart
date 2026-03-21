@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'weather_page.dart';
+import 'recent_searches_page.dart';
 
 class CityInputScreen extends StatefulWidget {
   const CityInputScreen({super.key});
@@ -28,6 +29,23 @@ class _CityInputScreenState extends State<CityInputScreen> {
 
     return Scaffold(
       backgroundColor: cs.surface,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.history_rounded, color: cs.primary),
+            tooltip: 'Recent Searches',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const RecentSearchesPage()),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),

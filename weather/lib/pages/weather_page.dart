@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../service/weather_service.dart';
 import '../model/weather_model.dart';
+import 'package:provider/provider.dart';
+import '../provider/recent_searches_provider.dart';
 
 class WeatherPage extends StatefulWidget {
   final String city;
@@ -34,6 +36,10 @@ class _WeatherPageState extends State<WeatherPage> {
     try {
       weather = await service.getWeather(city).timeout(const Duration(seconds: 10));
       forecast = await service.getForecast(city).timeout(const Duration(seconds: 10));
+      
+      if (mounted && weather != null) {
+        context.read<RecentSearchesProvider>().addSearch(weather!);
+      }
     } catch (e) {
       debugPrint("Weather error: $e");
       if (e.toString().contains('TimeoutException')) {
@@ -228,7 +234,7 @@ class _WeatherPageState extends State<WeatherPage> {
                 Text(
                   widget.city[0].toUpperCase() + widget.city.substring(1),
                   style: tt.titleMedium?.copyWith(
-                    color: cs.onSurface.withOpacity(0.6),
+                    color: cs.onSurface,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.bold,
                   ),
