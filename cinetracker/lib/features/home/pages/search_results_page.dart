@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import '../model/movie_model.dart';
-import '../service/omdb_service.dart';
+import '../../../model/movie_model.dart';
 import 'movie_details_page.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:provider/provider.dart';
@@ -18,8 +17,6 @@ class SearchResultsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final service = OMDBService();
-
     return Scaffold(
       appBar: AppBar(title: Text('Results for "$query"')),
 
@@ -60,37 +57,14 @@ class SearchResultsPage extends StatelessWidget {
                 );
               },
             ),
-            onTap: () async {
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (_) =>
-                    const Center(child: CircularProgressIndicator()),
+            onTap: () {
+              // push directly, details page will handle fetching
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MovieDetailsPage(movie: movie),
+                ),
               );
-
-              try {
-                final fullMovie = await service.getMovieById(
-                  movie.imdbId,
-                  tmdbId: movie.tmdbId,
-                );
-
-                if (!context.mounted) return;
-                Navigator.pop(context);
-
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MovieDetailsPage(movie: fullMovie),
-                  ),
-                );
-              } catch (_) {
-                if (!context.mounted) return;
-                Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('failed to load movie details')),
-                );
-              }
             },
           );
         },

@@ -1,9 +1,9 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
-import '../model/movie_model.dart';
-import '../service/omdb_service.dart';
-import '../service/tmdb_service.dart';
+import '../../../model/movie_model.dart';
+import '../../../service/omdb_service.dart';
+import '../../../service/tmdb_service.dart';
 
 class MovieDetailsPage extends StatefulWidget {
   final Movie movie; // tmdb movie (has tmdbId)
@@ -28,11 +28,15 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
     fetchFullDetails();
   }
 
-  // tmdb -> imdb -> omdb
+  // fetch details using either existing imdb id or from tmdb
   Future<void> fetchFullDetails() async {
     try {
-      // step 1: get imdb id from tmdb
-      final imdbId = await tmdbService.getImdbId(widget.movie.tmdbId);
+      // step 1: get imdb id (use existing if available, else fetch from tmdb)
+      String? imdbId = widget.movie.imdbId;
+
+      if (imdbId.isEmpty) {
+        imdbId = await tmdbService.getImdbId(widget.movie.tmdbId);
+      }
 
       if (imdbId == null || imdbId.isEmpty) {
         throw Exception('imdb id not found');

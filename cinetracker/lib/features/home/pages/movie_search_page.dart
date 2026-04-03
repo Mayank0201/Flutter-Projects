@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../service/omdb_service.dart';
+import '../../../service/omdb_service.dart';
 import 'search_results_page.dart';
 
 class MovieSearchPage extends StatefulWidget {

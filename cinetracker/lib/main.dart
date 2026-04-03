@@ -1,8 +1,9 @@
+import 'package:cinetracker/features/auth/pages/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/adapters.dart';
-import 'pages/main_page.dart';
+import 'features/home/pages/main_page.dart';
 import 'package:provider/provider.dart';
 import 'provider/wishlist_provider.dart';
 
@@ -46,7 +47,7 @@ class MyApp extends StatelessWidget {
           elevation: 2,
         ),
       ),
-      home: const MainPage(),
+      home: const LoginScreen(),
     );
   }
 }

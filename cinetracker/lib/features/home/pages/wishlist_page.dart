@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../provider/wishlist_provider.dart';
+import '../../../provider/wishlist_provider.dart';
 import 'movie_details_page.dart';
-import '../model/movie_model.dart';
+import '../../../model/movie_model.dart';
 
 class WishlistPage extends StatelessWidget {
   const WishlistPage({super.key});

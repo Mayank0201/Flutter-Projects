@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cinetracker/service/tmdb_service.dart';
-import 'package:cinetracker/service/omdb_service.dart';
-import '../model/movie_model.dart';
+import '../../../model/movie_model.dart';
 import 'movie_details_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -59,11 +58,11 @@ class _GenreSectionState extends State<_GenreSection> {
   void initState() {
     super.initState();
 
-    // Fetch movies for the given genre using TMDB
+    // fetch movies for the given genre using TMDB
     _future = _tmdbService.getGenreMovies(widget.genre);
   }
 
-  // Retry API call on error
+  // retry API call on error
   void _retry() {
     setState(() {
       _future = _tmdbService.getGenreMovies(widget.genre);
@@ -72,7 +71,7 @@ class _GenreSectionState extends State<_GenreSection> {
 
   @override
   Widget build(BuildContext context) {
-    // Guard in case TMDB API key is missing
+    // guard in case TMDB API key is missing
     if (_tmdbService.tmdbApiKey.isEmpty) {
       return _sectionTitle(
         'Latest ${widget.genre} Movies',
@@ -83,16 +82,16 @@ class _GenreSectionState extends State<_GenreSection> {
     return _sectionTitle(
       'Latest ${widget.genre} Movies',
       SizedBox(
-        height: 240, // Fixed height for horizontal list
+        height: 240, // fixed height for horizontal list
         child: FutureBuilder<List<Movie>>(
           future: _future,
           builder: (context, snapshot) {
-            // Loading state
+            // loading state
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            // Error state
+            // error state
             if (snapshot.hasError) {
               return Center(
                 child: Column(
@@ -111,12 +110,12 @@ class _GenreSectionState extends State<_GenreSection> {
 
             final movies = snapshot.data ?? [];
 
-            // Empty state
+            // empty state
             if (movies.isEmpty) {
               return const Center(child: Text('No movies found'));
             }
 
-            // Horizontal movie list
+            // horizontal movie list
             return ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -130,7 +129,7 @@ class _GenreSectionState extends State<_GenreSection> {
 
                 return GestureDetector(
                   onTap: () {
-                    // Navigate to details page (OMDb fetch happens there)
+                    // navigate to details page (OMDb fetch happens there)
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -186,7 +185,7 @@ class _GenreSectionState extends State<_GenreSection> {
     );
   }
 
-  // Section title + content wrapper
+  // section title + content wrapper
   Widget _sectionTitle(String title, Widget child) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +203,7 @@ class _GenreSectionState extends State<_GenreSection> {
     );
   }
 
-  // Fallback UI when poster image is missing
+  // fallback UI when poster image is missing
   Widget _posterPlaceholder() {
     return Container(
       width: 140,
