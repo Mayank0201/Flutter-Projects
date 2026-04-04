@@ -33,6 +33,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Registration successful")));
+      Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(
         context,

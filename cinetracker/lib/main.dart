@@ -1,3 +1,5 @@
+import 'package:cinetracker/core/network/api_service.dart';
+import 'package:cinetracker/core/storage/token_storage.dart';
 import 'package:cinetracker/features/auth/pages/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -16,16 +18,21 @@ Future<void> main() async {
   // load .env before runApp
   await dotenv.load(fileName: ".env");
 
-  runApp(
-    ChangeNotifierProvider(
-      create: (_) => WishlistProvider(),
-      child: const MyApp(),
-    ),
-  );
+  final storage = TokenStorage();
+  final token = await storage.getToken();
+
+  final ApiService apiService = ApiService();
+
+  if (token != null) {
+    apiService.setToken(token);
+  }
+
+  runApp(MyApp(isLoggedIn: token != null));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final bool isLoggedIn;
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +54,7 @@ class MyApp extends StatelessWidget {
           elevation: 2,
         ),
       ),
-      home: const LoginScreen(),
+      home: isLoggedIn ? const MainPage() : const LoginScreen(),
     );
   }
 }

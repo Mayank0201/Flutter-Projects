@@ -14,11 +14,7 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
 
-  final List<Widget> _pages = const [
-    HomePage(),
-    MovieSearchPage(),
-    WishlistPage(),
-  ];
+  final List<Widget> _pages = const [HomePage(), MovieSearchPage()];
 
   void _onItemTapped(int index) {
     setState(() {

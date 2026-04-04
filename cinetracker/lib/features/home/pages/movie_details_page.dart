@@ -15,7 +15,7 @@ class MovieDetailsPage extends StatefulWidget {
 }
 
 class _MovieDetailsPageState extends State<MovieDetailsPage> {
-  final OMDBService omdbService = OMDBService();
+  //final OMDBService omdbService = OMDBService();
   final TMDBService tmdbService = TMDBService();
 
   Movie? fullMovie;
@@ -25,40 +25,9 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
   @override
   void initState() {
     super.initState();
-    fetchFullDetails();
   }
 
   // fetch details using either existing imdb id or from tmdb
-  Future<void> fetchFullDetails() async {
-    try {
-      // step 1: get imdb id (use existing if available, else fetch from tmdb)
-      String? imdbId = widget.movie.imdbId;
-
-      if (imdbId.isEmpty) {
-        imdbId = await tmdbService.getImdbId(widget.movie.tmdbId);
-      }
-
-      if (imdbId == null || imdbId.isEmpty) {
-        throw Exception('imdb id not found');
-      }
-
-      // step 2: fetch full movie details from omdb
-      final result = await omdbService.getMovieById(
-        imdbId,
-        tmdbId: widget.movie.tmdbId,
-      );
-
-      setState(() {
-        fullMovie = result;
-      });
-    } catch (e) {
-      setState(() {
-        errorMessage = "failed to load movie details.";
-      });
-    }
-
-    setState(() => isLoading = false);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -158,7 +127,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   // title
                   Text(
-                    "${fullMovie!.title} (${fullMovie!.year})",
+                    "${fullMovie!.title}",
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 22,
@@ -171,7 +140,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   // rating
                   Text(
-                    "imdb rating: ${fullMovie!.imdbRating}",
+                    "imdb rating:",
                     style: const TextStyle(fontSize: 18, color: Colors.white70),
                   ),
 
@@ -192,18 +161,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   const SizedBox(height: 8),
 
-                  Text(
-                    fullMovie!.plot,
-                    style: const TextStyle(fontSize: 16, color: Colors.white70),
-                  ),
-
                   const SizedBox(height: 24),
-
-                  _infoRow("Released", fullMovie!.released),
-                  _infoRow("Runtime", fullMovie!.runtime),
-                  _infoRow("Genre", fullMovie!.genre),
-                  _infoRow("Director", fullMovie!.director),
-                  _infoRow("Actors", fullMovie!.actors),
                 ],
               ),
             ),

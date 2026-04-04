@@ -1,3 +1,5 @@
+import 'package:cinetracker/core/storage/token_storage.dart';
+import 'package:cinetracker/features/home/pages/home_page.dart';
 import 'package:flutter/material.dart';
 import '../service/auth_service.dart';
 import '../../../core/network/api_service.dart';
@@ -15,6 +17,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final usernameController = TextEditingController();
   final passwordController = TextEditingController();
 
+  final storage = TokenStorage();
+
   final apiService = ApiService();
   late final AuthService authService;
 
@@ -31,9 +35,12 @@ class _LoginScreenState extends State<LoginScreen> {
         passwordController.text,
       );
       apiService.setToken(token);
-      ScaffoldMessenger.of(
+      await storage.saveToken(token);
+
+      Navigator.pushReplacement(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Login successful")));
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
     } catch (e) {
       print(e);
       ScaffoldMessenger.of(

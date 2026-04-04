@@ -41,22 +41,7 @@ class SearchResultsPage extends StatelessWidget {
                 : _smallPosterPlaceholder(),
 
             title: Text(movie.title),
-            subtitle: Text(movie.year),
-            trailing: Consumer<WishlistProvider>(
-              builder: (context, wishlistProvider, _) {
-                final isFavorite = wishlistProvider.isFavorite(movie.imdbId);
 
-                return IconButton(
-                  icon: Icon(
-                    isFavorite ? Iconsax.heart5 : Iconsax.heart,
-                    color: isFavorite ? Colors.red : Colors.grey,
-                  ),
-                  onPressed: () {
-                    wishlistProvider.toggleFavorite(movie);
-                  },
-                );
-              },
-            ),
             onTap: () {
               // push directly, details page will handle fetching
               Navigator.push(

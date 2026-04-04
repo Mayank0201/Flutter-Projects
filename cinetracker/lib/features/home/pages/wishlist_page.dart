@@ -1,3 +1,4 @@
+/*
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../provider/wishlist_provider.dart';
@@ -28,7 +29,6 @@ class WishlistPage extends StatelessWidget {
 
           return ListTile(
             title: Text(movie.title),
-            subtitle: Text(movie.year),
             onTap: () => onPressed(movie),
           );
         },
@@ -36,3 +36,4 @@ class WishlistPage extends StatelessWidget {
     }
   }
 }
+*/

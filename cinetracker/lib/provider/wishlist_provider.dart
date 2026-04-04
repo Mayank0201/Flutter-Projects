@@ -1,3 +1,4 @@
+/*
 import 'package:flutter/material.dart';
 import '../model/movie_model.dart';
 
@@ -19,3 +20,5 @@ class WishlistProvider extends ChangeNotifier {
     return _wishlist.any((m) => m.imdbId == imdbId);
   }
 }
+
+*/

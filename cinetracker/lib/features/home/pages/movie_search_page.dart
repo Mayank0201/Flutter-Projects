@@ -11,11 +11,11 @@ class MovieSearchPage extends StatefulWidget {
 
 class _MovieSearchPageState extends State<MovieSearchPage> {
   final TextEditingController controller = TextEditingController();
-  final OMDBService service = OMDBService();
+  //final OMDBService service = OMDBService();
 
   bool isLoading = false;
   String? errorMessage;
-
+  /*
   void searchMovie() async {
     final query = controller.text.trim();
 
@@ -33,7 +33,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
     try {
       // get list of movies
-      final results = await service.searchMovies(query);
+      //final results = await service.searchMovies(query);
 
       if (!mounted) return;
 
@@ -58,7 +58,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
     setState(() => isLoading = false);
   }
-
+*/
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -72,7 +72,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
             TextField(
               controller: controller,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => searchMovie(),
+              onSubmitted: (_) => (),
 
               style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
 
@@ -95,7 +95,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
             const SizedBox(height: 16),
 
-            ElevatedButton(onPressed: searchMovie, child: const Text("search")),
+            ElevatedButton(onPressed: () => {}, child: const Text("search")),
 
             const SizedBox(height: 20),
 

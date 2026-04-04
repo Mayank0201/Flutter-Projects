@@ -1,57 +1,57 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../model/movie_model.dart';
-import '../core/constants/genre_map.dart';
 
 class TMDBService {
-  final String tmdbApiKey = dotenv.env['TMDB_API_KEY'] ?? '';
-  final String tmdbBaseUrl = "https://api.themoviedb.org/3/discover/movie";
+  static final TMDBService _instance = TMDBService._internal();
 
-  Future<List<Movie>> getGenreMovies(String genre) async {
-    final int? genreId = tmdbGenreMap[genre];
+  factory TMDBService() => _instance;
 
-    if (genreId == null) {
-      return [];
-    }
+  TMDBService._internal();
 
-    final url = Uri.parse(
-      '$tmdbBaseUrl'
-      '?api_key=$tmdbApiKey'
-      '&with_genres=$genreId'
-      '&language=en-US'
-      '&page=1',
-    );
+  final Dio dio = Dio(
+    BaseOptions(
+      baseUrl: dotenv.env['BASE_URL']!,
+      responseType: ResponseType.json,
+      headers: {"Content-Type": "application/json"},
+    ),
+  );
 
-    final response = await http.get(url);
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load movies');
-    }
-
-    final data = json.decode(response.body);
-    final List moviesJson = data['results'];
-
-    return moviesJson
-        .map((movieJson) => Movie.fromTMDBJson(movieJson))
-        .toList();
+  void setToken(String token) {
+    dio.options.headers["Authorization"] = "Bearer $token";
   }
 
-  Future<String?> getImdbId(int tmdbId) async {
-    final url = Uri.parse(
-      'https://api.themoviedb.org/3/movie/$tmdbId/external_ids'
-      '?api_key=$tmdbApiKey',
+  Future<List<Movie>> getPopularMovies() async {
+    final response = await dio.get(
+      "/movie/popular",
+      queryParameters: {"page": 1},
     );
 
-    final response = await http.get(url);
+    print("POPULAR RESPONSE: ${response.data}");
 
-    if (response.statusCode != 200) {
-      return null;
-    }
+    final List data = response.data["results"] ?? [];
 
-    final data = json.decode(response.body);
+    return data.map((e) => Movie.fromBackendJson(e)).toList();
+  }
 
-    // TMDB returns imdb_id like "tt0848228"
-    return data['imdb_id'];
+  Future<List<Map<String, dynamic>>> getGenres() async {
+    final response = await dio.get("/movie/genres");
+
+    print("GENRE RESPONSE: ${response.data}");
+
+    return List<Map<String, dynamic>>.from(response.data);
+  }
+
+  Future<List<Movie>> getMoviesByGenre(String genreId) async {
+    final response = await dio.get(
+      "/movie/by-genre",
+      queryParameters: {"genreId": genreId, "page": 1},
+    );
+
+    print("GENRE MOVIES RESPONSE: ${response.data}");
+
+    final List data = response.data["results"] ?? [];
+
+    return data.map((e) => Movie.fromBackendJson(e)).toList();
   }
 }
