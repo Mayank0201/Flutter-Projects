@@ -1,10 +1,12 @@
 import 'package:cinetracker/core/storage/token_storage.dart';
-import 'package:cinetracker/features/home/pages/home_page.dart';
+import 'package:cinetracker/features/home/pages/main_page.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../service/auth_service.dart';
 import '../../../core/network/api_service.dart';
+import '../../../provider/wishlist_provider.dart';
+import '../../../service/tmdb_service.dart';
 import 'register_screen.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final storage = TokenStorage();
 
   final apiService = ApiService();
+  final tmdbService = TMDBService();
   late final AuthService authService;
 
   @override
@@ -35,11 +38,13 @@ class _LoginScreenState extends State<LoginScreen> {
         passwordController.text,
       );
       apiService.setToken(token);
+      tmdbService.setToken(token);
       await storage.saveToken(token);
+      await context.read<WishlistProvider>().loadWatchlist();
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const HomePage()),
+        MaterialPageRoute(builder: (_) => const MainPage()),
       );
     } catch (e) {
       print(e);

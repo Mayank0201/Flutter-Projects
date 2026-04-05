@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:cinetracker/service/tmdb_service.dart';
 import '../../../model/movie_model.dart';
 import 'movie_details_page.dart';
 
 import '../../../core/storage/token_storage.dart';
+import '../../../provider/wishlist_provider.dart';
 import '../../auth/pages/login_screen.dart';
 
 class HomePage extends StatefulWidget {
@@ -33,8 +35,10 @@ class _HomePageState extends State<HomePage> {
     final storage = TokenStorage();
     final token = await storage.getToken();
     print(token);
-    if (token != null) {
+    if (token != null && token.isNotEmpty) {
       _tmdbService.setToken(token);
+    } else {
+      _tmdbService.clearToken();
     }
 
     await loadInitialData();
@@ -88,6 +92,9 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              context.read<WishlistProvider>().resetForLogout();
+              _tmdbService.clearToken();
+
               final storage = TokenStorage();
               await storage.clearToken();
 

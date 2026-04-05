@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../service/omdb_service.dart';
+import '../../../service/tmdb_service.dart';
+import '../../../core/storage/token_storage.dart';
 import 'search_results_page.dart';
 
 class MovieSearchPage extends StatefulWidget {
@@ -11,11 +12,33 @@ class MovieSearchPage extends StatefulWidget {
 
 class _MovieSearchPageState extends State<MovieSearchPage> {
   final TextEditingController controller = TextEditingController();
-  //final OMDBService service = OMDBService();
+  final TMDBService service = TMDBService();
 
   bool isLoading = false;
   String? errorMessage;
-  /*
+
+  @override
+  void initState() {
+    super.initState();
+    _initToken();
+  }
+
+  Future<void> _initToken() async {
+    final storage = TokenStorage();
+    final token = await storage.getToken();
+    if (token != null && token.isNotEmpty) {
+      service.setToken(token);
+    } else {
+      service.clearToken();
+    }
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
   void searchMovie() async {
     final query = controller.text.trim();
 
@@ -32,8 +55,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
     });
 
     try {
-      // get list of movies
-      //final results = await service.searchMovies(query);
+      final results = await service.searchMovies(query);
 
       if (!mounted) return;
 
@@ -42,7 +64,6 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
           errorMessage = "no movies found.";
         });
       } else {
-        // open results page
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -51,14 +72,16 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         errorMessage = "something went wrong.";
       });
     }
 
+    if (!mounted) return;
     setState(() => isLoading = false);
   }
-*/
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -68,14 +91,11 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // search field
             TextField(
               controller: controller,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => (),
-
+              onSubmitted: (_) => searchMovie(),
               style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-
               decoration: InputDecoration(
                 hintText: "search for a movie...",
                 hintStyle: TextStyle(
@@ -83,10 +103,8 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
                     context,
                   ).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
-
                 filled: true,
                 fillColor: Theme.of(context).colorScheme.surface,
-
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -95,16 +113,14 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
             const SizedBox(height: 16),
 
-            ElevatedButton(onPressed: () => {}, child: const Text("search")),
+            ElevatedButton(onPressed: searchMovie, child: const Text("search")),
 
             const SizedBox(height: 20),
 
-            // loading indicator
             if (isLoading) const CircularProgressIndicator(),
 
             const SizedBox(height: 10),
 
-            // error message
             if (errorMessage != null)
               Container(
                 padding: const EdgeInsets.all(14),
@@ -120,7 +136,6 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
             const SizedBox(height: 10),
 
-            // initial message
             if (!isLoading && errorMessage == null)
               const Text(
                 "search for a movie to begin.",

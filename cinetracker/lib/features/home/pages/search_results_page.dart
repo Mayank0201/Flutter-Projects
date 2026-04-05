@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../model/movie_model.dart';
 import 'movie_details_page.dart';
-import 'package:iconsax/iconsax.dart';
-import 'package:provider/provider.dart';
-import 'package:cinetracker/provider/wishlist_provider.dart';
 
 class SearchResultsPage extends StatelessWidget {
   final List<Movie> movies;
@@ -24,26 +21,24 @@ class SearchResultsPage extends StatelessWidget {
         itemCount: movies.length,
         itemBuilder: (context, index) {
           final movie = movies[index];
-          final posterUrl = movie.poster != 'N/A' ? movie.poster : null;
 
           return ListTile(
-            leading: posterUrl != null
+            leading: movie.poster.isNotEmpty
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(6),
                     child: Image.network(
-                      posterUrl,
+                      movie.poster,
                       width: 50,
                       height: 75,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _smallPosterPlaceholder(),
+                      errorBuilder: (_, __, ___) => const Icon(Icons.movie),
                     ),
                   )
-                : _smallPosterPlaceholder(),
+                : const Icon(Icons.movie),
 
             title: Text(movie.title),
 
             onTap: () {
-              // push directly, details page will handle fetching
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -54,14 +49,17 @@ class SearchResultsPage extends StatelessWidget {
           );
         },
       ),
-    );
-  }
-
-  Widget _smallPosterPlaceholder() {
-    return const SizedBox(
-      width: 50,
-      height: 75,
-      child: Icon(Icons.movie, color: Colors.grey),
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: Text(
+            "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ),
+      ),
     );
   }
 }
