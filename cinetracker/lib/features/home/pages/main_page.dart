@@ -28,38 +28,44 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
-    const titles = ['Home', 'Search', 'Wishlist'];
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: Text(titles[_selectedIndex])),
-
       body: IndexedStack(index: _selectedIndex, children: _pages),
 
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Container(
+            height: 0.5,
+            color: colorScheme.outline,
+          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
             child: Text(
               "This product uses the TMDB API but is not endorsed or certified by TMDB.",
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.labelSmall,
             ),
           ),
           BottomNavigationBar(
             currentIndex: _selectedIndex,
             onTap: _onItemTapped,
             items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
               BottomNavigationBarItem(
-                icon: Icon(Icons.search),
+                icon: Icon(Icons.home_outlined),
+                activeIcon: Icon(Icons.home_rounded),
+                label: 'Home',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.search_rounded),
+                activeIcon: Icon(Icons.search_rounded),
                 label: 'Search',
               ),
               BottomNavigationBarItem(
-                icon: Icon(Icons.favorite),
+                icon: Icon(Icons.favorite_outline_rounded),
+                activeIcon: Icon(Icons.favorite_rounded),
                 label: 'Wishlist',
               ),
             ],

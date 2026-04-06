@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../model/movie_model.dart';
 import '../model/watchlist_item_model.dart';
@@ -32,7 +33,7 @@ class TMDBService {
       queryParameters: {"page": 1},
     );
 
-    print("POPULAR RESPONSE: ${response.data}");
+    debugPrint("POPULAR RESPONSE: ${response.data}");
 
     final List data = response.data["results"] ?? [];
 
@@ -42,7 +43,7 @@ class TMDBService {
   Future<List<Map<String, dynamic>>> getGenres() async {
     final response = await dio.get("/movie/genres");
 
-    print("GENRE RESPONSE: ${response.data}");
+    debugPrint("GENRE RESPONSE: ${response.data}");
 
     return List<Map<String, dynamic>>.from(response.data);
   }
@@ -53,7 +54,7 @@ class TMDBService {
       queryParameters: {"genreId": genreId, "page": 1},
     );
 
-    print("GENRE MOVIES RESPONSE: ${response.data}");
+    debugPrint("GENRE MOVIES RESPONSE: ${response.data}");
 
     final List data = response.data["results"] ?? [];
 
@@ -66,7 +67,7 @@ class TMDBService {
       queryParameters: {"query": query, "page": 1},
     );
 
-    print("SEARCH RESPONSE: ${response.data}");
+    debugPrint("SEARCH RESPONSE: ${response.data}");
 
     final List data = response.data["results"] ?? [];
 
@@ -79,7 +80,7 @@ class TMDBService {
       queryParameters: {"movieId": movieId},
     );
 
-    print("MOVIE DETAILS RESPONSE: ${response.data}");
+    debugPrint("MOVIE DETAILS RESPONSE: ${response.data}");
 
     final dynamic raw = response.data;
     if (raw is Map<String, dynamic>) {
@@ -101,7 +102,7 @@ class TMDBService {
       data: {"movieId": movieId},
     );
 
-    print("ADD WATCHLIST RESPONSE: ${response.data}");
+    debugPrint("ADD WATCHLIST RESPONSE: ${response.data}");
 
     final dynamic raw = response.data;
     if (raw is Map<String, dynamic>) {
@@ -114,7 +115,7 @@ class TMDBService {
   Future<List<WatchlistItem>> getWatchlist() async {
     final response = await dio.get("/watchlist/get");
 
-    print("GET WATCHLIST RESPONSE: ${response.data}");
+    debugPrint("GET WATCHLIST RESPONSE: ${response.data}");
 
     final dynamic raw = response.data;
     if (raw is List) {
@@ -133,7 +134,7 @@ class TMDBService {
       data: {"movieId": movieId},
     );
 
-    print("REMOVE WATCHLIST RESPONSE: ${response.data}");
+    debugPrint("REMOVE WATCHLIST RESPONSE: ${response.data}");
 
     final dynamic raw = response.data;
     if (raw == null) {

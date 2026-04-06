@@ -14,49 +14,108 @@ class SearchResultsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text('Results for "$query"')),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
-      body: ListView.builder(
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Results for "$query"'),
+      ),
+
+      body: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         itemCount: movies.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final movie = movies[index];
 
-          return ListTile(
-            leading: movie.poster.isNotEmpty
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Image.network(
-                      movie.poster,
-                      width: 50,
-                      height: 75,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.movie),
+          return Material(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MovieDetailsPage(movie: movie),
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: movie.poster.isNotEmpty
+                          ? Image.network(
+                              movie.poster,
+                              width: 56,
+                              height: 80,
+                              fit: BoxFit.cover,
+                              cacheHeight: 160,
+                              errorBuilder: (_, _, _) => Container(
+                                width: 56,
+                                height: 80,
+                                color: colorScheme.surface,
+                                child: Icon(
+                                  Icons.movie_rounded,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            )
+                          : Container(
+                              width: 56,
+                              height: 80,
+                              color: colorScheme.surface,
+                              child: Icon(
+                                Icons.movie_rounded,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
                     ),
-                  )
-                : const Icon(Icons.movie),
-
-            title: Text(movie.title),
-
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MovieDetailsPage(movie: movie),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            movie.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          if (movie.releaseYear != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              movie.releaseYear.toString(),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+            ),
           );
         },
       ),
-      bottomNavigationBar: const SafeArea(
+      bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Text(
             "This product uses the TMDB API but is not endorsed or certified by TMDB.",
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: Colors.grey),
+            style: theme.textTheme.labelSmall,
           ),
         ),
       ),

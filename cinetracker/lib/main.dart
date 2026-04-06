@@ -1,9 +1,11 @@
 import 'package:cinetracker/core/network/api_service.dart';
 import 'package:cinetracker/core/storage/token_storage.dart';
+import 'package:cinetracker/core/theme/app_theme.dart';
 import 'package:cinetracker/features/auth/pages/login_screen.dart';
+import 'package:cinetracker/provider/theme_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/adapters.dart';
 import 'service/tmdb_service.dart';
 import 'features/home/pages/main_page.dart';
@@ -12,6 +14,11 @@ import 'provider/wishlist_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   await Hive.initFlutter();
   await Hive.openBox("wishlistBox");
@@ -42,8 +49,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ColorScheme.fromSeed(seedColor: Colors.deepPurple);
-
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<WishlistProvider>(
@@ -55,24 +60,23 @@ class MyApp extends StatelessWidget {
             return provider;
           },
         ),
-      ],
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: scheme,
-
-          // global font for the entire app
-          textTheme: GoogleFonts.interTextTheme(),
-
-          appBarTheme: AppBarTheme(
-            backgroundColor: scheme.primary,
-            foregroundColor: scheme.onPrimary,
-            centerTitle: true,
-            elevation: 2,
-          ),
+        ChangeNotifierProvider<ThemeProvider>(
+          create: (_) => ThemeProvider(),
         ),
-        home: isLoggedIn ? const MainPage() : const LoginScreen(),
+      ],
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, _) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: 'CineTracker',
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeProvider.themeMode,
+            themeAnimationDuration: const Duration(milliseconds: 450),
+            themeAnimationCurve: Curves.easeInOutCubic,
+            home: isLoggedIn ? const MainPage() : const LoginScreen(),
+          );
+        },
       ),
     );
   }
