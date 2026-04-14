@@ -1,4 +1,5 @@
 import 'package:cinetracker/core/network/api_service.dart';
+import 'package:cinetracker/core/navigation/app_navigator.dart';
 import 'package:cinetracker/core/storage/token_storage.dart';
 import 'package:cinetracker/core/theme/app_theme.dart';
 import 'package:cinetracker/features/auth/pages/login_screen.dart';
@@ -27,20 +28,22 @@ Future<void> main() async {
   await dotenv.load(fileName: ".env");
 
   final storage = TokenStorage();
-  await storage.clearToken();
-  final token = await storage.getToken();
+  final token = await storage.getAccessToken();
+  final isLoggedIn = token != null && token.isNotEmpty;
+  final accessToken = token ?? '';
 
-  final ApiService apiService = ApiService();
-  final TMDBService tmdbService = TMDBService();
+  final apiService = ApiService();
+  final tmdbService = TMDBService();
 
-  if (token != null && token.isNotEmpty) {
-    apiService.setToken(token);
-    tmdbService.setToken(token);
+  if (isLoggedIn) {
+    apiService.setToken(accessToken);
+    tmdbService.setToken(accessToken);
   } else {
+    apiService.clearToken();
     tmdbService.clearToken();
   }
 
-  runApp(const MyApp(isLoggedIn: false));
+  runApp(MyApp(isLoggedIn: isLoggedIn));
 }
 
 class MyApp extends StatelessWidget {
@@ -60,13 +63,12 @@ class MyApp extends StatelessWidget {
             return provider;
           },
         ),
-        ChangeNotifierProvider<ThemeProvider>(
-          create: (_) => ThemeProvider(),
-        ),
+        ChangeNotifierProvider<ThemeProvider>(create: (_) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {
           return MaterialApp(
+            navigatorKey: appNavigatorKey,
             debugShowCheckedModeBanner: false,
             title: 'CineTracker',
             theme: AppTheme.lightTheme,
@@ -74,6 +76,10 @@ class MyApp extends StatelessWidget {
             themeMode: themeProvider.themeMode,
             themeAnimationDuration: const Duration(milliseconds: 450),
             themeAnimationCurve: Curves.easeInOutCubic,
+            routes: {
+              '/login': (_) => const LoginScreen(),
+              '/main': (_) => const MainPage(),
+            },
             home: isLoggedIn ? const MainPage() : const LoginScreen(),
           );
         },

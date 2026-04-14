@@ -10,12 +10,19 @@ class AuthException implements Exception {
   String toString() => message;
 }
 
+class LoginTokens {
+  final String accessToken;
+  final String refreshToken;
+
+  LoginTokens({required this.accessToken, required this.refreshToken});
+}
+
 class AuthService {
   final ApiService apiService;
 
   AuthService(this.apiService);
 
-  Future<String> login(String username, String password) async {
+  Future<LoginTokens> login(String username, String password) async {
     final response = await apiService.dio.post(
       "/auth/login",
       data: {"username": username, "password": password},
@@ -23,17 +30,25 @@ class AuthService {
 
     final raw = response.data;
     if (raw is Map<String, dynamic>) {
-      final token = raw['token']?.toString();
-      if (token != null && token.isNotEmpty) {
-        return token;
+      final accessToken =
+          raw['accessToken']?.toString() ?? raw['access_token']?.toString();
+      final refreshToken =
+          raw['refreshToken']?.toString() ?? raw['refresh_token']?.toString();
+
+      if (accessToken != null &&
+          accessToken.isNotEmpty &&
+          refreshToken != null &&
+          refreshToken.isNotEmpty) {
+        return LoginTokens(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+        );
       }
     }
 
-    if (raw is String && raw.isNotEmpty) {
-      return raw;
-    }
-
-    throw StateError("Invalid login response: token missing");
+    throw StateError(
+      "Invalid login response: accessToken/refreshToken missing",
+    );
   }
 
   Future<void> register(String username, String email, String password) async {

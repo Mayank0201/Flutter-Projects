@@ -1,14 +1,13 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cinetracker/service/tmdb_service.dart';
+import 'package:cinetracker/core/network/api_service.dart';
 import '../../../model/movie_model.dart';
 import '../../../provider/theme_provider.dart';
 import 'movie_details_page.dart';
 
 import '../../../core/storage/token_storage.dart';
 import '../../../provider/wishlist_provider.dart';
-import '../../auth/pages/login_screen.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,6 +18,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TMDBService _tmdbService = TMDBService();
+  final ApiService _apiService = ApiService();
 
   List<Movie> movies = [];
   List<Map<String, dynamic>> genres = [];
@@ -35,8 +35,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> init() async {
     final storage = TokenStorage();
-    final token = await storage.getToken();
-    debugPrint(token);
+    final token = await storage.getAccessToken();
     if (token != null && token.isNotEmpty) {
       _tmdbService.setToken(token);
     } else {
@@ -102,10 +101,7 @@ class _HomePageState extends State<HomePage> {
               size: 24,
             ),
             const SizedBox(width: 8),
-            Text(
-              "CineTracker",
-              style: theme.appBarTheme.titleTextStyle,
-            ),
+            Text("CineTracker", style: theme.appBarTheme.titleTextStyle),
           ],
         ),
         actions: [
@@ -124,15 +120,17 @@ class _HomePageState extends State<HomePage> {
             tooltip: "Logout",
             onPressed: () async {
               context.read<WishlistProvider>().resetForLogout();
+              _apiService.clearToken();
               _tmdbService.clearToken();
 
               final storage = TokenStorage();
-              await storage.clearToken();
+              await storage.clearTokens();
 
-              if (!mounted) return;
-              Navigator.pushReplacement(
+              if (!context.mounted) return;
+              Navigator.pushNamedAndRemoveUntil(
                 context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
+                '/login',
+                (route) => false,
               );
             },
           ),
@@ -196,8 +194,9 @@ class _HomePageState extends State<HomePage> {
                         color: isSelected
                             ? colorScheme.primary
                             : colorScheme.onSurface,
-                        fontWeight:
-                            isSelected ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                         fontSize: 13,
                       ),
                       side: BorderSide(
@@ -236,8 +235,7 @@ class _HomePageState extends State<HomePage> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) =>
-                                  MovieDetailsPage(movie: movie),
+                              builder: (_) => MovieDetailsPage(movie: movie),
                             ),
                           );
                         },
@@ -250,7 +248,9 @@ class _HomePageState extends State<HomePage> {
                                   borderRadius: BorderRadius.circular(14),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.15),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.15,
+                                      ),
                                       blurRadius: 8,
                                       offset: const Offset(0, 4),
                                     ),
@@ -262,16 +262,16 @@ class _HomePageState extends State<HomePage> {
                                     movie.poster,
                                     fit: BoxFit.cover,
                                     width: double.infinity,
-                                    cacheHeight: 400, // prevents decoding massive images and freezing the UI
-                                    errorBuilder: (_, __, ___)  =>
-                                        Container(
-                                          color: colorScheme.surface,
-                                          child: Icon(
-                                            Icons.movie_rounded,
-                                            size: 40,
-                                            color: colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
+                                    cacheHeight:
+                                        400, // prevents decoding massive images and freezing the UI
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: colorScheme.surface,
+                                      child: Icon(
+                                        Icons.movie_rounded,
+                                        size: 40,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

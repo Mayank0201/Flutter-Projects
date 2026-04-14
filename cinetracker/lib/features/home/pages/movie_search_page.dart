@@ -25,7 +25,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
   Future<void> _initToken() async {
     final storage = TokenStorage();
-    final token = await storage.getToken();
+    final token = await storage.getAccessToken();
     if (token != null && token.isNotEmpty) {
       service.setToken(token);
     } else {
@@ -88,9 +88,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Search"),
-      ),
+      appBar: AppBar(title: const Text("Search")),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -191,7 +189,9 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
                         Icon(
                           Icons.movie_filter_outlined,
                           size: 56,
-                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                          color: colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.4,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         Text(

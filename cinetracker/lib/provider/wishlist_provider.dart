@@ -24,7 +24,7 @@ class WishlistProvider extends ChangeNotifier {
 
   Future<void> _ensureToken() async {
     final storage = TokenStorage();
-    final token = await storage.getToken();
+    final token = await storage.getAccessToken();
     if (token == null || token.isEmpty) {
       _service.clearToken();
       return;

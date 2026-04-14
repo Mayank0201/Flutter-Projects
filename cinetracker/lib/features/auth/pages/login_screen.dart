@@ -1,5 +1,4 @@
 import 'package:cinetracker/core/storage/token_storage.dart';
-import 'package:cinetracker/features/home/pages/main_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -39,22 +38,22 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final token = await authService.login(
+      final tokens = await authService.login(
         usernameController.text.replaceAll(' ', ''),
         passwordController.text,
       );
-      apiService.setToken(token);
-      tmdbService.setToken(token);
-      await storage.saveToken(token);
+      apiService.setToken(tokens.accessToken);
+      tmdbService.setToken(tokens.accessToken);
+      await storage.saveTokens(
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      );
 
       if (!mounted) return;
       await context.read<WishlistProvider>().loadWatchlist();
 
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainPage()),
-      );
+      Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
     } catch (e) {
       debugPrint(e.toString());
       if (!mounted) return;
