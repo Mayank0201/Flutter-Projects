@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cinetracker/service/tmdb_service.dart';
-import 'package:cinetracker/core/network/api_service.dart';
 import '../../../model/movie_model.dart';
 import '../../../provider/theme_provider.dart';
 import 'movie_details_page.dart';
 
 import '../../../core/storage/token_storage.dart';
-import '../../../provider/wishlist_provider.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -18,7 +16,6 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TMDBService _tmdbService = TMDBService();
-  final ApiService _apiService = ApiService();
 
   List<Movie> movies = [];
   List<Map<String, dynamic>> genres = [];
@@ -115,25 +112,6 @@ class _HomePageState extends State<HomePage> {
             tooltip: themeProvider.isDark ? "Light mode" : "Dark mode",
             onPressed: () => themeProvider.toggleTheme(),
           ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded, size: 22),
-            tooltip: "Logout",
-            onPressed: () async {
-              context.read<WishlistProvider>().resetForLogout();
-              _apiService.clearToken();
-              _tmdbService.clearToken();
-
-              final storage = TokenStorage();
-              await storage.clearTokens();
-
-              if (!context.mounted) return;
-              Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/login',
-                (route) => false,
-              );
-            },
-          ),
         ],
       ),
       body: Column(
@@ -216,17 +194,16 @@ class _HomePageState extends State<HomePage> {
           // movies grid
           Expanded(
             child: isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? _buildSkeletonGrid()
                 : GridView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                     itemCount: movies.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          childAspectRatio: 0.62,
-                          crossAxisSpacing: 14,
-                          mainAxisSpacing: 16,
-                        ),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: MediaQuery.of(context).size.width > 600 ? 3 : 2,
+                      childAspectRatio: 0.62,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 16,
+                    ),
                     itemBuilder: (context, index) {
                       final movie = movies[index];
 
@@ -262,8 +239,6 @@ class _HomePageState extends State<HomePage> {
                                     movie.poster,
                                     fit: BoxFit.cover,
                                     width: double.infinity,
-                                    cacheHeight:
-                                        400, // prevents decoding massive images and freezing the UI
                                     errorBuilder: (_, __, ___) => Container(
                                       color: colorScheme.surface,
                                       child: Icon(
@@ -293,6 +268,53 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSkeletonGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      itemCount: 6,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.62,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 16,
+      ),
+      itemBuilder: (context, index) {
+        final colorScheme = Theme.of(context).colorScheme;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              height: 14,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              height: 14,
+              width: 100,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

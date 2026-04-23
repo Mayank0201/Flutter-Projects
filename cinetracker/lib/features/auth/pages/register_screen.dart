@@ -61,9 +61,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Registration successful")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Registration successful! Please check your email to verify your account.",
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
       Navigator.pop(context);
     } on AuthException catch (e) {
       if (!mounted) return;

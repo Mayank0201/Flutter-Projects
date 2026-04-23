@@ -57,9 +57,11 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       debugPrint(e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Login failed")));
+
+      final message = e is AuthException ? e.message : "Login failed";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

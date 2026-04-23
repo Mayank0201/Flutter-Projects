@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:cinetracker/core/network/api_service.dart';
 import 'package:cinetracker/core/navigation/app_navigator.dart';
 import 'package:cinetracker/core/storage/token_storage.dart';
@@ -46,9 +49,81 @@ Future<void> main() async {
   runApp(MyApp(isLoggedIn: isLoggedIn));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   final bool isLoggedIn;
   const MyApp({super.key, required this.isLoggedIn});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _appLinks = AppLinks();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    // handle the initial link that launched the app (cold start)
+    try {
+      final initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        _handleDeepLink(initialUri);
+      }
+    } catch (_) {
+      // no initial link – ignore
+    }
+
+    // handle links received while the app is already running
+    _linkSub = _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    });
+  }
+
+  void _handleDeepLink(Uri uri) {
+    debugPrint("Deep link received: $uri");
+
+    if (uri.scheme != 'cinetracker') return;
+
+    final navigator = appNavigatorKey.currentState;
+    if (navigator == null) return;
+
+    switch (uri.host) {
+      case 'login':
+        // user verified email → go to login screen
+        navigator.pushNamedAndRemoveUntil('/login', (route) => false);
+        break;
+      case 'resend':
+        // verification failed → go to login screen with a message
+        navigator.pushNamedAndRemoveUntil('/login', (route) => false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = appNavigatorKey.currentContext;
+          if (ctx != null) {
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  "Verification failed or expired. Please register again or request a new link.",
+                ),
+              ),
+            );
+          }
+        });
+        break;
+      default:
+        debugPrint("Unknown deep link host: ${uri.host}");
+    }
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +132,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<WishlistProvider>(
           create: (_) {
             final provider = WishlistProvider();
-            if (isLoggedIn) {
+            if (widget.isLoggedIn) {
               provider.loadWatchlist();
             }
             return provider;
@@ -80,7 +155,7 @@ class MyApp extends StatelessWidget {
               '/login': (_) => const LoginScreen(),
               '/main': (_) => const MainPage(),
             },
-            home: isLoggedIn ? const MainPage() : const LoginScreen(),
+            home: widget.isLoggedIn ? const MainPage() : const LoginScreen(),
           );
         },
       ),

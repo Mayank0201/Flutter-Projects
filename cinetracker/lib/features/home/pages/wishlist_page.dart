@@ -140,7 +140,6 @@ class _WishlistPageState extends State<WishlistPage> {
                               width: 56,
                               height: 80,
                               fit: BoxFit.cover,
-                              cacheHeight: 160,
                               errorBuilder: (_, _, _) => Container(
                                 width: 56,
                                 height: 80,

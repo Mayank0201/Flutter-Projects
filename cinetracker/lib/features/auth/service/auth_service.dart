@@ -23,32 +23,64 @@ class AuthService {
   AuthService(this.apiService);
 
   Future<LoginTokens> login(String username, String password) async {
-    final response = await apiService.dio.post(
-      "/auth/login",
-      data: {"username": username, "password": password},
-    );
+    try {
+      final response = await apiService.dio.post(
+        "/auth/login",
+        data: {"username": username, "password": password},
+      );
 
-    final raw = response.data;
-    if (raw is Map<String, dynamic>) {
-      final accessToken =
-          raw['accessToken']?.toString() ?? raw['access_token']?.toString();
-      final refreshToken =
-          raw['refreshToken']?.toString() ?? raw['refresh_token']?.toString();
+      final raw = response.data;
+      if (raw is Map<String, dynamic>) {
+        final dataMap = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+        final accessToken =
+            dataMap['accessToken']?.toString() ?? dataMap['access_token']?.toString() ?? dataMap['token']?.toString();
+        final refreshToken =
+            dataMap['refreshToken']?.toString() ?? dataMap['refresh_token']?.toString();
 
-      if (accessToken != null &&
-          accessToken.isNotEmpty &&
-          refreshToken != null &&
-          refreshToken.isNotEmpty) {
-        return LoginTokens(
-          accessToken: accessToken,
-          refreshToken: refreshToken,
-        );
+        if (accessToken != null &&
+            accessToken.isNotEmpty &&
+            refreshToken != null &&
+            refreshToken.isNotEmpty) {
+          return LoginTokens(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+          );
+        }
       }
+
+      throw AuthException(
+        "Invalid login response: accessToken/refreshToken missing",
+      );
+    } on DioException catch (e) {
+      throw AuthException(_resolveLoginErrorMessage(e));
+    } catch (e) {
+      throw AuthException("An unexpected error occurred during login.");
+    }
+  }
+
+  String _resolveLoginErrorMessage(DioException e) {
+    final statusCode = e.response?.statusCode;
+    final data = e.response?.data;
+
+    String? serverMessage;
+    if (data is Map<String, dynamic>) {
+      serverMessage =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          data['details']?.toString();
+    } else if (data is String && data.trim().isNotEmpty) {
+      serverMessage = data;
     }
 
-    throw StateError(
-      "Invalid login response: accessToken/refreshToken missing",
-    );
+    if (statusCode == 401) {
+      return serverMessage ?? "Invalid username or password.";
+    }
+
+    if (statusCode == 403) {
+      return serverMessage ?? "Please verify your email before logging in.";
+    }
+
+    return serverMessage ?? "Login failed. Please try again.";
   }
 
   Future<void> register(String username, String email, String password) async {

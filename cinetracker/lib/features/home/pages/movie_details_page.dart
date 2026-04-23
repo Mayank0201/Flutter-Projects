@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../model/movie_model.dart';
 import '../../../provider/wishlist_provider.dart';
 import '../../../service/tmdb_service.dart';
+import '../../../service/rating_service.dart';
 
 class MovieDetailsPage extends StatefulWidget {
   final Movie movie;
@@ -17,10 +18,17 @@ class MovieDetailsPage extends StatefulWidget {
 
 class _MovieDetailsPageState extends State<MovieDetailsPage> {
   final TMDBService tmdbService = TMDBService();
+  final RatingService ratingService = RatingService();
   Movie? fullMovie;
   bool isLoading = true;
   String? errorMessage;
   bool _isWatchlistUpdating = false;
+
+  // rating state
+  double _averageRating = 0.0;
+  int _totalRatings = 0;
+  double? _userRating; // null = not rated; double for half-star support
+  bool _isRatingLoading = false;
 
   @override
   void initState() {
@@ -44,10 +52,22 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
     });
 
     try {
-      final movie = await tmdbService.getMovieDetails(widget.movie.id);
+      // fetch movie details and rating summary in parallel
+      final results = await Future.wait([
+        tmdbService.getMovieDetails(widget.movie.id),
+        ratingService.getRatingSummary(widget.movie.id).catchError((_) => RatingSummary.empty()),
+      ]);
+
       if (!mounted) return;
+
+      final movie = results[0] as Movie;
+      final summary = results[1] as RatingSummary;
+
       setState(() {
         fullMovie = movie;
+        _averageRating = summary.averageRating;
+        _totalRatings = summary.totalRatings;
+        _userRating = summary.userRating;
         isLoading = false;
       });
     } catch (_) {
@@ -56,6 +76,42 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
         errorMessage = "Could not load full details.";
         isLoading = false;
       });
+    }
+  }
+
+  Future<void> _onStarTapped(double rating) async {
+    if (_isRatingLoading) return;
+
+    setState(() => _isRatingLoading = true);
+
+    try {
+      if (_userRating != null && _userRating == rating) {
+        // tapping the same rating again removes the rating
+        await ratingService.deleteRating(widget.movie.id);
+        if (!mounted) return;
+        setState(() => _userRating = null);
+      } else {
+        // set new rating — send as double
+        await ratingService.setRating(widget.movie.id, rating);
+        if (!mounted) return;
+        setState(() => _userRating = rating);
+      }
+
+      // refresh the summary to get the updated average
+      final summary = await ratingService.getRatingSummary(widget.movie.id);
+      if (!mounted) return;
+      setState(() {
+        _averageRating = summary.averageRating;
+        _totalRatings = summary.totalRatings;
+        _userRating = summary.userRating;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to update rating")),
+      );
+    } finally {
+      if (mounted) setState(() => _isRatingLoading = false);
     }
   }
 
@@ -231,13 +287,11 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                         borderRadius: BorderRadius.circular(14),
                         child: Image.network(
                           posterUrl,
-                          width: 200,
-                          height: 300,
+                          width: (MediaQuery.of(context).size.width * 0.5).clamp(160, 220),
                           fit: BoxFit.cover,
-                          cacheHeight: 450, // 300 * 1.5 device pixel ratio max
                           errorBuilder: (_, __, ___) => Container(
-                            width: 200,
-                            height: 300,
+                            width: (MediaQuery.of(context).size.width * 0.5).clamp(160, 220),
+                            height: (MediaQuery.of(context).size.width * 0.5).clamp(160, 220) * 1.5,
                             color: Colors.grey.shade800,
                             alignment: Alignment.center,
                             child: const Icon(
@@ -267,7 +321,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   const SizedBox(height: 14),
 
-                  // rating row
+                  // tmdb rating row
                   if (fullMovie!.rating > 0)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -297,6 +351,11 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                       "Rating not available",
                       style: TextStyle(fontSize: 14, color: Colors.white54),
                     ),
+
+                  const SizedBox(height: 16),
+
+                  // ── user star rating ────────────────────────────
+                  _buildStarRatingSection(),
 
                   const SizedBox(height: 16),
 
@@ -350,14 +409,107 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   const SizedBox(height: 24),
 
-                  const Text(
-                    "This product uses the TMDB API but is not endorsed or certified by TMDB.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 11, color: Colors.white38),
-                  ),
-
                   const SizedBox(height: 24),
                 ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// interactive 1–5 star rating row with community average
+  Widget _buildStarRatingSection() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.1),
+          width: 0.5,
+        ),
+      ),
+      child: Column(
+        children: [
+          // label
+          Text(
+            _userRating != null ? "Your Rating" : "Rate this Movie",
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: Colors.white70,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // stars
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(5, (i) {
+              final starIndex = i;
+              
+              // determine which icon to show
+              IconData icon;
+              if (_userRating != null) {
+                if (_userRating! >= starIndex + 1) {
+                  icon = Icons.star_rounded;
+                } else if (_userRating! >= starIndex + 0.5) {
+                  icon = Icons.star_half_rounded;
+                } else {
+                  icon = Icons.star_outline_rounded;
+                }
+              } else {
+                icon = Icons.star_outline_rounded;
+              }
+
+              final isSelected = _userRating != null && _userRating! > starIndex;
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (details) {
+                  final localX = details.localPosition.dx;
+                  // total width of star hit area is 48 (36 icon + 12 padding)
+                  // center point is 24
+                  final rating = starIndex + (localX < 24 ? 0.5 : 1.0);
+                  _onStarTapped(rating);
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Icon(
+                    icon,
+                    color: isSelected
+                        ? const Color(0xFFFFB800)
+                        : Colors.white38,
+                    size: 36,
+                  ),
+                ),
+              );
+            }),
+          ),
+
+          const SizedBox(height: 8),
+
+          // loading indicator or community stats
+          if (_isRatingLoading)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: Colors.white54,
+              ),
+            )
+          else
+            Text(
+              _totalRatings > 0
+                  ? "${_averageRating.toStringAsFixed(1)} avg · $_totalRatings ${_totalRatings == 1 ? 'rating' : 'ratings'}"
+                  : "Be the first to rate!",
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.white54,
               ),
             ),
         ],

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'home_page.dart';
 import 'movie_search_page.dart';
-import 'wishlist_page.dart';
+import 'profile_page.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -17,7 +17,7 @@ class _MainPageState extends State<MainPage> {
   final List<Widget> _pages = const [
     HomePage(),
     MovieSearchPage(),
-    WishlistPage(),
+    ProfilePage(),
   ];
 
   void _onItemTapped(int index) {
@@ -29,46 +29,29 @@ class _MainPageState extends State<MainPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       body: IndexedStack(index: _selectedIndex, children: _pages),
 
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: 0.5,
-            color: colorScheme.outline,
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: _onItemTapped,
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home_rounded),
+            label: 'Home',
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-            child: Text(
-              "This product uses the TMDB API but is not endorsed or certified by TMDB.",
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall,
-            ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.search_rounded),
+            activeIcon: Icon(Icons.search_rounded),
+            label: 'Search',
           ),
-          BottomNavigationBar(
-            currentIndex: _selectedIndex,
-            onTap: _onItemTapped,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined),
-                activeIcon: Icon(Icons.home_rounded),
-                label: 'Home',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.search_rounded),
-                activeIcon: Icon(Icons.search_rounded),
-                label: 'Search',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.favorite_outline_rounded),
-                activeIcon: Icon(Icons.favorite_rounded),
-                label: 'Wishlist',
-              ),
-            ],
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline_rounded),
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
           ),
         ],
       ),

@@ -5,7 +5,7 @@ import '../model/movie_model.dart';
 import '../model/watchlist_item_model.dart';
 import '../service/tmdb_service.dart';
 
-class WishlistProvider extends ChangeNotifier {
+class WishlistProvider extends ChangeNotifier with WidgetsBindingObserver {
   final TMDBService _service = TMDBService();
   final List<WatchlistItem> _wishlist = [];
   bool _isLoading = false;
@@ -20,6 +20,24 @@ class WishlistProvider extends ChangeNotifier {
 
   bool isFavorite(int movieId) {
     return _wishlist.any((m) => m.movieId == movieId);
+  }
+
+  WishlistProvider() {
+    // Listen for app lifecycle changes so we reload when coming back from background
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      loadWatchlist();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _ensureToken() async {
@@ -42,6 +60,9 @@ class WishlistProvider extends ChangeNotifier {
   }
 
   Future<void> loadWatchlist() async {
+    // Don't trigger a second concurrent load
+    if (_isLoading) return;
+
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -69,16 +90,28 @@ class WishlistProvider extends ChangeNotifier {
 
     if (_pendingMovieIds.contains(movie.id)) return false;
     _pendingMovieIds.add(movie.id);
+
+    // Optimistic update: add immediately so the heart turns red without waiting
+    final tempItem = WatchlistItem(
+      id: 0,
+      movieId: movie.id,
+      title: movie.title,
+      posterUrl: movie.poster,
+      releaseYear: movie.releaseYear,
+      genre: movie.genre,
+    );
+    if (!isFavorite(movie.id)) {
+      _wishlist.add(tempItem);
+    }
     notifyListeners();
 
     try {
       await _ensureToken();
       final item = await _service.addToWatchlist(movie.id);
 
-      final exists = _wishlist.any((m) => m.movieId == item.movieId);
-      if (!exists) {
-        _wishlist.add(item);
-      }
+      // Replace the temp item with the real one from the server
+      _wishlist.removeWhere((m) => m.movieId == item.movieId);
+      _wishlist.add(item);
 
       _errorMessage = null;
       return true;
@@ -95,22 +128,13 @@ class WishlistProvider extends ChangeNotifier {
           serverMessage.contains('exists');
 
       if (isDuplicate) {
-        final exists = isFavorite(movie.id);
-        if (!exists) {
-          _wishlist.add(
-            WatchlistItem(
-              id: 0,
-              movieId: movie.id,
-              title: movie.title,
-              posterUrl: movie.poster,
-              releaseYear: movie.releaseYear,
-              genre: movie.genre,
-            ),
-          );
-        }
+        // Already in watchlist — keep the optimistic item
         _errorMessage = null;
         return true;
       }
+
+      // Roll back the optimistic add on real error
+      _wishlist.removeWhere((m) => m.movieId == movie.id);
 
       final isValueTooLong =
           serverMessage.contains('value too long') ||
@@ -129,6 +153,8 @@ class WishlistProvider extends ChangeNotifier {
                 : "Movie can't be added right now.");
       return false;
     } catch (_) {
+      // Roll back the optimistic add
+      _wishlist.removeWhere((m) => m.movieId == movie.id);
       _errorMessage = "Movie can't be added right now.";
       return false;
     } finally {

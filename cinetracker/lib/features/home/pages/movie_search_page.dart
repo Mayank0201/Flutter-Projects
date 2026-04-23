@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../model/movie_model.dart';
 import '../../../service/tmdb_service.dart';
 import '../../../core/storage/token_storage.dart';
+import 'movie_details_page.dart';
 import 'search_results_page.dart';
 
 class MovieSearchPage extends StatefulWidget {
@@ -16,6 +19,8 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
   bool isLoading = false;
   String? errorMessage;
+  List<Movie> _results = [];
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -35,19 +40,27 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     controller.dispose();
     super.dispose();
   }
 
-  void searchMovie() async {
-    final query = controller.text.trim();
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (query.trim().isNotEmpty) {
+        _performSearch(query.trim(), isLiveSearch: true);
+      } else {
+        setState(() {
+          _results = [];
+          errorMessage = null;
+        });
+      }
+    });
+  }
 
-    if (query.isEmpty) {
-      setState(() {
-        errorMessage = "please enter a movie name.";
-      });
-      return;
-    }
+  Future<void> _performSearch(String query, {bool isLiveSearch = false}) async {
+    if (query.isEmpty) return;
 
     setState(() {
       isLoading = true;
@@ -61,15 +74,23 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
       if (results.isEmpty) {
         setState(() {
-          errorMessage = "no movies found.";
+          _results = [];
+          errorMessage = isLiveSearch ? null : "no movies found.";
         });
       } else {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => SearchResultsPage(movies: results, query: query),
-          ),
-        );
+        if (isLiveSearch) {
+          setState(() {
+            _results = results;
+          });
+        } else {
+          // If they explicitly hit search, go to the full results page
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SearchResultsPage(movies: results, query: query),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -81,6 +102,8 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
     if (!mounted) return;
     setState(() => isLoading = false);
   }
+
+  void searchMovie() => _performSearch(controller.text.trim());
 
   @override
   Widget build(BuildContext context) {
@@ -99,6 +122,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
               TextField(
                 controller: controller,
                 textInputAction: TextInputAction.search,
+                onChanged: _onSearchChanged,
                 onSubmitted: (_) => searchMovie(),
                 style: theme.textTheme.bodyLarge,
                 decoration: InputDecoration(
@@ -129,25 +153,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
 
               const SizedBox(height: 16),
 
-              SizedBox(
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: isLoading ? null : searchMovie,
-                  icon: isLoading
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: colorScheme.onPrimary,
-                          ),
-                        )
-                      : const Icon(Icons.search_rounded, size: 20),
-                  label: Text(isLoading ? "Searching..." : "Search"),
-                ),
-              ),
-
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
 
               if (errorMessage != null)
                 Container(
@@ -180,7 +186,40 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
                   ),
                 ),
 
-              if (!isLoading && errorMessage == null)
+              if (isLoading && _results.isEmpty)
+                const Expanded(
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_results.isNotEmpty)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          "Suggestions",
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          itemCount: _results.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final movie = _results[index];
+                            return _buildMovieTile(context, movie);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (!isLoading && errorMessage == null)
                 Expanded(
                   child: Center(
                     child: Column(
@@ -205,6 +244,89 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMovieTile(BuildContext context, Movie movie) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Material(
+      color: colorScheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 0,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MovieDetailsPage(movie: movie),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: movie.poster.isNotEmpty
+                    ? Image.network(
+                        movie.poster,
+                        width: 46,
+                        height: 64,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _buildPlaceholderIcon(colorScheme),
+                      )
+                    : _buildPlaceholderIcon(colorScheme),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      movie.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (movie.releaseYear != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        movie.releaseYear.toString(),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholderIcon(ColorScheme colorScheme) {
+    return Container(
+      width: 46,
+      height: 64,
+      color: colorScheme.surfaceContainerHighest,
+      child: Icon(
+        Icons.movie_rounded,
+        size: 20,
+        color: colorScheme.onSurfaceVariant,
       ),
     );
   }

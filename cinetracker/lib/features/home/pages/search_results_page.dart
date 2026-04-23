@@ -54,7 +54,6 @@ class SearchResultsPage extends StatelessWidget {
                               width: 56,
                               height: 80,
                               fit: BoxFit.cover,
-                              cacheHeight: 160,
                               errorBuilder: (_, _, _) => Container(
                                 width: 56,
                                 height: 80,
@@ -107,17 +106,6 @@ class SearchResultsPage extends StatelessWidget {
             ),
           );
         },
-      ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Text(
-            "This product uses the TMDB API but is not endorsed or certified by TMDB.",
-            textAlign: TextAlign.center,
-            style: theme.textTheme.labelSmall,
-          ),
-        ),
       ),
     );
   }
