@@ -1,4 +1,4 @@
-package com.example.cinetracker
+package com.mayank.cinetracker
 
 import io.flutter.embedding.android.FlutterActivity
 

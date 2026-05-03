@@ -95,7 +95,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  "CineTracker",
+                  "CineFolio",
                   textAlign: TextAlign.center,
                   style: theme.textTheme.displayMedium,
                 ),

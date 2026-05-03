@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cinetracker/core/network/api_service.dart';
+import 'package:cinetracker/core/utils/content_moderator.dart';
 import '../service/auth_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -31,6 +32,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final email = emailController.text.trim();
     final password = passwordController.text;
 
+    final usernameError = ContentModerator.validateUsername(username);
+    if (usernameError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(usernameError)),
+      );
+      return;
+    }
+
     if (username.isEmpty || email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -45,10 +54,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    if (password.length < 6) {
+    if (password.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Password should be at least 6 characters."),
+          content: Text("Password must be at least 8 characters long."),
+        ),
+      );
+      return;
+    }
+
+    if (!RegExp(r'^(?=.*[A-Z])(?=.*\d).*$').hasMatch(password)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Password must contain at least 1 uppercase letter and 1 number."),
         ),
       );
       return;

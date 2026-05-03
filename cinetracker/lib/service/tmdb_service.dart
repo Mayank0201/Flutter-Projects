@@ -123,8 +123,16 @@ class TMDBService {
     throw StateError("Invalid watchlist add response format");
   }
 
-  Future<List<WatchlistItem>> getWatchlist() async {
-    final response = await dio.get("/watchlist/get");
+  Future<List<WatchlistItem>> getWatchlist({String? status}) async {
+    final Map<String, dynamic> queryParams = {};
+    if (status != null && status.isNotEmpty) {
+      queryParams['status'] = status.toUpperCase();
+    }
+
+    final response = await dio.get(
+      "/watchlist/get",
+      queryParameters: queryParams.isNotEmpty ? queryParams : null,
+    );
 
     debugPrint("GET WATCHLIST RESPONSE: ${response.data}");
 
@@ -154,6 +162,26 @@ class TMDBService {
     }
 
     return <WatchlistItem>[];
+  }
+
+  /// PATCH /watchlist/{movieId}/status  body: { "status": "ACTIVE" }
+  Future<WatchlistItem> updateWatchlistStatus(int movieId, String status) async {
+    final response = await dio.patch(
+      "/watchlist/$movieId/status",
+      data: {"status": status.toUpperCase()},
+    );
+
+    debugPrint("UPDATE WATCHLIST STATUS RESPONSE: ${response.data}");
+
+    final dynamic raw = response.data;
+    if (raw is Map<String, dynamic>) {
+      final dynamic data = raw['data'] ?? raw;
+      if (data is Map<String, dynamic>) {
+        return WatchlistItem.fromJson(data);
+      }
+    }
+
+    throw StateError("Invalid watchlist status update response format");
   }
 
   Future<bool> removeFromWatchlist(int movieId) async {

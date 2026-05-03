@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cinetracker/service/tmdb_service.dart';
@@ -23,11 +24,30 @@ class _HomePageState extends State<HomePage> {
   String? selectedGenreId;
 
   bool isLoading = true;
+  bool isTakingLong = false;
+  Timer? _loadingTimer;
 
   @override
   void initState() {
     super.initState();
+    _startTimer();
     init();
+  }
+
+  void _startTimer() {
+    _loadingTimer?.cancel();
+    isTakingLong = false;
+    _loadingTimer = Timer(const Duration(seconds: 10), () {
+      if (mounted && isLoading) {
+        setState(() => isTakingLong = true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _loadingTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> init() async {
@@ -51,6 +71,7 @@ class _HomePageState extends State<HomePage> {
         genres = genreData;
         movies = popularMovies;
         isLoading = false;
+        _loadingTimer?.cancel();
       });
     } catch (e) {
       debugPrint(e.toString());
@@ -98,7 +119,7 @@ class _HomePageState extends State<HomePage> {
               size: 24,
             ),
             const SizedBox(width: 8),
-            Text("CineTracker", style: theme.appBarTheme.titleTextStyle),
+            Text("CineFolio", style: theme.appBarTheme.titleTextStyle),
           ],
         ),
         actions: [
@@ -239,7 +260,7 @@ class _HomePageState extends State<HomePage> {
                                     movie.poster,
                                     fit: BoxFit.cover,
                                     width: double.infinity,
-                                    errorBuilder: (_, __, ___) => Container(
+                                    errorBuilder: (_, _, _) => Container(
                                       color: colorScheme.surface,
                                       child: Icon(
                                         Icons.movie_rounded,
@@ -272,49 +293,80 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSkeletonGrid() {
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-      itemCount: 6,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.62,
-        crossAxisSpacing: 14,
-        mainAxisSpacing: 16,
-      ),
-      itemBuilder: (context, index) {
-        final colorScheme = Theme.of(context).colorScheme;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(14),
+    return Column(
+      children: [
+        if (isTakingLong)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+            margin: const EdgeInsets.only(bottom: 10, left: 16, right: 16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "Taking longer than usual, please wait...",
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
-            Container(
-              height: 14,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(4),
-              ),
+          ),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            itemCount: 6,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.62,
+              crossAxisSpacing: 14,
+              mainAxisSpacing: 16,
             ),
-            const SizedBox(height: 6),
-            Container(
-              height: 14,
-              width: 100,
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ],
-        );
-      },
+            itemBuilder: (context, index) {
+              final colorScheme = Theme.of(context).colorScheme;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    height: 14,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 14,
+                    width: 100,
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

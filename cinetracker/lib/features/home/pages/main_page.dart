@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'home_page.dart';
 import 'movie_search_page.dart';
 import 'profile_page.dart';
+import 'discovery_page.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -17,6 +18,7 @@ class _MainPageState extends State<MainPage> {
   final List<Widget> _pages = const [
     HomePage(),
     MovieSearchPage(),
+    DiscoveryPage(),
     ProfilePage(),
   ];
 
@@ -28,8 +30,6 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       body: IndexedStack(index: _selectedIndex, children: _pages),
 
@@ -47,6 +47,11 @@ class _MainPageState extends State<MainPage> {
             icon: Icon(Icons.search_rounded),
             activeIcon: Icon(Icons.search_rounded),
             label: 'Search',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.explore_outlined),
+            activeIcon: Icon(Icons.explore_rounded),
+            label: 'Discover',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline_rounded),

@@ -6,6 +6,9 @@ class Movie {
   final double rating;
   final int? releaseYear;
   final String genre;
+  final List<String> cast;
+  final String director;
+  final List<Trailer> trailers;
 
   Movie({
     required this.id,
@@ -15,6 +18,9 @@ class Movie {
     this.rating = 0,
     this.releaseYear,
     this.genre = "N/A",
+    this.cast = const [],
+    this.director = "Unknown",
+    this.trailers = const [],
   });
 
   static int _toInt(dynamic value) {
@@ -70,6 +76,24 @@ class Movie {
       parsedGenre = names.join(', ');
     }
 
+    List<String> parsedCast = [];
+    final dynamic castRaw = json['cast'];
+    if (castRaw is List) {
+      parsedCast = castRaw.map((e) {
+        if (e is Map<String, dynamic>) {
+          return e['name']?.toString() ?? '';
+        }
+        return e.toString();
+      }).where((name) => name.isNotEmpty).toList();
+    }
+
+
+    List<Trailer> parsedTrailers = [];
+    final dynamic trailersRaw = json['trailers'];
+    if (trailersRaw is List) {
+      parsedTrailers = trailersRaw.map((e) => Trailer.fromJson(e)).toList();
+    }
+
     return Movie(
       id: _toInt(
         json['movieId'] ??
@@ -86,6 +110,32 @@ class Movie {
       ),
       releaseYear: _extractReleaseYear(json),
       genre: parsedGenre.isNotEmpty ? parsedGenre : 'N/A',
+      cast: parsedCast,
+      director: (json['director'] ?? 'Unknown').toString(),
+      trailers: parsedTrailers,
+    );
+  }
+}
+
+class Trailer {
+  final String id;
+  final String name;
+  final String key;
+  final String site;
+
+  Trailer({
+    required this.id,
+    required this.name,
+    required this.key,
+    required this.site,
+  });
+
+  factory Trailer.fromJson(Map<String, dynamic> json) {
+    return Trailer(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? 'Trailer').toString(),
+      key: (json['key'] ?? '').toString(),
+      site: (json['site'] ?? 'YouTube').toString(),
     );
   }
 }

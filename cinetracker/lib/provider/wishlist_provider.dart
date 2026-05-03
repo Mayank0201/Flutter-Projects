@@ -11,10 +11,30 @@ class WishlistProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _isLoading = false;
   String? _errorMessage;
   final Set<int> _pendingMovieIds = <int>{};
+  String? _activeStatusFilter;
 
   List<WatchlistItem> get getWishlist => List.unmodifiable(_wishlist);
+  String? get activeStatusFilter => _activeStatusFilter;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  /// Returns watchlist items filtered by the current status filter.
+  /// If no filter is active, returns all items.
+  List<WatchlistItem> get getFilteredWishlist {
+    if (_activeStatusFilter == null || _activeStatusFilter!.isEmpty) {
+      return List.unmodifiable(_wishlist);
+    }
+    return List.unmodifiable(
+      _wishlist.where((item) => item.status == _activeStatusFilter).toList(),
+    );
+  }
+
+  /// Sets the status filter and reloads the watchlist from the backend.
+  Future<void> setStatusFilter(String? status) async {
+    _activeStatusFilter = status;
+    notifyListeners();
+    await loadWatchlist();
+  }
 
   bool isPending(int movieId) => _pendingMovieIds.contains(movieId);
 
@@ -69,7 +89,7 @@ class WishlistProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       await _ensureToken();
-      final items = await _service.getWatchlist();
+      final items = await _service.getWatchlist(status: _activeStatusFilter);
       _wishlist
         ..clear()
         ..addAll(items);
@@ -190,6 +210,41 @@ class WishlistProvider extends ChangeNotifier with WidgetsBindingObserver {
       return removeMovieById(movie.id);
     }
     return addMovie(movie);
+  }
+
+  /// Updates the watchlist status for a movie via PATCH /watchlist/{movieId}/status
+  Future<bool> updateStatus(int movieId, String newStatus) async {
+    if (_pendingMovieIds.contains(movieId)) return false;
+    _pendingMovieIds.add(movieId);
+    notifyListeners();
+
+    try {
+      await _ensureToken();
+      final updated = await _service.updateWatchlistStatus(movieId, newStatus);
+
+      // Replace the local item with the updated one
+      final index = _wishlist.indexWhere((m) => m.movieId == movieId);
+      if (index != -1) {
+        _wishlist[index] = updated;
+      }
+      _errorMessage = null;
+      return true;
+    } catch (_) {
+      _errorMessage = "Failed to update status.";
+      return false;
+    } finally {
+      _pendingMovieIds.remove(movieId);
+      notifyListeners();
+    }
+  }
+
+  /// Returns the status of a specific movie in the watchlist.
+  String? getMovieStatus(int movieId) {
+    try {
+      return _wishlist.firstWhere((m) => m.movieId == movieId).status;
+    } catch (_) {
+      return null;
+    }
   }
 
   String _extractServerMessage(dynamic responseData) {

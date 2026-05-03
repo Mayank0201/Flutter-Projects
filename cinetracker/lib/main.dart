@@ -88,7 +88,7 @@ class _MyAppState extends State<MyApp> {
   void _handleDeepLink(Uri uri) {
     debugPrint("Deep link received: $uri");
 
-    if (uri.scheme != 'cinetracker') return;
+    if (uri.scheme != 'cinefolio') return;
 
     final navigator = appNavigatorKey.currentState;
     if (navigator == null) return;
@@ -145,7 +145,7 @@ class _MyAppState extends State<MyApp> {
           return MaterialApp(
             navigatorKey: appNavigatorKey,
             debugShowCheckedModeBanner: false,
-            title: 'CineTracker',
+            title: 'CineFolio',
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,

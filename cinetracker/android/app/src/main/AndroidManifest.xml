@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="cinetracker"
+        android:label="CineFolio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
@@ -29,12 +29,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <!-- deep link: cinetracker://login and cinetracker://resend -->
+            <!-- deep link: cinefolio://login and cinefolio://resend -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="cinetracker" />
+                <data android:scheme="cinefolio" />
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

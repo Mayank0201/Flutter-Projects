@@ -133,7 +133,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
                   ),
                   suffixIcon: ValueListenableBuilder<TextEditingValue>(
                     valueListenable: controller,
-                    builder: (_, value, __) {
+                    builder: (_, value, _) {
                       if (value.text.isEmpty) return const SizedBox.shrink();
                       return IconButton(
                         icon: Icon(
@@ -209,7 +209,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
                         child: ListView.separated(
                           padding: const EdgeInsets.only(bottom: 20),
                           itemCount: _results.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 8),
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final movie = _results[index];
                             return _buildMovieTile(context, movie);
@@ -278,7 +278,7 @@ class _MovieSearchPageState extends State<MovieSearchPage> {
                         width: 46,
                         height: 64,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _buildPlaceholderIcon(colorScheme),
+                        errorBuilder: (_, _, _) => _buildPlaceholderIcon(colorScheme),
                       )
                     : _buildPlaceholderIcon(colorScheme),
               ),

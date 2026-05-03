@@ -55,7 +55,7 @@ class CreditsPage extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              "1.0.0",
+              "1.0.1",
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -68,7 +68,7 @@ class CreditsPage extends StatelessWidget {
                   const Icon(Icons.movie_filter_rounded, size: 32),
                   const SizedBox(height: 8),
                   Text(
-                    "CineTracker",
+                    "CineFolio",
                     style: theme.textTheme.titleSmall?.copyWith(
                       letterSpacing: 1.2,
                     ),

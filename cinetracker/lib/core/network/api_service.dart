@@ -20,6 +20,8 @@ class ApiService {
       BaseOptions(
         baseUrl: dotenv.get("BASE_URL"),
         headers: {"Content-Type": "application/json"},
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
       ),
     );
 
@@ -27,31 +29,39 @@ class ApiService {
       BaseOptions(
         baseUrl: dotenv.get("BASE_URL"),
         headers: {"Content-Type": "application/json"},
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
       ),
     );
 
     dio.interceptors.add(InterceptorsWrapper(
       onError: (DioException error, ErrorInterceptorHandler handler) async {
         if (error.response?.statusCode == 401) {
-          final refreshed = await _refreshAccessToken();
-          if (refreshed) {
-            try {
-              // Retry original request
+          try {
+            final refreshed = await _refreshAccessToken();
+            if (refreshed) {
+              final newHeaders = Map<String, dynamic>.from(error.requestOptions.headers);
+              newHeaders['Authorization'] = dio.options.headers['Authorization'];
+
               final cloneReq = await dio.request(
                 error.requestOptions.path,
                 options: Options(
                   method: error.requestOptions.method,
-                  headers: error.requestOptions.headers,
+                  headers: newHeaders,
                 ),
                 data: error.requestOptions.data,
                 queryParameters: error.requestOptions.queryParameters,
               );
               return handler.resolve(cloneReq);
-            } catch (e) {
+            } else {
+              // Server explicitly rejected the token (returned false)
+              await _forceLogout();
               return handler.next(error);
             }
-          } else {
-            await _forceLogout();
+          } catch (e) {
+            // Network error or 500 during refresh. 
+            // Don't logout, just fail the current request.
+            debugPrint("INTERCEPTOR: Refresh failed due to error: $e");
             return handler.next(error);
           }
         }
@@ -89,6 +99,7 @@ class ApiService {
   Future<bool> _performRefresh() async {
     final refreshToken = await _tokenStorage.getRefreshToken();
     if (refreshToken == null || refreshToken.isEmpty) {
+      debugPrint("REFRESH: No refresh token found in storage.");
       return false;
     }
 
@@ -100,6 +111,7 @@ class ApiService {
 
       final accessToken = _extractAccessToken(response.data);
       if (accessToken == null || accessToken.isEmpty) {
+        debugPrint("REFRESH: Access token missing in response.");
         return false;
       }
 
@@ -111,14 +123,22 @@ class ApiService {
       }
 
       setToken(accessToken);
+      debugPrint("REFRESH: Token refreshed successfully.");
       return true;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
+      final status = e.response?.statusCode;
+      debugPrint("REFRESH: DioException during refresh (Status: $status)");
+      
+      // Only return false (force logout) if the server explicitly rejects the token
+      if (status == 401 || status == 403 || status == 400) {
         return false;
       }
-      return false;
-    } catch (_) {
-      return false;
+      
+      // For network errors or 500s, rethrow so the interceptor doesn't log out
+      rethrow;
+    } catch (e) {
+      debugPrint("REFRESH: Unexpected error during refresh: $e");
+      rethrow;
     }
   }
 

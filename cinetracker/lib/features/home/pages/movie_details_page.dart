@@ -1,11 +1,16 @@
 import 'dart:ui';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../model/movie_model.dart';
 import '../../../provider/wishlist_provider.dart';
 import '../../../service/tmdb_service.dart';
 import '../../../service/rating_service.dart';
+import 'package:cinetracker/core/utils/content_moderator.dart';
+import '../widgets/status_picker_sheet.dart';
+import 'movie_reviews_page.dart';
 
 class MovieDetailsPage extends StatefulWidget {
   final Movie movie;
@@ -79,22 +84,118 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
     }
   }
 
-  Future<void> _onStarTapped(double rating) async {
+  Future<void> _onStarTapped(double initialRating) async {
     if (_isRatingLoading) return;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) {
+        double currentRating = initialRating;
+        final TextEditingController commentController = TextEditingController();
+
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            String? errorText;
+            return AlertDialog(
+              backgroundColor: Theme.of(context).colorScheme.surface,
+              title: const Text('Rate & Review'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(5, (index) {
+                      IconData icon;
+                      if (currentRating >= index + 1) {
+                        icon = Icons.star_rounded;
+                      } else if (currentRating >= index + 0.5) {
+                        icon = Icons.star_half_rounded;
+                      } else {
+                        icon = Icons.star_outline_rounded;
+                      }
+                      return GestureDetector(
+                        onTapDown: (details) {
+                          final localX = details.localPosition.dx;
+                          setDialogState(() {
+                            currentRating = index + (localX < 24 ? 0.5 : 1.0);
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(
+                            icon,
+                            color: const Color(0xFFFFB800),
+                            size: 40,
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: commentController,
+                    decoration: InputDecoration(
+                      hintText: 'Optional comment...',
+                      border: const OutlineInputBorder(),
+                      errorText: errorText,
+                    ),
+                    maxLines: 3,
+                    onChanged: (val) {
+                      setDialogState(() => errorText = ContentModerator.validateReview(val));
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                if (_userRating != null)
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, {'delete': true}),
+                    child: const Text('Remove Rating', style: TextStyle(color: Colors.red)),
+                  ),
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    final validationError = ContentModerator.validateReview(commentController.text.trim());
+                    if (validationError != null) {
+                      setDialogState(() => errorText = validationError);
+                      // Use the page's context to show the snackbar
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(validationError)),
+                      );
+                    } else {
+                      Navigator.pop(dialogContext, {
+                        'rating': currentRating,
+                        'comment': commentController.text.trim(),
+                      });
+                    }
+                  },
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return; // Dialog dismissed
 
     setState(() => _isRatingLoading = true);
 
     try {
-      if (_userRating != null && _userRating == rating) {
-        // tapping the same rating again removes the rating
+      if (result['delete'] == true) {
         await ratingService.deleteRating(widget.movie.id);
         if (!mounted) return;
         setState(() => _userRating = null);
       } else {
-        // set new rating — send as double
-        await ratingService.setRating(widget.movie.id, rating);
+        final newRating = result['rating'] as double;
+        final comment = result['comment'] as String;
+        await ratingService.setRating(widget.movie.id, newRating, comment: comment);
         if (!mounted) return;
-        setState(() => _userRating = rating);
+        setState(() => _userRating = newRating);
       }
 
       // refresh the summary to get the updated average
@@ -107,8 +208,15 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      String message = "Failed to update rating";
+      if (e is DioException) {
+        final responseData = e.response?.data;
+        if (responseData is Map && responseData['message'] != null) {
+          message = responseData['message'].toString();
+        }
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to update rating")),
+        SnackBar(content: Text(message)),
       );
     } finally {
       if (mounted) setState(() => _isRatingLoading = false);
@@ -164,11 +272,11 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                           activeMovie,
                         );
 
-                        if (!mounted) return;
+                        if (!context.mounted) return;
 
                         setState(() => _isWatchlistUpdating = false);
 
-                        if (!mounted) return;
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
@@ -221,7 +329,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                   alignment: Alignment.topCenter,
                   // caching decoded image size drastically reduces RAM and jank
                   cacheHeight: (screenHeight * 1.15).toInt() ~/ 2, 
-                  errorBuilder: (_, __, ___) => Container(color: Colors.black),
+                  errorBuilder: (_, _, _) => Container(color: Colors.black),
                 ),
               ),
             ),
@@ -289,7 +397,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                           posterUrl,
                           width: (MediaQuery.of(context).size.width * 0.5).clamp(160, 220),
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                          errorBuilder: (_, _, _) => Container(
                             width: (MediaQuery.of(context).size.width * 0.5).clamp(160, 220),
                             height: (MediaQuery.of(context).size.width * 0.5).clamp(160, 220) * 1.5,
                             color: Colors.grey.shade800,
@@ -357,6 +465,35 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
                   // ── user star rating ────────────────────────────
                   _buildStarRatingSection(),
 
+                  const SizedBox(height: 12),
+
+                  // ── See reviews button ───────────────────────────
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MovieReviewsPage(
+                          movieId: activeMovie.id,
+                          movieTitle: activeMovie.title,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.rate_review_outlined, size: 18),
+                    label: const Text('See Reviews'),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.3)),
+                      foregroundColor: Colors.white70,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // ── Watchlist status action ────────────────────────
+                  _buildStatusAction(context, activeMovie, wishlistProvider),
+
                   const SizedBox(height: 16),
 
                   Wrap(
@@ -409,11 +546,178 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
 
                   const SizedBox(height: 24),
 
-                  const SizedBox(height: 24),
+                  if (fullMovie!.director.isNotEmpty && fullMovie!.director != "Unknown") ...[
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Director",
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        fullMovie!.director,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+
+                  if (fullMovie!.cast.isNotEmpty) ...[
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Top Cast",
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 110,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: fullMovie!.cast.length > 10 ? 10 : fullMovie!.cast.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 16),
+                        itemBuilder: (context, index) {
+                          return Column(
+                            children: [
+                              CircleAvatar(
+                                radius: 30,
+                                backgroundColor: Colors.white.withValues(alpha: 0.1),
+                                child: Text(
+                                  fullMovie!.cast[index][0],
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: 70,
+                                child: Text(
+                                  fullMovie!.cast[index],
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white60,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+
+
                 ],
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildStatusAction(BuildContext context, Movie movie, WishlistProvider provider) {
+    final status = provider.getMovieStatus(movie.id);
+    
+    // If not in watchlist, show an "Add to List" button
+    if (status == null) {
+      return OutlinedButton.icon(
+        onPressed: () => showModalBottomSheet(
+          context: context,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (_) => StatusPickerSheet(
+            movie: movie,
+            provider: provider,
+            currentStatus: null,
+          ),
+        ),
+        icon: const Icon(Icons.add_rounded, size: 18),
+        label: const Text('Set Status'),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
+      );
+    }
+
+    const statusColors = {
+      'PENDING': Colors.amber,
+      'ACTIVE': Colors.blue,
+      'COMPLETED': Colors.green,
+    };
+    const statusIcons = {
+      'PENDING': Icons.bookmark_outline_rounded,
+      'ACTIVE': Icons.play_circle_outline_rounded,
+      'COMPLETED': Icons.check_circle_outline_rounded,
+    };
+    const statusLabels = {
+      'PENDING': 'Pending',
+      'ACTIVE': 'Watching',
+      'COMPLETED': 'Completed',
+    };
+    final color = statusColors[status] ?? Colors.grey;
+    final icon = statusIcons[status] ?? Icons.bookmark_outline_rounded;
+    final label = statusLabels[status] ?? status;
+
+    return GestureDetector(
+      onTap: () => showModalBottomSheet(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (_) => StatusPickerSheet(
+          movie: movie,
+          provider: provider,
+          currentStatus: status,
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.edit_rounded, size: 12, color: color.withValues(alpha: 0.7)),
+          ],
+        ),
       ),
     );
   }
@@ -434,7 +738,7 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
         children: [
           // label
           Text(
-            _userRating != null ? "Your Rating" : "Rate this Movie",
+            _userRating != null ? "Your Rating" : "Rate and Add a Review",
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,

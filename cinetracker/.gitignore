@@ -45,3 +45,7 @@ app.*.map.json
 /android/app/release
 
 *.env
+
+*.jks
+*.key.properties
+*.content_moderator.dart
