@@ -579,6 +579,56 @@ class GridManager {
     });
   }
 
+  void updateDemand(double dt) {
+    for (final dest in destinations) {
+      final key = _key(dest);
+      final cell = grid[dest.y][dest.x];
+      if (!cell.isDestination) continue;
+
+      final age = destinationAges[key] ?? 0;
+      final isMature = age >= GameConstants.maturityThresholdWeeks;
+
+      double rateMultiplier = 1.0 + (age * GameConstants.demandAgeScalingRate);
+      if (isMature) {
+        rateMultiplier *= GameConstants.matureRequestSpeedMultiplier;
+      }
+      
+      double interval = GameConstants.demandTickInterval / rateMultiplier;
+      if (interval < GameConstants.minDemandInterval) {
+        interval = GameConstants.minDemandInterval;
+      }
+
+      double timer = demandTimers[key] ?? 0.0;
+      timer += dt;
+
+      if (timer >= interval) {
+        timer = 0.0;
+        int currentDemand = demand[key] ?? 0;
+        int maxD = isMature ? GameConstants.matureMaxDemand : GameConstants.maxDemand;
+        if (currentDemand < maxD) {
+          demand[key] = currentDemand + 1;
+        }
+      }
+      demandTimers[key] = timer;
+
+      int currentDemand = demand[key] ?? 0;
+      int maxD = isMature ? GameConstants.matureMaxDemand : GameConstants.maxDemand;
+      if (currentDemand >= maxD) {
+        double overflow = overflowLevels[key] ?? 0.0;
+        double speedMult = isMature ? GameConstants.matureOverflowBuildupMultiplier : 1.0;
+        overflow += (dt / GameConstants.criticalDuration) * speedMult;
+        overflowLevels[key] = overflow.clamp(0.0, 1.0);
+      } else {
+        double overflow = overflowLevels[key] ?? 0.0;
+        if (overflow > 0.0) {
+          overflow -= dt / GameConstants.overflowRecoveryDuration;
+          overflowLevels[key] = overflow.clamp(0.0, 1.0);
+        }
+      }
+    }
+  }
+
+
   void reset({int? minX, int? maxX, int? minY, int? maxY}) {
     grid = List.generate(rows, (y) => List.generate(cols, (x) => GridCell()));
     houses.clear();
@@ -1049,7 +1099,7 @@ class GridManager {
     updateNodeConnections(x, y);
     // _resolveConnectivity(x, y); // Removed to prevent side-effect reverts
 
-    if (type == CellType.tunnel) _cleanOrphanRoads();
+    if (type == CellType.tunnel || type == CellType.bridge) _cleanOrphanRoads();
     
     onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
     return true;
@@ -1389,6 +1439,8 @@ class GridManager {
     final cell = grid[y][x];
     if (cell.type == CellType.tunnel) {
       grid[y][x] = GridCell(type: CellType.mountain);
+    } else if (cell.type == CellType.bridge) {
+      grid[y][x] = GridCell(type: CellType.water);
     } else {
       grid[y][x] = GridCell();
     }
@@ -1694,7 +1746,7 @@ class GridManager {
     
     destinations.add(pos);
     infrastructure.add(pos); // [FIX] Add to infrastructure for rendering
-    demand[key] = 0;
+    demand[key] = 1;
     demandTimers[key] = 0;
     if (name != null) districtNames[key] = name;
   }

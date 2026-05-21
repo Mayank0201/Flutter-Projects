@@ -916,34 +916,19 @@ class GridRenderer extends PositionComponent
       offsetY + (sc.maxSpawnY + 1) * cellSize,
     );
 
-    // Draw dark overlay outside the active rectangle
+    // Draw fully opaque solid overlay outside the active rectangle
     final paint = Paint()
-      ..color = GameConstants.backgroundColor.withValues(alpha: 0.4)
+      ..color = GameConstants.backgroundColor
       ..style = PaintingStyle.fill;
 
-    // We can use clipPath to draw everywhere EXCEPT the rect
+    // Use clipPath/evenOdd path to draw solid color everywhere in the camera viewport EXCEPT the rect
+    final viewport = game.camera.visibleWorldRect;
     final path = Path()
-      ..addRect(
-        Rect.fromLTWH(
-          offsetX,
-          offsetY,
-          gridManager.cols * cellSize,
-          gridManager.rows * cellSize,
-        ),
-      )
+      ..addRect(viewport)
       ..addRect(rect)
       ..fillType = PathFillType.evenOdd;
 
     canvas.drawPath(path, paint);
-
-    // Inner soft glow/border for the reveal area
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.05)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0,
-    );
   }
 
   void _drawFloatingMessages(Canvas canvas) {

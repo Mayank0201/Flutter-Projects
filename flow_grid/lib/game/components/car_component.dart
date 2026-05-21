@@ -307,6 +307,17 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
         gm.getCell(targetDest.x, targetDest.y).isDestination) {
       game.score += 100;
       game.totalDeliveries += 1;
+
+      // Decrease demand and claimed demand
+      final destKey = "${targetDest.x},${targetDest.y}";
+      final currentDemand = gm.demand[destKey] ?? 0;
+      if (currentDemand > 0) {
+        gm.demand[destKey] = currentDemand - 1;
+      }
+      final currentClaimed = gm.claimedDemand[destKey] ?? 0;
+      if (currentClaimed > 0) {
+        gm.claimedDemand[destKey] = currentClaimed - 1;
+      }
     }
 
     // Pathfind home from current path endpoint to the home driveway.

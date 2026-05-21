@@ -47,6 +47,8 @@ class NileMapGenerator extends MapGenerator {
       _drawWindingRiver(grid, i, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
     }
 
+    _cleanupIsolatedWater(grid);
+
     grid.detectRegionsEndless();
     grid.applyTerrainSpeeds();
   }
@@ -113,8 +115,42 @@ class NileMapGenerator extends MapGenerator {
     if (week % 5 == 0) {
       // Add a river on one side of expansion
       _drawWindingRiver(grid, week, minX: 0, maxX: grid.cols - 1, minY: 0, maxY: grid.rows - 1); 
+      _cleanupIsolatedWater(grid);
       grid.detectRegionsEndless();
       grid.applyTerrainSpeeds();
+    }
+  }
+
+  void _cleanupIsolatedWater(GridManager grid) {
+    for (int y = 0; y < grid.rows; y++) {
+      for (int x = 0; x < grid.cols; x++) {
+        if (grid.grid[y][x].type == CellType.water) {
+          int neighbors = 0;
+          List<GridPosition> emptyNeighbors = [];
+          for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            final nx = x + d[0];
+            final ny = y + d[1];
+            if (grid.isValid(nx, ny)) {
+              if (grid.grid[ny][nx].type == CellType.water) {
+                neighbors++;
+              } else if (grid.grid[ny][nx].isEmpty) {
+                emptyNeighbors.add(GridPosition(nx, ny));
+              }
+            }
+          }
+          if (neighbors == 0) {
+            // Isolated single water tile!
+            if (emptyNeighbors.isNotEmpty) {
+              // Try to grow it by choosing a random empty neighbor
+              final target = emptyNeighbors[_random.nextInt(emptyNeighbors.length)];
+              grid.grid[target.y][target.x] = GridCell(type: CellType.water);
+            } else {
+              // If no empty neighbors, just remove the water tile
+              grid.grid[y][x] = GridCell();
+            }
+          }
+        }
+      }
     }
   }
 }

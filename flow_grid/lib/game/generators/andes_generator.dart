@@ -84,9 +84,11 @@ class AndesMapGenerator extends MapGenerator {
        final rx = xMin + _random.nextInt(max(1, xMax - xMin));
        final ry = yMin + _random.nextInt(max(1, yMax - yMin));
        if (grid.isValid(rx, ry) && grid.grid[ry][rx].isEmpty) {
-          _growBlob(grid, rx, ry, 1 + _random.nextInt(2));
+          _growBlob(grid, rx, ry, 2 + _random.nextInt(2));
        }
     }
+
+    _cleanupIsolatedMountains(grid);
 
     grid.detectRegionsEndless();
     grid.applyTerrainSpeeds();
@@ -168,8 +170,42 @@ class AndesMapGenerator extends MapGenerator {
       final y = _random.nextInt(grid.rows);
       
       _growBlob(grid, x, y, 5 + _random.nextInt(8));
+      _cleanupIsolatedMountains(grid);
       grid.detectRegionsEndless();
       grid.applyTerrainSpeeds();
+    }
+  }
+
+  void _cleanupIsolatedMountains(GridManager grid) {
+    for (int y = 0; y < grid.rows; y++) {
+      for (int x = 0; x < grid.cols; x++) {
+        if (grid.grid[y][x].type == CellType.mountain) {
+          int neighbors = 0;
+          List<GridPosition> emptyNeighbors = [];
+          for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            final nx = x + d[0];
+            final ny = y + d[1];
+            if (grid.isValid(nx, ny)) {
+              if (grid.grid[ny][nx].type == CellType.mountain) {
+                neighbors++;
+              } else if (grid.grid[ny][nx].isEmpty) {
+                emptyNeighbors.add(GridPosition(nx, ny));
+              }
+            }
+          }
+          if (neighbors == 0) {
+            // Isolated single mountain tile!
+            if (emptyNeighbors.isNotEmpty) {
+              // Try to grow it by choosing a random empty neighbor
+              final target = emptyNeighbors[_random.nextInt(emptyNeighbors.length)];
+              grid.grid[target.y][target.x] = GridCell(type: CellType.mountain);
+            } else {
+              // If no empty neighbors, just remove the mountain tile
+              grid.grid[y][x] = GridCell();
+            }
+          }
+        }
+      }
     }
   }
 }

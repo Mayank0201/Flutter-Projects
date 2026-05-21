@@ -71,7 +71,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   int activeColorCount = 1;
   double timeScale = 1.0;
 
-  late SpawnController? spawnController;
+  SpawnController? spawnController;
   late ProgressionDirector progressionDirector;
   late DistrictPlanner districtPlanner;
   late EventManager eventManager;
@@ -94,7 +94,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   static const int _initialActiveHalfHeight = 7;   // Week 1: 14 cells tall
   static const int _weeklyActiveExpansionX = 3;    // +6 width per week
   static const int _weeklyActiveExpansionY = 2;    // +4 height per week
-  static const double _activeAreaPadding = 1.05;   // ~2.5% margin around region
 
   int get _activeHalfWidth {
     final maxHalf = (gridCols - 4) ~/ 2;
@@ -108,13 +107,27 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
   double get _targetZoom {
     if (size.x <= 100 || size.y <= 100) return 0.5;
-    final screenW = size.x - hudPanelWidth;
-    final screenH = size.y;
-    final areaW = (_activeHalfWidth * 2) * cellSize * _activeAreaPadding;
-    final areaH = (_activeHalfHeight * 2) * cellSize * _activeAreaPadding;
-    final zoomX = screenW / areaW;
-    final zoomY = screenH / areaH;
-    return min(zoomX, zoomY).clamp(0.3, 2.0);
+
+    // Use a solid padding (e.g. 32 pixels) on the borders for a clean framing
+    const double padding = 32.0;
+    final screenW = size.x - hudPanelWidth - (2 * padding);
+    final screenH = size.y - (2 * padding);
+
+    if (screenW <= 0 || screenH <= 0) return 0.5;
+
+    double w;
+    double h;
+    if (spawnController != null) {
+      w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
+      h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+    } else {
+      w = (_activeHalfWidth * 2) * cellSize;
+      h = (_activeHalfHeight * 2) * cellSize;
+    }
+
+    final zoomX = screenW / w;
+    final zoomY = screenH / h;
+    return min(zoomX, zoomY).clamp(0.1, 8.0);
   }
 
   MapType selectedMapType = MapType.zen;
@@ -180,6 +193,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     paused = true;
     debugPrint("[BOOT] onLoad complete, added mainMenu");
   }
+
 
   Future<void> _loadVehicleSprites() async {
     final image = await images.load('normal_vehicles.png');
@@ -305,8 +319,9 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
     phase = GamePhase.playing;
     paused = false;
-    _syncCameraCenter(instant: true);
     _syncSpawnBounds();
+    camera.viewfinder.zoom = _targetZoom;
+    _syncCameraCenter(instant: true);
 
     // Defer initial district spawn to first update tick so that `size`
     // is guaranteed populated â€” _focusCameraOn() depends on it.
@@ -396,8 +411,10 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   void onGameResize(Vector2 size) {
     super.onGameResize(size);
     if (phase == GamePhase.playing) {
-      _syncCameraCenter(instant: true);
       _syncSpawnBounds();
+      camera.viewfinder.zoom = _targetZoom;
+      _syncCameraCenter(instant: true);
+      gridRenderer?.markDirty();
     }
   }
 
@@ -410,9 +427,9 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     // First valid frame: snap the camera (zoom + position) to its target so
     // the player doesn't watch a ~half-second zoom drift at start-up.
     if (phase == GamePhase.playing && !_initialSyncDone && size.x > 100) {
+      _syncSpawnBounds();
       camera.viewfinder.zoom = _targetZoom;
       _syncCameraCenter(instant: true);
-      _syncSpawnBounds();
       _initialSyncDone = true;
       debugPrint("[SYNC] Initial camera and spawn bounds synchronized with size: $size");
 
@@ -425,7 +442,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
     _debugLogTimer += dt;
     if (_debugLogTimer > 5.0) {
-      debugPrint("[UPDATE_LOOP_ACTIVE] phase: $phase, paused: $paused, week: $week");
+      debugPrint("[UPDATE_LOOP_ACTIVE] phase: $phase, paused: $paused, week: $week, zoom: ${camera.viewfinder.zoom.toStringAsFixed(3)}, targetZoom: ${_targetZoom.toStringAsFixed(3)}, activeArea: [${spawnController?.minSpawnX}..${spawnController?.maxSpawnX}, ${spawnController?.minSpawnY}..${spawnController?.maxSpawnY}]");
       _debugLogTimer = 0;
     }
     
@@ -456,6 +473,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       _simTickTimer = 0;
       gridManager?.updateCongestion(cars);
       gridManager?.updateSatisfaction(simDt);
+      gridManager?.updateDemand(simDt);
     }
 
     // Tier 4: 2Hz - HUD & Analytics
@@ -490,6 +508,13 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       if (car.arrived) {
         toRemove.add(car);
         car.removeFromParent();
+        if (!car.isReturning && gridManager != null) {
+          final destKey = "${car.targetDest.x},${car.targetDest.y}";
+          final currentClaimed = gridManager!.claimedDemand[destKey] ?? 0;
+          if (currentClaimed > 0) {
+            gridManager!.claimedDemand[destKey] = currentClaimed - 1;
+          }
+        }
         carPool.returnCar(car);
         continue;
       }
@@ -550,6 +575,11 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
               );
               _cars.add(car);
               world.add(car);
+              
+              // Claim the demand!
+              final destKey = "${dest.x},${dest.y}";
+              gridManager!.claimedDemand[destKey] = (gridManager!.claimedDemand[destKey] ?? 0) + 1;
+              
               timer = 0;
             }
           }
@@ -561,9 +591,15 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
   GridPosition? _findDestination(GridPosition housePos) {
     final houseCell = gridManager!.getCell(housePos.x, housePos.y);
-    final targets = gridManager!.destinations.where((d) => 
-      gridManager!.getCell(d.x, d.y).colorIndex == houseCell.colorIndex
-    ).toList();
+    final targets = gridManager!.destinations.where((d) {
+      final cell = gridManager!.getCell(d.x, d.y);
+      if (cell.colorIndex != houseCell.colorIndex) return false;
+      
+      final key = "${d.x},${d.y}";
+      final demandVal = gridManager!.demand[key] ?? 0;
+      final claimedVal = gridManager!.claimedDemand[key] ?? 0;
+      return demandVal > claimedVal;
+    }).toList();
     
     if (targets.isEmpty) return null;
     return targets[Random().nextInt(targets.length)];
@@ -682,12 +718,21 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       zoom = 1.0;
     }
 
-    final gridW = gridCols * cellSize;
-    final gridH = gridRows * cellSize;
-    final target = Vector2(
-      (gridW - screenW / zoom) / 2,
-      (gridH - screenH / zoom) / 2,
-    );
+    Vector2 target;
+    if (spawnController != null) {
+      final w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
+      final h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+      final targetX = (boardOffsetX + spawnController!.minSpawnX * cellSize) - ((screenW / zoom) - w) / 2;
+      final targetY = (boardOffsetY + spawnController!.minSpawnY * cellSize) - ((screenH / zoom) - h) / 2;
+      target = Vector2(targetX, targetY);
+    } else {
+      final gridW = gridCols * cellSize;
+      final gridH = gridRows * cellSize;
+      target = Vector2(
+        (gridW - screenW / zoom) / 2,
+        (gridH - screenH / zoom) / 2,
+      );
+    }
 
     if (instant) {
       camera.viewfinder.position = target;
@@ -701,6 +746,12 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     if (weekTimer >= GameConstants.weekDuration) {
       weekTimer = 0;
       week++;
+      if (gridManager != null) {
+        for (final dest in gridManager!.destinations) {
+          final key = "${dest.x},${dest.y}";
+          gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
+        }
+      }
       // Active region grows with the week — refresh spawn bounds so new
       // buildings can land in the newly opened ring of cells, and the camera
       // zoom (derived from the region size) widens to match.
@@ -723,15 +774,43 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
   void _syncSpawnBounds() {
     if (spawnController == null || gridManager == null) return;
+    
+    // Base active half-dimensions for the current week
+    int hw = _activeHalfWidth;
+    int hh = _activeHalfHeight;
+    
+    // Adjust to match the viewport aspect ratio to eliminate black bars
+    if (size.x > 100 && size.y > 100) {
+      const double padding = 32.0;
+      final screenW = size.x - hudPanelWidth - (2 * padding);
+      final screenH = size.y - (2 * padding);
+      if (screenW > 0 && screenH > 0) {
+        final screenAspect = screenW / screenH;
+        final baseAspect = hw / hh;
+        if (screenAspect > baseAspect) {
+          // Screen is wider: expand hw to match height
+          hw = (hh * screenAspect).round();
+          // Clamp to grid limits
+          final maxHw = (gridCols - 4) ~/ 2;
+          if (hw > maxHw) hw = maxHw;
+        } else {
+          // Screen is taller: expand hh to match width
+          hh = (hw / screenAspect).round();
+          // Clamp to grid limits
+          final maxHh = (gridRows - 4) ~/ 2;
+          if (hh > maxHh) hh = maxHh;
+        }
+      }
+    }
+
     final cx = gridCols ~/ 2;
     final cy = gridRows ~/ 2;
-    final hw = _activeHalfWidth;
-    final hh = _activeHalfHeight;
     spawnController!.minSpawnX = max(2, cx - hw);
     spawnController!.maxSpawnX = min(gridManager!.cols - 3, cx + hw - 1);
     spawnController!.minSpawnY = max(2, cy - hh);
     spawnController!.maxSpawnY = min(gridManager!.rows - 3, cy + hh - 1);
   }
+
 
   /// Returns true if [pos] is inside the current active region — used to block
   /// player builds outside the playable area until weekly expansions open it up.
