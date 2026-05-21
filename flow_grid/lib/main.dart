@@ -1,12 +1,14 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'game/flow_grid_game.dart';
 import 'ui/main_menu_overlay.dart';
 import 'ui/game_hud_overlay.dart';
 import 'ui/game_over_overlay.dart';
 import 'ui/weekly_upgrade_overlay.dart';
+import 'ui/map_selection_overlay.dart';
+import 'ui/save_slot_overlay.dart';
+import 'ui/tutorial_overlay.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,18 +19,12 @@ void main() {
     DeviceOrientation.landscapeRight,
   ]);
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      systemNavigationBarColor: Colors.transparent,
-    ),
-  );
 
-  runApp(const FlowGridApp());
+  runApp(const MyApp());
 }
 
-class FlowGridApp extends StatelessWidget {
-  const FlowGridApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -36,27 +32,23 @@ class FlowGridApp extends StatelessWidget {
       title: 'Flow Grid',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        brightness: Brightness.dark,
         useMaterial3: true,
-        textTheme: GoogleFonts.interTextTheme(),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFE74C3C),
-          brightness: Brightness.dark,
-        ),
       ),
-      home: const GamePage(),
+      home: const GameScreen(),
     );
   }
 }
 
-class GamePage extends StatefulWidget {
-  const GamePage({super.key});
+class GameScreen extends StatefulWidget {
+  const GameScreen({super.key});
 
   @override
-  State<GamePage> createState() => _GamePageState();
+  State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GamePageState extends State<GamePage> {
-  late final FlowGridGame _game;
+class _GameScreenState extends State<GameScreen> {
+  late FlowGridGame _game;
 
   @override
   void initState() {
@@ -66,17 +58,17 @@ class _GamePageState extends State<GamePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: GameWidget<FlowGridGame>(
-        game: _game,
-        overlayBuilderMap: {
-          'mainMenu': (context, game) => MainMenuOverlay(game: game),
-          'hud': (context, game) => GameHudOverlay(game: game),
-          'gameOver': (context, game) => GameOverOverlay(game: game),
-          'weeklyUpgrade': (context, game) =>
-              WeeklyUpgradeOverlay(game: game),
-        },
-      ),
+    return GameWidget(
+      game: _game,
+      overlayBuilderMap: {
+        'mainMenu': (context, FlowGridGame game) => MainMenuOverlay(game: game),
+        'mapSelection': (context, FlowGridGame game) => MapSelectionOverlay(game: game),
+        'gameOver': (context, FlowGridGame game) => GameOverOverlay(game: game),
+        'weeklyUpgrade': (context, FlowGridGame game) => WeeklyUpgradeOverlay(game: game),
+        'hud': (context, FlowGridGame game) => GameHudOverlay(game: game),
+        'saveSlot': (context, FlowGridGame game) => SaveSlotOverlay(game: game),
+        'tutorial': (context, FlowGridGame game) => TutorialOverlay(game: game),
+      },
     );
   }
 }

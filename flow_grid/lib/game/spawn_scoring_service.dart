@@ -3,7 +3,7 @@ import 'package:flow_grid/game/grid_manager.dart';
 import 'package:flow_grid/game/spawn_controller.dart';
 import 'package:flow_grid/models/grid_cell.dart';
 
-/// SpawnScoringService — Responsible for:
+/// SpawnScoringService â€” Responsible for:
 /// - Destination global distribution
 /// - Quadrant balancing
 /// - Edge avoidance scoring
@@ -43,7 +43,7 @@ class SpawnScoringService {
 
     // Reduce edge penalty in emergency stages to allow fallback
     double edgePenaltyMult = 1.0;
-    if (stage.index >= PlanningStage.stage4_StrongRelax.index) edgePenaltyMult = 0.2;
+    if (stage.index >= PlanningStage.stage4StrongRelax.index) edgePenaltyMult = 0.2;
 
     if (distToTop < marginY) score -= (marginY - distToTop) * 30 * edgePenaltyMult;
     if (distToBottom < marginY) score -= (marginY - distToBottom) * 30 * edgePenaltyMult;
@@ -79,7 +79,7 @@ class SpawnScoringService {
     score += spawnController.districtPlanner.calculateRegionScore(pos, colorIndex) * 0.5;
 
     // 4. ROADABILITY (Issue 2)
-    final entry = spawnController.findValidEntrySide(pos);
+    final entry = spawnController.findValidEntrySide(pos, profile: BuildingProfile.commercial, stage: stage);
     if (entry != null) {
       score += calculateRoadabilityScore(pos, entry);
     } else {
@@ -162,7 +162,7 @@ class SpawnScoringService {
     score -= nearbyRoads * 10.0;
 
     // 4. ACCESSIBILITY & ROADABILITY (Issue 2)
-    final entry = spawnController.findValidEntrySide(pos);
+    final entry = spawnController.findValidEntrySide(pos, profile: BuildingProfile.residential, stage: stage);
     if (entry != null) {
       score += calculateRoadabilityScore(pos, entry);
       score += spawnController.calculateOpennessScore(pos, entry) * 10; // Increased weight
@@ -281,15 +281,7 @@ class SpawnScoringService {
     }
   }
 
-  int _getQuadrant(GridPosition pos) {
-    final midX = (spawnController.minSpawnX + spawnController.maxSpawnX) / 2;
-    final midY = (spawnController.minSpawnY + spawnController.maxSpawnY) / 2;
-    if (pos.x < midX) {
-      return pos.y < midY ? 0 : 2; // Top-Left, Bottom-Left
-    } else {
-      return pos.y < midY ? 1 : 3; // Top-Right, Bottom-Right
-    }
-  }
+
 
   GridPosition? _calculateUrbanCenter() {
     if (gridManager.buildings.isEmpty) return null;
@@ -305,3 +297,4 @@ class SpawnScoringService {
     );
   }
 }
+

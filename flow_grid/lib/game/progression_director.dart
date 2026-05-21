@@ -1,4 +1,5 @@
 import 'package:flow_grid/game/spawn_controller.dart';
+import 'package:flow_grid/models/game_constants.dart';
 
 /// ProgressionDirector — the SINGLE authority for:
 /// - Week timing awareness
@@ -33,7 +34,8 @@ class ProgressionDirector {
   
   // [FIX] Guaranteed Expansions (Issue 2)
   int _pendingExpansionEvents = 0;
-  bool _expansionEventTriggeredThisWeek = false;
+  bool _expansionEventTriggeredThisWeek20 = false;
+  bool _expansionEventTriggeredThisWeek60 = false;
 
   // Track the last week we processed (to detect week transitions)
   int _lastWeek = 0;
@@ -45,7 +47,6 @@ class ProgressionDirector {
 
   void _log(String msg) {
     spawnController.onLog?.call(msg);
-    print(msg);
   }
 
   // ============================================================
@@ -60,12 +61,17 @@ class ProgressionDirector {
     _expandedThisCycle.clear();
     _expansionRetryCooldowns.clear();
     _hasUnlockedColorThisWeek = false;
-    _expansionEventTriggeredThisWeek = false;
+    _expansionEventTriggeredThisWeek20 = false;
+    _expansionEventTriggeredThisWeek60 = false;
     _pendingExpansionEvents = 0;
     _lastWeek = 0;
 
     // Color 0 (red) is unlocked at week 1
     _colorUnlockWeek[0] = 1;
+  }
+
+  void registerUnlockedColor(int colorIndex, int week) {
+    _colorUnlockWeek[colorIndex] = week;
   }
 
   // ============================================================
@@ -86,6 +92,9 @@ class ProgressionDirector {
 
     // Track B: Older-color district expansion
     _checkExpansionPackages(week, weekProgress);
+    
+    // Track C: Regional Sector Expansion
+    _checkSectorExpansion(week, weekProgress);
   }
 
   // ============================================================
@@ -94,7 +103,8 @@ class ProgressionDirector {
 
   void _onWeekChanged(int newWeek) {
     _hasUnlockedColorThisWeek = false;
-    _expansionEventTriggeredThisWeek = false;
+    _expansionEventTriggeredThisWeek20 = false;
+    _expansionEventTriggeredThisWeek60 = false;
   }
 
   // Removed _rebuildExpansionPoolIfNeeded as it is now handled in-place for single source of truth
@@ -152,19 +162,44 @@ class ProgressionDirector {
   // ============================================================
 
   void _checkExpansionPackages(int week, double progress) {
-    // [FIX] Guaranteed Expansions (Issue 2)
-    // Every week at 60% progress, we add a new expansion event to the queue.
-    if (week >= 2 && progress >= 0.6 && !_expansionEventTriggeredThisWeek) {
+    // [NEW] Endless Expansion Logic: 
+    // Usually expansions happen at 60%. 
+    // If all colors are already unlocked (Week 7+), we trigger an EXTRA expansion at 20%.
+    bool shouldTriggerEndgameExpansion = (spawnController.activeColorCount >= 6) && progress >= 0.2;
+    bool shouldTriggerStandardExpansion = progress >= 0.6;
+    
+    // Track 20% milestone for endgame
+    if (week >= 2 && shouldTriggerEndgameExpansion && !_expansionEventTriggeredThisWeek20) {
       _pendingExpansionEvents++;
-      _expansionEventTriggeredThisWeek = true;
-      _log('[EXPANSION] Week $week milestone reached. Pending events: $_pendingExpansionEvents');
+      _expansionEventTriggeredThisWeek20 = true;
+      _log('[EXPANSION] Endgame 20% milestone reached. Pending events: $_pendingExpansionEvents');
+    }
+
+    // Track 60% milestone
+    if (week >= 2 && shouldTriggerStandardExpansion && !_expansionEventTriggeredThisWeek60) {
+      _pendingExpansionEvents++;
+      _expansionEventTriggeredThisWeek60 = true;
+      _log('[EXPANSION] Standard 60% milestone reached. Pending events: $_pendingExpansionEvents');
+    }
+
+    // 0. Emergency Check: If color 0 (red) is missing its physical presence, retry it
+    if (spawnController.getHouseCount(0) == 0 && spawnController.gridManager.getDestinationsForColor(0).isEmpty) {
+      final cooldown = _colorRetryCooldowns[0] ?? 0;
+      if (_elapsedTime >= cooldown) {
+        final success = spawnController.spawnInitialPair(0);
+        if (!success) {
+          _colorRetryCooldowns[0] = _elapsedTime + 10.0;
+        } else {
+          _log('[RESTORE] Recovered missing initial district for Color 0');
+        }
+      }
     }
 
     if (_pendingExpansionEvents <= 0) return;
 
-    // 1. Identify all currently eligible colors (unlocked and at least 1 week old)
+    // 1. Identify all currently eligible colors (unlocked and at least X weeks old)
     final eligibleColors = _colorUnlockWeek.entries
-        .where((e) => week - e.value >= 1)
+        .where((e) => week - e.value >= 0) // [FIX] Allow week-1 expansion for smoother start
         .map((e) => e.key)
         .toList();
 
@@ -211,6 +246,17 @@ class ProgressionDirector {
     } else {
       _log('[EXPANSION] FAILED color $bestColor. Retrying in 10s.');
       _expansionRetryCooldowns[bestColor] = _elapsedTime + 10.0;
+    }
+  }
+
+  void _checkSectorExpansion(int week, double progress) {
+    if (week < 4) return; // Regional expansion starts from week 4
+    
+    // We'll use game score and regional satisfaction to trigger new sectors
+    
+    if (spawnController.gridManager.regionalSatisfaction > GameConstants.criticalSatisfactionThreshold) {
+      // If we have high score and good satisfaction, expand the physical grid bounds
+      // This is usually handled by weekly upgrades, but can be forced here
     }
   }
 }

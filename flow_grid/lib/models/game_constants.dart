@@ -1,47 +1,68 @@
 import 'package:flutter/material.dart';
 
 class GameConstants {
+  static const double cellSize = 40.0;
   // Timing (Longer weeks, calmer demand — Mini Motorways pacing)
-  static const double weekDuration = 75.0; // Faster week (was 90s)
+  static const double weekDuration = 85.0;
   static const double initialSpawnDelay = 15.0; // Ignored by new scheduler
   static const double minSpawnDelay = 8.0; // Ignored by new scheduler
-  static const double carSpawnInterval = 12.0; // Rebalanced (was 8s)
-  static const double demandTickInterval = 14.0; 
+  static const double carSpawnInterval = 12.0;
+  static const double demandTickInterval = 13.0;
   static const int maxDemand = 6;
-  static const double criticalDuration = 45.0; // Slightly longer for gradual system
-  static const double overflowRecoveryDuration = 120.0; // Slow natural decay
-  static const double overflowDeliveryRecovery = 0.125; // 8 deliveries to clear 100%
+  static const double criticalDuration = 42.0;
+  static const double overflowRecoveryDuration = 50.0;
+  static const double overflowDeliveryRecovery = 0.06;
 
   // Maturity (Mini Motorways style evolution)
-  static const int maturityThresholdWeeks = 3;
+  static const int maturityThresholdWeeks = 4;
   static const int matureMaxDemand = 10;
-  static const double matureRequestSpeedMultiplier = 1.35;
-  static const double matureOverflowBuildupMultiplier = 1.25;
+  static const double matureRequestSpeedMultiplier = 1.5;
+  static const double matureOverflowBuildupMultiplier = 1.35;
 
   // Endless Scaling (Part 1 & 3)
-  static const double highDemandHouseTriggerDuration = 25.0; // Seconds at 6+ dots
-  static const double demandAgeScalingRate = 0.15; // +15% demand speed per week after maturity
-  static const double minDemandInterval = 3.5; // Clamp for late game dots
+  static const double highDemandHouseTriggerDuration = 22.0;
+  static const double demandAgeScalingRate = 0.18;
+  static const double minDemandInterval = 3.0;
 
   // Starting Inventories
-  static const int startingRoadBudget = 20;
+  static const int startingRoadBudget = 25;
   static const int startingTunnels = 1; // was: startingBridges
-  static const int startingTrafficLights = 0;
+  static const int startingBridges = 1;
+  static const int startingTrafficLights = 1;
   static const int startingSmartJunctions = 0; // was: startingRoundabouts
   static const int startingExpressLanes = 0; // was 1 (removed for cleanup)
 
-  static const int weeklyRoadBonus = 5;
+  static const int weeklyRoadBonus = 4;
 
   // Car
-  static const double carSpeed = 135.0;
+  static const double carSpeed = 130.0;
 
   // Terrain & Capacity
   static const double mountainTerrainPenalty =
       0.6; // speed multiplier near mountains
   static const double tunnelSpeedBonus = 1.0; // tunnels remove penalty
-  static const double expressLaneSpeed = 1.25; // 0.8 path weight
+  static const double expressLaneSpeed =
+      1.4; // 0.7 path weight (increased from 1.25)
   static const int roadCapacityDefault = 5;
+  static const int avenueCapacity = 15;
+  static const int highwayCapacity = 45;
+  static const int metroCapacity = 120;
+  static const int elevatedRailCapacity = 180;
+  
+  static const double metroSpeedMultiplier = 2.2;
+  static const double elevatedRailSpeedMultiplier = 2.8;
+  static const double highwaySpeedMultiplier = 1.8;
+  
   static const double roadCapacityCongestedThreshold = 0.8;
+  
+  // Satisfaction System (Part 4)
+  static const double satisfactionDecayRate = 0.005; // per car delivery delay
+  static const double satisfactionRecoveryRate = 0.02; // per on-time delivery
+  static const double criticalSatisfactionThreshold = 0.35;
+  
+  // Regional Expansion (Part 3)
+  static const int sectorUnlockBaseCost = 1500;
+  static const int sectorUnlockScoreThreshold = 500;
 
   // Traffic Signals
   static const double trafficSignalInterval = 3.0; // seconds per phase
@@ -69,6 +90,8 @@ class GameConstants {
 
   // Tunnel & Express Lane
   static const Color tunnelColor = Color(0xFF8A7D6B);
+  static const Color waterColor = Color(0xFF2C5E8A); // Deep River Blue
+  static const Color bridgeColor = Color(0xFF7A8A99); // Slate Steel
   static const Color expressLaneColor = Color(0xFF4A9062); // Subtle Green
   static const Color expressLaneBorderColor = Color(0xFF346344);
 
@@ -105,4 +128,17 @@ class GameConstants {
 
   static Color getBuildingDarkColor(int index) =>
       buildingDarkColors[index % buildingDarkColors.length];
+
+  // --- Performance & Stabilization (Task 7 & 13) ---
+  static const bool debugInfrastructure = false;
+  static const bool showPerformanceOverlay = true;
+  
+  // Tick Rates (Hz) - Task 5
+  static const double logicTickRate = 15.0;     // Traffic, logic updates
+  static const double congestionTickRate = 5.0; // Congestion analytics
+  static const double satisfactionTickRate = 2.0; // Global metrics
+  static const double spawnCheckTickRate = 1.0;   // District expansion
+  
+  // Render Chunks - Task 1
+  static const int chunkSize = 16; // tiles per chunk
 }

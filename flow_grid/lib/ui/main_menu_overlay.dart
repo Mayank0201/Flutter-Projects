@@ -66,7 +66,10 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                 if (_hasSave) ...[
                   _menuButton(
                     label: 'RESUME CITY',
-                    onPressed: () => widget.game.startGame(resume: true),
+                    onPressed: () {
+                      widget.game.overlays.remove('mainMenu');
+                      widget.game.overlays.add('saveSlot');
+                    },
                     primary: true,
                   ),
                   const SizedBox(height: 16),
@@ -74,8 +77,19 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                 
                 _menuButton(
                   label: _hasSave ? 'NEW EXPEDITION' : 'START SIMULATION',
-                  onPressed: () => widget.game.startGame(resume: false),
+                  onPressed: () {
+                    widget.game.overlays.remove('mainMenu');
+                    widget.game.overlays.add('mapSelection');
+                  },
                   primary: !_hasSave,
+                ),
+                const SizedBox(height: 16),
+                _menuButton(
+                  label: 'LEARN TO FLOW',
+                  onPressed: () {
+                    widget.game.overlays.remove('mainMenu');
+                    widget.game.overlays.add('tutorial');
+                  },
                 ),
                 
                 const SizedBox(height: 40), // Reduced from 60

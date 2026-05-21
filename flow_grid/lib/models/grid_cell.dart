@@ -1,4 +1,13 @@
+enum InteractionState { idle, preview, commit }
 enum Direction { north, east, south, west }
+enum InfrastructureAxis { horizontal, vertical }
+enum ConnectionNodeType {
+  buildingEntrance,
+  infrastructureConnector,
+  intersection,
+  corridorInternal,
+  none
+}
 
 extension DirectionExtension on Direction {
   Direction get opposite {
@@ -30,7 +39,7 @@ extension DirectionExtension on Direction {
 }
 enum MapRegion { A, B }
 
-enum VehicleType { car, truck, serviceVan }
+enum VehicleType { car, truck, serviceVan, bus, emergency }
 
 enum CellType {
   empty,
@@ -42,11 +51,18 @@ enum CellType {
   smartJunction,  // was: roundabout
   trafficLight,
   expresswayNode, // generic node marker if needed, but overpass layer is preferred
+  water,          // Large rivers/waterways
+  bridge,         // Infrastructure for water crossings
+  metroTrack,     // [NEW] Underground/Surface Metro
+  elevatedRail,   // [NEW] High-capacity rail
+  highway,        // [NEW] High-speed surface road
 }
 
 enum OverpassType { none, start, end }
 
 enum RoadEdgeType { normal, tunnel, expressway }
+
+enum InfrastructureOwner { none, player, systemGenerated, eventGenerated }
 
 class GridCell {
   final CellType type;
@@ -72,7 +88,27 @@ class GridCell {
   
   // Traffic signal state
   final int signalPhase;     // 0 = N/S green, 1 = E/W green
-
+  final bool isInfrastructureInternal;
+  final bool isConnectableEndpoint;
+  final InfrastructureAxis? infrastructureAxis;
+  final int roadLevel; // 0: Street, 1: Avenue, 2: Highway
+  
+  // [NEW] Transit & Road Management
+  final bool isBusStop;
+  final bool isBusLane;
+  final bool isOneWay;
+  final Direction? oneWayDirection;
+  final String? busRouteId;
+  final bool isMetroStation;
+  final bool isPriority;
+  
+  // [NEW] Mega City Systems
+  final double satisfaction; // 0.0 (miserable) to 1.0 (perfect)
+  final String? sectorId;    // Identification of regional expansion sector
+  final bool isHighway;
+  final bool isElevatedRail;
+  final InfrastructureOwner owner;
+  final InfrastructureOwner upgradeOwner;
   GridCell({
     this.type = CellType.empty,
     this.colorIndex,
@@ -91,7 +127,26 @@ class GridCell {
     this.overpass = OverpassType.none,
     this.signalPhase = 0,
     this.region,
+    this.isInfrastructureInternal = false,
+    this.isConnectableEndpoint = false,
+    this.infrastructureAxis,
+    this.roadLevel = 0, // 0: Street, 1: Avenue, 2: Highway
+    this.isBusStop = false,
+    this.isBusLane = false,
+    this.isOneWay = false,
+    this.oneWayDirection,
+    this.busRouteId,
+    this.isMetroStation = false,
+    this.isPriority = false,
+    this.satisfaction = 1.0,
+    this.sectorId,
+    this.isHighway = false,
+    this.isElevatedRail = false,
+    this.owner = InfrastructureOwner.none,
+    this.upgradeOwner = InfrastructureOwner.none,
   });
+
+  bool get hasSmartJunction => type == CellType.smartJunction;
 
   GridCell copyWith({
     CellType? type,
@@ -111,6 +166,23 @@ class GridCell {
     int? signalPhase,
     OverpassType? overpass,
     MapRegion? region,
+    bool? isInfrastructureInternal,
+    bool? isConnectableEndpoint,
+    InfrastructureAxis? infrastructureAxis,
+    int? roadLevel,
+    bool? isBusStop,
+    bool? isBusLane,
+    bool? isOneWay,
+    Direction? oneWayDirection,
+    String? busRouteId,
+    bool? isMetroStation,
+    bool? isPriority,
+    double? satisfaction,
+    String? sectorId,
+    bool? isHighway,
+    bool? isElevatedRail,
+    InfrastructureOwner? owner,
+    InfrastructureOwner? upgradeOwner,
   }) {
     return GridCell(
       type: type ?? this.type,
@@ -130,20 +202,52 @@ class GridCell {
       overpass: overpass ?? this.overpass,
       signalPhase: signalPhase ?? this.signalPhase,
       region: region ?? this.region,
+      isInfrastructureInternal: isInfrastructureInternal ?? this.isInfrastructureInternal,
+      isConnectableEndpoint: isConnectableEndpoint ?? this.isConnectableEndpoint,
+      infrastructureAxis: infrastructureAxis ?? this.infrastructureAxis,
+      roadLevel: roadLevel ?? this.roadLevel,
+      isBusStop: isBusStop ?? this.isBusStop,
+      isBusLane: isBusLane ?? this.isBusLane,
+      isOneWay: isOneWay ?? this.isOneWay,
+      oneWayDirection: oneWayDirection ?? this.oneWayDirection,
+      busRouteId: busRouteId ?? this.busRouteId,
+      isMetroStation: isMetroStation ?? this.isMetroStation,
+      isPriority: isPriority ?? this.isPriority,
+      satisfaction: satisfaction ?? this.satisfaction,
+      sectorId: sectorId ?? this.sectorId,
+      isHighway: isHighway ?? this.isHighway,
+      isElevatedRail: isElevatedRail ?? this.isElevatedRail,
+      owner: owner ?? this.owner,
+      upgradeOwner: upgradeOwner ?? this.upgradeOwner,
     );
   }
 
   bool get isEmpty => type == CellType.empty;
-  bool get isRoad => type == CellType.road || type == CellType.tunnel || type == CellType.trafficLight;
+  bool get isRoad => type == CellType.road || type == CellType.tunnel || type == CellType.bridge || type == CellType.trafficLight;
   bool get isHouse => type == CellType.house;
   bool get isDestination => type == CellType.destination;
-  bool get isMountain => type == CellType.mountain || type == CellType.tunnel;
+  bool get isMountain => type == CellType.mountain;
   bool get isTunnel => type == CellType.tunnel;
+  bool get isBridge => type == CellType.bridge;
+  bool get isWater => type == CellType.water;
   bool get isExpressLaneNode => overpass != OverpassType.none;
   bool get isSmartJunction => type == CellType.smartJunction;
+  bool get isMetro => isMetroStation;
+  
+  ConnectionNodeType get connectionType {
+    if (isConnectableEndpoint) return ConnectionNodeType.infrastructureConnector;
+    if (isInfrastructureInternal) return ConnectionNodeType.corridorInternal;
+    if (type == CellType.road) return ConnectionNodeType.intersection;
+    return ConnectionNodeType.none;
+  }
+
   bool get isPassable =>
       isRoad ||
       isExpressLaneNode ||
+      isHighway ||
+      isElevatedRail ||
+      type == CellType.metroTrack ||
+      type == CellType.elevatedRail ||
       type == CellType.smartJunction ||
       type == CellType.trafficLight;
 }

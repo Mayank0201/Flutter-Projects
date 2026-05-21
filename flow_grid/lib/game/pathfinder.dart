@@ -8,8 +8,11 @@ class Pathfinder {
   static List<GridPosition>? findPath(
     GridManager grid,
     GridPosition start,
-    GridPosition end,
-  ) {
+    GridPosition end, {
+    double congestionMultiplier = 1.0,
+    bool isEmergency = false,
+    VehicleType vehicleType = VehicleType.car,
+  }) {
     final openSet = _BinaryHeap<_Node>((a, b) => a.f.compareTo(b.f));
     final cameFrom = <String, GridPosition>{};
     final gScore = <String, double>{};
@@ -52,6 +55,21 @@ class Pathfinder {
               nextNodes.add(GridPosition(nPos.x, nPos.y, Direction.west));
             }
           } else {
+            // [NEW] One-Way Logic: Only allow moving INTO a one-way tile if the direction matches
+            if (nCell.isOneWay) {
+              Direction? moveDir;
+              if (nPos.x > current.pos.x) {
+                moveDir = Direction.east;
+              } else if (nPos.x < current.pos.x) {
+                moveDir = Direction.west;
+              } else if (nPos.y > current.pos.y) {
+                moveDir = Direction.south;
+              } else if (nPos.y < current.pos.y) {
+                moveDir = Direction.north;
+              }
+
+              if (moveDir != nCell.oneWayDirection) continue; // Forbidden direction
+            }
             nextNodes.add(nPos);
           }
         }
@@ -118,15 +136,41 @@ class Pathfinder {
             stepCost *= 1.0 / neighborCell.speedMultiplier; // Express lane bonus
           }
           
-          // Capacity-aware cost
-          final load = grid.getRoadLoad(neighbor.x, neighbor.y);
-          final cap = neighborCell.capacity;
-          if (load >= (cap * GameConstants.roadCapacityCongestedThreshold).ceil()) {
-            stepCost += 1.0; // Congested
+          // --- [NEW] Strategic Weighting (Road Hierarchy) ---
+          double roadWeight = 1.0;
+          if (neighborCell.isExpressLaneNode) {
+            roadWeight = 0.4;
+          } else if (neighborCell.isHighway || neighborCell.roadLevel == 2) {
+             // Trucks LOVE highways
+             roadWeight = (vehicleType == VehicleType.truck) ? 0.3 : 0.5;
+          } else if (neighborCell.roadLevel == 1) {
+            roadWeight = 0.75; // Avenue priority
           }
-          if (load >= cap) {
-            stepCost += 3.0; // Full
+          else if (neighborCell.isBusLane) {
+             // Buses LOVE bus lanes
+             roadWeight = (vehicleType == VehicleType.bus) ? 0.4 : 0.9;
           }
+          
+          // Metro/Rail Filtering
+          if (neighborCell.type == CellType.metroTrack || neighborCell.type == CellType.elevatedRail) {
+             if (vehicleType != VehicleType.bus && vehicleType != VehicleType.emergency) {
+                // Regular cars can't use tracks
+                stepCost = 999;
+             } else {
+                roadWeight = 0.35; // Fast if allowed
+             }
+          }
+          
+          // --- [NEW] Dynamic Congestion Weight (Smart AI) ---
+          double congestionWeight = 1.0;
+          final count = grid.getRoadLoad(neighbor.x, neighbor.y);
+          final load = count / (neighborCell.capacity * 1.5);
+          
+          // Emergency vehicles ignore 90% of congestion
+          final impact = (vehicleType == VehicleType.emergency) ? 0.1 : 2.5; 
+          congestionWeight = 1.0 + (load * impact * congestionMultiplier);
+
+          stepCost *= roadWeight * congestionWeight;
           
           // Intersection penalty
           final connectionCount = grid.getNeighbors(neighbor.x, neighbor.y, target: end)

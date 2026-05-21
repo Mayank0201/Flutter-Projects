@@ -1,13 +1,13 @@
 import 'dart:math';
+import 'package:flow_grid/game/district_name_generator.dart';
 import 'package:flow_grid/game/district_planner.dart';
 import 'package:flow_grid/game/grid_manager.dart';
 import 'package:flow_grid/game/spawn_scoring_service.dart';
 import 'package:flow_grid/models/grid_cell.dart';
 import 'package:flutter/foundation.dart';
-import '../models/game_constants.dart';
 
 // ============================================================
-// SPAWN CONFIGURATION — all tunable constants in one place
+// SPAWN CONFIGURATION â€” all tunable constants in one place
 // ============================================================
 // [NEW] Immutable Spawn Profiles (Issue: Residential/Commercial Contamination)
 class BuildingProfile {
@@ -81,9 +81,12 @@ class SpawnConfig {
   // ============================================================
   // [NEW] District Locality & Spacing Rules (Issue 1 & 2)
   // ============================================================
-  static const int maxDistrictExpansionRadius = 24; // [NEW] Increased for better map coverage
-  static const int destinationToHouseMinDistance = 16; // [FIX] Increased separation (was 12)
-  static const int destinationToDestinationMinDistance = 15;
+  // Sized for a Mini-Motorways style starting region (~20x14). Larger
+  // separations would force the spawn planner to push buildings across the
+  // whole grid, which is impossible to connect with the early road budget.
+  static const int maxDistrictExpansionRadius = 14;
+  static const int destinationToHouseMinDistance = 5;
+  static const int destinationToDestinationMinDistance = 7;
   static const int sameColorHouseClusterRadius = 4;
 }
 
@@ -99,11 +102,11 @@ enum SpawnZone {
 }
 
 enum PlanningStage { 
-  stage1_Ideal, 
-  stage2_Relaxed, 
-  stage3_MoreRelaxed, 
-  stage4_StrongRelax, 
-  stage5_ExtremeRelax 
+  stage1Ideal, 
+  stage2Relaxed, 
+  stage3MoreRelaxed, 
+  stage4StrongRelax, 
+  stage5ExtremeRelax 
 }
 
 enum SpawnFailure {
@@ -192,7 +195,7 @@ class DistrictDNA {
 }
 
 // ============================================================
-// SPAWN CONTROLLER — the single authority for all spawning
+// SPAWN CONTROLLER â€” the single authority for all spawning
 // ============================================================
 class SpawnController {
   final Random _random;
@@ -298,7 +301,7 @@ class SpawnController {
       final destPos = _findDestinationSpot(colorIndex, stage: stage, anchor: resCenter);
       if (destPos == null) continue;
       
-      final destEntry = findValidEntrySide(destPos);
+      final destEntry = findValidEntrySide(destPos, profile: BuildingProfile.commercial, stage: stage);
       if (destEntry == null) continue;
       
       // 3. FIND NEARBY HOUSES (Complete with entries)
@@ -329,7 +332,7 @@ class SpawnController {
     double minDist = 1.0;
     double maxDist = 8.0;
 
-    if (stage.index >= PlanningStage.stage5_ExtremeRelax.index) maxDist = 12.0;
+    if (stage.index >= PlanningStage.stage5ExtremeRelax.index) maxDist = 12.0;
 
     for (int y = minSpawnY; y <= maxSpawnY; y++) {
       for (int x = minSpawnX; x <= maxSpawnX; x++) {
@@ -339,7 +342,7 @@ class SpawnController {
         
         // Avoid pending destination during district generation
         if (avoidDest != null && pos.manhattanDistance(avoidDest) < SpawnConfig.destinationToHouseMinDistance) {
-          if (stage.index < PlanningStage.stage5_ExtremeRelax.index) continue;
+          if (stage.index < PlanningStage.stage5ExtremeRelax.index) continue;
         }
 
         if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.house)) continue;
@@ -359,7 +362,7 @@ class SpawnController {
     // Pick best spots that HAVE valid entry sides
     final result = <HousePlan>[];
     for (final pos in candidates) {
-      final entry = findValidEntrySide(pos);
+      final entry = findValidEntrySide(pos, profile: BuildingProfile.residential, stage: stage);
       if (entry == null) continue;
 
       bool tooClose = false;
@@ -379,6 +382,10 @@ class SpawnController {
   }
 
   void _commitInitialDistrict(int colorIndex, DistrictPlan plan) {
+    gridManager.commitPlacement(() => _doCommitInitialDistrict(colorIndex, plan));
+  }
+
+  void _doCommitInitialDistrict(int colorIndex, DistrictPlan plan) {
     // 1. ATOMIC VALIDATION (Ghost Reservation check)
     // Ensure all target cells are still empty/valid before committing
     for (final spot in plan.allSpots) {
@@ -390,10 +397,12 @@ class SpawnController {
 
     // 2. Destination
     _log('[VALIDATE] type=DESTINATION reservation=${BuildingProfile.commercial.corridorLength} influence=${BuildingProfile.commercial.influenceRadius}');
-    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry);
+    final profile = districtPlanner.getProfileFor(colorIndex);
+    final name = DistrictNameGenerator.generate(profile.type);
+    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry, name: name);
     scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
     final dDP = plan.destPos.getNeighbor(plan.destEntry);
-    gridManager.placeRoad(dDP.x, dDP.y);
+    gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
     gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
     districtPlanner.claimSector(colorIndex, plan.destPos, isCommercial: true);
 
@@ -407,7 +416,7 @@ class SpawnController {
       
       scoringService.reserveEntranceCorridor(hPlan.pos, hPlan.entry, isDestination: false);
       final hDP = hPlan.pos.getNeighbor(hPlan.entry);
-      gridManager.placeRoad(hDP.x, hDP.y);
+      gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
       gridManager.connectBuilding(hPlan.pos.x, hPlan.pos.y, hDP.x, hDP.y);
       districtPlanner.claimSector(colorIndex, hPlan.pos, isCommercial: false);
     }
@@ -448,9 +457,9 @@ class SpawnController {
     }
     
     // Stage 2: Fallback to a completely new central location
-    final newCenter = _findInitialHouseCenter(colorIndex, stage: PlanningStage.stage3_MoreRelaxed);
+    final newCenter = _findInitialHouseCenter(colorIndex, stage: PlanningStage.stage3MoreRelaxed);
     if (newCenter != null) {
-      final housePlans = _findNearbyHouseSpots(colorIndex, newCenter, stage: PlanningStage.stage3_MoreRelaxed);
+      final housePlans = _findNearbyHouseSpots(colorIndex, newCenter, stage: PlanningStage.stage3MoreRelaxed);
       if (housePlans.isNotEmpty) {
         final hPlan = housePlans.first;
         _commitHouse(colorIndex, hPlan.pos, hPlan.entry);
@@ -464,6 +473,10 @@ class SpawnController {
   }
 
   void _commitHouse(int colorIndex, GridPosition pos, Direction entry) {
+    gridManager.commitPlacement(() => _doCommitHouse(colorIndex, pos, entry));
+  }
+
+  void _doCommitHouse(int colorIndex, GridPosition pos, Direction entry) {
     _log('[SPAWN] Placing HOUSE for Color $colorIndex at ${pos.key}');
     gridManager.placeHouse(pos.x, pos.y, colorIndex, entry);
     
@@ -471,7 +484,7 @@ class SpawnController {
     
     scoringService.reserveEntranceCorridor(pos, entry, isDestination: false);
     final hDP = pos.getNeighbor(entry);
-    gridManager.placeRoad(hDP.x, hDP.y);
+    gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
     gridManager.connectBuilding(pos.x, pos.y, hDP.x, hDP.y);
     districtPlanner.claimSector(colorIndex, pos, isCommercial: false);
   }
@@ -530,8 +543,8 @@ class SpawnController {
     // [FIX] Destination Separation (Issue 1)
     // Minimum distance from existing color cluster center (source or destination)
     double minDistFromExisting = 14.0; 
-    if (stage.index >= PlanningStage.stage3_MoreRelaxed.index) minDistFromExisting = 10.0;
-    if (stage.index >= PlanningStage.stage5_ExtremeRelax.index) minDistFromExisting = 6.0;
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) minDistFromExisting = 10.0;
+    if (stage.index >= PlanningStage.stage5ExtremeRelax.index) minDistFromExisting = 6.0;
 
     // Find destination candidates globally
     final destCandidates = <GridPosition>[];
@@ -541,9 +554,9 @@ class SpawnController {
 
         // Soft zone preference: prefer the target zone but don't hard-lock
         final zone = _getZoneAt(x, y);
-        if (zone != targetZone && stage.index < PlanningStage.stage3_MoreRelaxed.index) continue;      // [FIX] Anti-Linear Spawning (Issue 2)
+        if (zone != targetZone && stage.index < PlanningStage.stage3MoreRelaxed.index) continue;      // [FIX] Anti-Linear Spawning (Issue 2)
       // Destination should NOT be on the same axis as the existing cluster
-      if (stage.index < PlanningStage.stage4_StrongRelax.index && existingCenter != null) {
+      if (stage.index < PlanningStage.stage4StrongRelax.index && existingCenter != null) {
         if (pos.x == existingCenter.x || pos.y == existingCenter.y) continue;
       }
 
@@ -564,12 +577,12 @@ class SpawnController {
     });
 
     for (final destPos in destCandidates.take(8)) {
-      final destEntry = findValidEntrySide(destPos);
+      final destEntry = findValidEntrySide(destPos, profile: BuildingProfile.commercial, stage: stage);
       if (destEntry == null) continue;
 
       // [NEW] Find Residential Center for the expansion
       final resCenter = _findResidentialCenter(destPos, colorIndex, stage: stage);
-      if (resCenter == null && stage.index < PlanningStage.stage4_StrongRelax.index) continue;
+      if (resCenter == null && stage.index < PlanningStage.stage4StrongRelax.index) continue;
 
       // Find house candidates near the NEW residential center
       final housePlans = _findNearbyHouseSpots(colorIndex, resCenter ?? destPos, stage: stage, avoidDest: destPos);
@@ -590,6 +603,10 @@ class SpawnController {
 
   /// Commits an expansion plan (all-or-nothing, already validated)
   void _commitExpansion(int colorIndex, DistrictPlan plan, SpawnZone zone) {
+    gridManager.commitPlacement(() => _doCommitExpansion(colorIndex, plan, zone));
+  }
+
+  void _doCommitExpansion(int colorIndex, DistrictPlan plan, SpawnZone zone) {
     // 1. ATOMIC VALIDATION (Ghost Reservation check)
     // Ensure all target cells are still empty/valid before committing
     for (final spot in plan.allSpots) {
@@ -601,10 +618,12 @@ class SpawnController {
 
     // 2. Destination
     _log('[VALIDATE] type=DESTINATION reservation=${BuildingProfile.commercial.corridorLength} influence=${BuildingProfile.commercial.influenceRadius}');
-    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry);
+    final profile = districtPlanner.getProfileFor(colorIndex);
+    final name = DistrictNameGenerator.generate(profile.type);
+    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry, name: name);
     scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
     final dDP = plan.destPos.getNeighbor(plan.destEntry);
-    gridManager.placeRoad(dDP.x, dDP.y);
+    gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
     gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
     districtPlanner.claimSector(colorIndex, plan.destPos, isCommercial: true);
 
@@ -618,7 +637,7 @@ class SpawnController {
       
       scoringService.reserveEntranceCorridor(hPlan.pos, hPlan.entry, isDestination: false);
       final hDP = hPlan.pos.getNeighbor(hPlan.entry);
-      gridManager.placeRoad(hDP.x, hDP.y);
+      gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
       gridManager.connectBuilding(hPlan.pos.x, hPlan.pos.y, hDP.x, hDP.y);
       districtPlanner.claimSector(colorIndex, hPlan.pos, isCommercial: false);
     }
@@ -656,7 +675,7 @@ class SpawnController {
   int get queueDepth => _queue.length;
 
   // ============================================================
-  // SCHEDULER — one spawn per cooldown, no exceptions
+  // SCHEDULER â€” one spawn per cooldown, no exceptions
   // ============================================================
 
   void _processQueue() {
@@ -721,14 +740,14 @@ class SpawnController {
         _log('HOUSE REJECTED: Color $colorIndex has $houseCount houses, '
             'demand pressure=$pressure < threshold=$requiredPressure');
         lastFailure = SpawnFailure.demand;
-        return false; // Don't re-queue — demand gate blocks until pressure rises
+        return false; // Don't re-queue â€” demand gate blocks until pressure rises
       }
       _log('HOUSE ALLOWED: Demand pressure=$pressure justifies house #${houseCount + 1} for Color $colorIndex');
     }
 
     // Find a valid tile (Try stages 1-5)
     GridPosition? pos;
-    PlanningStage finalStage = PlanningStage.stage1_Ideal;
+    PlanningStage finalStage = PlanningStage.stage1Ideal;
 
     for (final stage in PlanningStage.values) {
       _log('PLANNER: Attempting Incremental House for Color $colorIndex at Stage ${stage.index + 1} (${stage.name})');
@@ -751,7 +770,7 @@ class SpawnController {
     }
 
     // [NEW] Local Density Cap (Skip if Stage 4+)
-    if (finalStage.index < PlanningStage.stage4_StrongRelax.index) {
+    if (finalStage.index < PlanningStage.stage4StrongRelax.index) {
       int nearbyHouses = 0;
       for (final house in gridManager.houses) {
         if (gridManager.grid[house.y][house.x].colorIndex == colorIndex) {
@@ -768,7 +787,7 @@ class SpawnController {
     }
 
     // Validate
-    final entry = findValidEntrySide(pos);
+    final entry = findValidEntrySide(pos, profile: BuildingProfile.residential, stage: finalStage);
     if (entry == null) {
       _log('HOUSE REJECTED: No entry side at $pos');
       return false;
@@ -787,7 +806,7 @@ class SpawnController {
 
     scoringService.reserveEntranceCorridor(pos, entry, isDestination: false);
     final dP = pos.getNeighbor(entry);
-    gridManager.placeRoad(dP.x, dP.y);
+    gridManager.placeRoad(dP.x, dP.y, owner: InfrastructureOwner.systemGenerated);
     gridManager.connectBuilding(pos.x, pos.y, dP.x, dP.y);
     districtPlanner.claimSector(colorIndex, pos, isCommercial: false);
     _lastSpawnTimeForColor[colorIndex] = _elapsedTime;
@@ -835,11 +854,13 @@ class SpawnController {
     final colorIndex = request.colorIndex;
 
     GridPosition? pos;
+    PlanningStage finalStage = PlanningStage.stage1Ideal;
     for (final stage in PlanningStage.values) {
       _log('PLANNER: Attempting Incremental Dest for Color $colorIndex at Stage ${stage.index + 1} (${stage.name})');
       pos = _findDestinationSpot(colorIndex, stage: stage);
       if (pos != null) {
         _log('PLANNER: Success at Stage ${stage.index + 1} for Color $colorIndex at $pos');
+        finalStage = stage;
         break;
       }
     }
@@ -851,7 +872,7 @@ class SpawnController {
       return false;
     }
 
-    final entry = findValidEntrySide(pos);
+    final entry = findValidEntrySide(pos, profile: BuildingProfile.commercial, stage: finalStage);
     if (entry == null) {
       _log('DEST REJECTED: No entry side at $pos');
       lastFailure = SpawnFailure.space; // Effectively space limit
@@ -864,7 +885,9 @@ class SpawnController {
     final profile = BuildingProfile.commercial;
     _log('[VALIDATE] type=DESTINATION reservation=${profile.corridorLength} influence=${profile.influenceRadius}');
 
-    gridManager.placeDestination(pos.x, pos.y, colorIndex, entry);
+    final districtProfile = districtPlanner.getProfileFor(colorIndex);
+    final name = DistrictNameGenerator.generate(districtProfile.type);
+    gridManager.placeDestination(pos.x, pos.y, colorIndex, entry, name: name);
     
     // HARD ASSERTION (Issue 3: Role Contamination)
     assert(gridManager.grid[pos.y][pos.x].isDestination, 'CRITICAL: Position $pos must be a DESTINATION');
@@ -882,7 +905,7 @@ class SpawnController {
   }
 
   // ============================================================
-  // POSITION SOLVER — cluster-aware, geography-aware
+  // POSITION SOLVER â€” cluster-aware, geography-aware
   // ============================================================
 
   GridPosition? _findHouseSpot(int colorIndex, {required bool isFirstHouse, required PlanningStage stage, GridPosition? center}) {
@@ -900,7 +923,7 @@ class SpawnController {
     final zones = colorAllowedHouseZones[colorIndex]!;
 
     int radius = 15; // Max cluster search radius
-    if (stage.index >= PlanningStage.stage3_MoreRelaxed.index) radius += 5;
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) radius += 5;
 
     for (int dy = -radius; dy <= radius; dy++) {
       for (int dx = -radius; dx <= radius; dx++) {
@@ -912,7 +935,7 @@ class SpawnController {
         final pos = GridPosition(x, y);
         final dist = pos.manhattanDistance(center);
         
-        if (stage.index < PlanningStage.stage3_MoreRelaxed.index) {
+        if (stage.index < PlanningStage.stage3MoreRelaxed.index) {
            if (dist < 2.0 || dist > radius) continue; // Tighter cluster for houses
         }
 
@@ -923,7 +946,7 @@ class SpawnController {
 
     if (candidates.isEmpty) {
       // Rule: No infinite fallback to random locations
-      if (stage.index >= PlanningStage.stage3_MoreRelaxed.index && stage.index < PlanningStage.stage5_ExtremeRelax.index) {
+      if (stage.index >= PlanningStage.stage3MoreRelaxed.index && stage.index < PlanningStage.stage5ExtremeRelax.index) {
          return _findSpotInZones(colorAllowedHouseZones[colorIndex]!, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
       }
       return null;
@@ -956,7 +979,7 @@ class SpawnController {
         if (!gridManager.grid[y][x].isEmpty) continue;
         
         // 2. Must not be reserved (unless in emergency)
-        if (gridManager.grid[y][x].isReserved && stage.index < PlanningStage.stage4_StrongRelax.index) continue;
+        if (gridManager.grid[y][x].isReserved && stage.index < PlanningStage.stage4StrongRelax.index) continue;
         
         // 3. Must have enough breathing room for a cluster
         if (gridManager.countNearbyBuildings(x, y, 3) > 0) continue;
@@ -984,7 +1007,7 @@ class SpawnController {
     
     int minDist = 12;
     int maxDist = 18;
-    if (stage.index >= PlanningStage.stage3_MoreRelaxed.index) {
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) {
       minDist = 8;
       maxDist = 24;
     }
@@ -1019,14 +1042,14 @@ class SpawnController {
         final pos = GridPosition(x, y);
         
         // Soft zone restriction: only apply if we aren't in emergency fallback
-        if (stage.index < PlanningStage.stage3_MoreRelaxed.index) {
+        if (stage.index < PlanningStage.stage3MoreRelaxed.index) {
           if (!zones.contains(_getZoneAt(pos.x, pos.y))) continue;
         }
 
         // Rule: Separation from residential center
         double minDist = SpawnConfig.destinationToHouseMinDistance.toDouble();
-        if (stage.index >= PlanningStage.stage4_StrongRelax.index) minDist *= 0.5;
-        if (stage.index >= PlanningStage.stage5_ExtremeRelax.index) minDist = 4.0;
+        if (stage.index >= PlanningStage.stage4StrongRelax.index) minDist *= 0.5;
+        if (stage.index >= PlanningStage.stage5ExtremeRelax.index) minDist = 4.0;
 
         if (center != null && pos.manhattanDistance(center) < minDist) continue;
 
@@ -1106,7 +1129,7 @@ class SpawnController {
   }
 
   // ============================================================
-  // VALIDATION — correctness before convenience
+  // VALIDATION â€” correctness before convenience
   // ============================================================
 
   /// Check that a tile is valid for spawning a building
@@ -1128,7 +1151,7 @@ class SpawnController {
     if (!cell.isEmpty) return false;
     
     // 1b. Must not be reserved (Issue 2: Corridor Reservation)
-    if (cell.isReserved && stage.index < PlanningStage.stage4_StrongRelax.index) return false;
+    if (cell.isReserved && stage.index < PlanningStage.stage4StrongRelax.index) return false;
 
     // 2. Map Bounds (Preserved)
     if (pos.x < minSpawnX || pos.x > maxSpawnX || pos.y < minSpawnY || pos.y > maxSpawnY) {
@@ -1136,7 +1159,7 @@ class SpawnController {
     }
 
     // 3. Reachable Driveway
-    final entrySide = findValidEntrySide(pos);
+    final entrySide = findValidEntrySide(pos, profile: profile, stage: stage);
     if (entrySide == null) return false;
 
     // 4. Basic Neighboring Check (Preserved)
@@ -1148,6 +1171,28 @@ class SpawnController {
       }
     }
     if (freeNeighbors < 1) return false; // Minimum 1 for connectivity
+
+    // [STRICT] Adjacency Check (Issue: Buildings touching each other)
+    // Rule: New buildings must have a 2-tile clearance from other buildings and infrastructure ports.
+    const int buildingClearance = 2;
+    for (int dy = -buildingClearance; dy <= buildingClearance; dy++) {
+      for (int dx = -buildingClearance; dx <= buildingClearance; dx++) {
+        if (dx == 0 && dy == 0) continue;
+        final nx = pos.x + dx;
+        final ny = pos.y + dy;
+        if (!gridManager.isValid(nx, ny)) continue;
+        final cell = gridManager.grid[ny][nx];
+        
+        // Cannot be near another building footprint
+        if (cell.isHouse || cell.isDestination) return false;
+        
+        // Cannot be near a driveway/entrance of another building
+        if (gridManager.isLockedEntrance(GridPosition(nx, ny))) return false;
+
+        // [NEW] Spacing Rule: Cannot spawn adjacent to infrastructure endpoints (tunnel/bridge mouths)
+        if (cell.isConnectableEndpoint) return false;
+      }
+    }
 
     // ============================================================
     // SOFT RULES (Relaxed based on Stage)
@@ -1171,13 +1216,13 @@ class SpawnController {
          // Houses must stay away from ANY destination
          if (dist < SpawnConfig.destinationToHouseMinDistance) {
            // Allow slightly closer only in extreme emergency
-           if (stage.index < PlanningStage.stage5_ExtremeRelax.index) return false;
+           if (stage.index < PlanningStage.stage5ExtremeRelax.index) return false;
            if (dist < 3) return false; // Hard minimum
          }
        } else {
          // Destinations must stay away from ANY other destination
          if (dist < SpawnConfig.destinationToDestinationMinDistance) {
-           if (stage.index < PlanningStage.stage4_StrongRelax.index) return false;
+           if (stage.index < PlanningStage.stage4StrongRelax.index) return false;
            if (dist < 7) return false; // Hard minimum (Mini Motorways spread)
          }
        }
@@ -1193,7 +1238,7 @@ class SpawnController {
       // Strict Border Padding for Destinations (Rule 3)
       // Even in Emergency, destinations shouldn't be pinned against the map edge
       int minPadding = 2; 
-      if (stage == PlanningStage.stage5_ExtremeRelax) minPadding = 1;
+      if (stage == PlanningStage.stage5ExtremeRelax) minPadding = 1;
 
       if (pos.x < minSpawnX + minPadding || pos.x > maxSpawnX - minPadding ||
           pos.y < minSpawnY + minPadding || pos.y > maxSpawnY - minPadding) {
@@ -1202,18 +1247,18 @@ class SpawnController {
       }
     }
 
-    if (stage == PlanningStage.stage5_ExtremeRelax) return true;
+    if (stage == PlanningStage.stage5ExtremeRelax) return true;
 
     // 5. Border Padding (Relaxed in Stage 3+)
     int padding = profile.borderPadding;
-    if (stage.index >= PlanningStage.stage3_MoreRelaxed.index) padding = 1;
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) padding = 1;
     if (pos.x < minSpawnX + padding || pos.x > maxSpawnX - padding ||
         pos.y < minSpawnY + padding || pos.y > maxSpawnY - padding) {
       return false;
     }
 
     // 6. Entrance Influence Zone (Relaxed in Stage 3+)
-    if (stage.index < PlanningStage.stage3_MoreRelaxed.index) {
+    if (stage.index < PlanningStage.stage3MoreRelaxed.index) {
       for (final house in gridManager.houses) {
         final otherEntry = gridManager.grid[house.y][house.x].entrySide;
         if (otherEntry != null) {
@@ -1240,7 +1285,7 @@ class SpawnController {
     }
 
     // New: Outward Clearance Check (Relaxed in Stage 3+)
-    if (stage.index < PlanningStage.stage3_MoreRelaxed.index) {
+    if (stage.index < PlanningStage.stage3MoreRelaxed.index) {
       for (int i = 1; i <= profile.corridorLength; i++) {
         final checkPos = pos.getNeighbor(entrySide, count: i);
         if (!gridManager.isValid(checkPos.x, checkPos.y)) return false;
@@ -1250,9 +1295,8 @@ class SpawnController {
       }
     }
 
-    // 7. Inter-Color Spacing (Relaxed in Stage 4+)
-    int interSpacing = profile.interColorSpacing;
-    if (stage.index >= PlanningStage.stage4_StrongRelax.index) interSpacing = 1;
+    // 7. Inter-Color Spacing (Strict: Buildings must never touch)
+    int interSpacing = 2; // Always at least 2
     
     // Check against all existing buildings
     for (int y = 0; y < gridManager.rows; y++) {
@@ -1263,20 +1307,14 @@ class SpawnController {
         final otherPos = GridPosition(x, y);
         final dist = pos.manhattanDistance(otherPos);
         
-        if (otherCell.colorIndex != colorIndex) {
-          if (dist < interSpacing) return false;
-        } else {
-          // 8. Same-Color Spacing (Relaxed in Stage 2+)
-          int sameSpacing = profile.sameColorSpacing;
-          if (stage.index >= PlanningStage.stage2_Relaxed.index) sameSpacing = (nodeType == SpawnNodeType.house) ? 1 : 2;
-          if (dist < sameSpacing) return false;
-        }
+        // [STRICT] Buildings must never touch (dist=1 is forbidden)
+        if (dist < interSpacing) return false;
       }
     }
 
     // 9. Driveway Spacing (Relaxed in Stage 2+)
     int dSp = 2; // Default driveway spacing
-    if (stage.index >= PlanningStage.stage2_Relaxed.index) dSp = 1;
+    if (stage.index >= PlanningStage.stage2Relaxed.index) dSp = 1;
     for (final house in gridManager.houses) {
       final otherEntry = gridManager.grid[house.y][house.x].entrySide;
       if (otherEntry != null) {
@@ -1286,14 +1324,14 @@ class SpawnController {
     }
 
     // 10. Macro Sector Reservations (Soft influenced)
-    if (stage.index < PlanningStage.stage4_StrongRelax.index) {
+    if (stage.index < PlanningStage.stage4StrongRelax.index) {
       if (!districtPlanner.isPositionAllowedFor(colorIndex, pos, activeColorCount)) {
         return false;
       }
     }
 
     // 11. Local Orientation Diversity (Ignored in Stage 3+)
-    if (stage.index < PlanningStage.stage3_MoreRelaxed.index) {
+    if (stage.index < PlanningStage.stage3MoreRelaxed.index) {
       if (_violatesLocalOrientationDiversity(pos, entrySide, colorIndex)) return false;
     }
 
@@ -1348,16 +1386,16 @@ class SpawnController {
   /// Helper to check if a tile is clear of ANY building footprints
   bool _isClearOfBuildings(GridPosition pos) {
     for (final house in gridManager.houses) {
-      if (pos.manhattanDistance(house) < 2) return false;
+      if (pos.manhattanDistance(house) < 3) return false; // Increased from 2
     }
     for (final dest in gridManager.destinations) {
-      if (pos.manhattanDistance(dest) < 2) return false;
+      if (pos.manhattanDistance(dest) < 3) return false; // Increased from 2
     }
     return true;
   }
 
   /// Find a valid entry side for a building at pos based on map position constraints
-  Direction? findValidEntrySide(GridPosition pos) {
+  Direction? findValidEntrySide(GridPosition pos, {BuildingProfile profile = BuildingProfile.residential, PlanningStage stage = PlanningStage.stage1Ideal}) {
     final List<Direction> allowed = [
       Direction.north,
       Direction.east,
@@ -1403,7 +1441,11 @@ class SpawnController {
     }
 
     // REQUIRE minimum accessibility score (Rule: can player build a good network?)
-    if (best != null && bestScore >= BuildingProfile.residential.minOpenness) {
+    int floor = profile.minOpenness;
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) floor = 1;
+    if (stage.index >= PlanningStage.stage5ExtremeRelax.index) floor = 0;
+
+    if (best != null && bestScore >= floor) {
       return best;
     }
 
@@ -1421,10 +1463,22 @@ class SpawnController {
       if (!gridManager.isValid(fwd.x, fwd.y)) break;
       
       final fwdCell = gridManager.grid[fwd.y][fwd.x];
+      
+      // [FIX] Anti-Overlap: Forward tiles must NOT be buildings or facing another entrance (Issue 2)
+      if (fwdCell.isHouse || fwdCell.isDestination) {
+        score -= 20; // Severe penalty for facing a building
+        break;
+      }
+      
+      if (gridManager.isLockedEntrance(fwd)) {
+        score -= 15; // Penalty for facing an entrance
+        break;
+      }
+
       if (fwdCell.isEmpty || fwdCell.isRoad) {
         score += 3; // Forward growth is high value
       } else {
-        break; // Blocked
+        break; // Blocked (mountain/water)
       }
 
       // Check immediate sideways tiles for junction potential
@@ -1445,13 +1499,13 @@ class SpawnController {
     final driveway = pos.getNeighbor(entrySide);
     
     // In extreme emergency, just ensure we have ONE tile out
-    if (stage == PlanningStage.stage5_ExtremeRelax) {
+    if (stage == PlanningStage.stage5ExtremeRelax) {
        return gridManager.isValid(driveway.x, driveway.y) && 
               (gridManager.grid[driveway.y][driveway.x].isEmpty || gridManager.grid[driveway.y][driveway.x].isRoad);
     }
 
     // 1. Forward Approach Space (Requirement: 2 tiles beyond driveway, relaxed to 1 in later stages)
-    int depth = (stage.index >= PlanningStage.stage4_StrongRelax.index) ? 1 : 2;
+    int depth = (stage.index >= PlanningStage.stage4StrongRelax.index) ? 1 : 2;
     for (int i = 1; i <= depth; i++) {
       final fwd = driveway.getNeighbor(entrySide, count: i);
       if (!gridManager.isValid(fwd.x, fwd.y)) return false;
@@ -1467,7 +1521,7 @@ class SpawnController {
     // 2. Side Clearance (Ensure not pinned in a 1-tile shaft)
     // Check tiles to the left and right of the driveway AND the first approach tile
     // Relaxed in Stage 4+
-    if (stage.index < PlanningStage.stage4_StrongRelax.index) {
+    if (stage.index < PlanningStage.stage4StrongRelax.index) {
       final sideDirs = [entrySide.rotateCCW(), entrySide.rotateCW()];
       for (final dir in sideDirs) {
         final side1 = driveway.getNeighbor(dir);
@@ -1485,7 +1539,7 @@ class SpawnController {
     
     // 3. Openness Check (Hard floor for destinations, relaxed in Stage 3+)
     int floor = BuildingProfile.commercial.minOpenness;
-    if (stage.index >= PlanningStage.stage3_MoreRelaxed.index) floor = 2;
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) floor = 2;
     
     int openness = calculateOpennessScore(pos, entrySide);
     if (openness < floor) return false;
@@ -1525,17 +1579,25 @@ class SpawnController {
   }
 
   // ============================================================
-  // DEMAND TRACKING — drives additional house spawning
+  // DEMAND TRACKING â€” drives additional house spawning
   // ============================================================
 
   void _updateDemandPressure() {
     for (int c = 0; c < activeColorCount; c++) {
       final dests = gridManager.getDestinationsForColor(c);
+      final houses = gridManager.getHousesForColor(c);
+      
       int totalUnmet = 0;
-      for (final dest in dests) {
-        final demand = gridManager.getDemand(dest);
-        final claimed = gridManager.getClaimedDemand(dest);
-        totalUnmet += max(0, demand - claimed);
+      
+      if (houses.isNotEmpty && dests.isEmpty) {
+        // [NEW] CRITICAL: Build pressure if color exists but has no sink!
+        totalUnmet = 10; // Forced pressure
+      } else {
+        for (final dest in dests) {
+          final demand = gridManager.getDemand(dest);
+          final claimed = gridManager.getClaimedDemand(dest);
+          totalUnmet += max(0, demand - claimed);
+        }
       }
 
       if (totalUnmet > 0) {
@@ -1553,7 +1615,6 @@ class SpawnController {
     if (_queue.isNotEmpty) return;
 
     // Track state of existing colors
-    bool allStable = true;
     int bestColor = -1;
     int bestPressure = 0;
     SpawnNodeType nodeToSpawn = SpawnNodeType.house;
@@ -1564,7 +1625,7 @@ class SpawnController {
       final timeSinceLastSpawn = _elapsedTime - (_lastSpawnTimeForColor[c] ?? -SpawnConfig.sameColorSpawnCooldown);
 
       if (houseCount < SpawnConfig.earlyHouseCap || pressure > 5) {
-        allStable = false; // Network is still growing or struggling
+        // Network is still growing or struggling
       }
 
       // Priority 1: Colors with only 1 house (incomplete cluster)
@@ -1572,7 +1633,7 @@ class SpawnController {
         bestColor = c;
         bestPressure = pressure;
         nodeToSpawn = SpawnNodeType.house;
-        break; // Highest priority — do this immediately
+        break; // Highest priority â€” do this immediately
       }
 
       // Non-linear threshold scaling for expansion (values in samples, e.g. 5 samples = 15s)
@@ -1608,20 +1669,6 @@ class SpawnController {
           'demand-driven (pressure=$bestPressure, houses=${getHouseCount(bestColor)})');
       return;
     }
-
-    // Priority 3: Introduce new color if network is stable AND elapsed time allows
-    if (allStable && activeColorCount < GameConstants.buildingColors.length) {
-      final delayRequired = activeColorCount < SpawnConfig.colorUnlockDelays.length 
-          ? SpawnConfig.colorUnlockDelays[activeColorCount] 
-          : SpawnConfig.colorUnlockDelays.last;
-          
-      if (_elapsedTime >= delayRequired) {
-        final newColor = activeColorCount;
-        activeColorCount++;
-        spawnInitialPair(newColor);
-        _log('NEW COLOR UNLOCKED: Color $newColor introduced at ${_elapsedTime.toStringAsFixed(1)}s (required ${delayRequired}s)');
-      }
-    }
   }
 
   // ============================================================
@@ -1637,3 +1684,4 @@ class SpawnController {
     // print(fullMessage);
   }
 }
+

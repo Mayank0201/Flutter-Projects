@@ -1,9 +1,12 @@
+import 'dart:math';
 import 'package:flow_grid/game/grid_manager.dart';
 import 'package:flow_grid/models/grid_cell.dart';
+import 'package:flow_grid/models/district_profile.dart';
 
 class DistrictTerritory {
   final int colorIndex;
   final bool isCommercial;
+  DistrictType districtType;
   GridPosition center;
   double radius;
   
@@ -12,15 +15,19 @@ class DistrictTerritory {
     required this.center,
     required this.radius,
     this.isCommercial = false,
+    this.districtType = DistrictType.residential,
   });
 
   void expand(double amount) {
     radius += amount;
   }
+
+  DistrictProfile get profile => DistrictProfile.fromType(districtType);
 }
 
 class DistrictPlanner {
   final GridManager gridManager;
+  final Random _random = Random();
 
   // Track territory for each active color
   final Map<int, DistrictTerritory> territories = {};
@@ -31,12 +38,14 @@ class DistrictPlanner {
   DistrictPlanner({required this.gridManager});
 
   /// [NEW] Registers a new district and its starting anchor.
-  void registerDistrict(int colorIndex, GridPosition anchor, {required bool isCommercial}) {
+  void registerDistrict(int colorIndex, GridPosition anchor, {required bool isCommercial, DistrictType? type}) {
+    final districtType = type ?? _assignDistrictType(colorIndex);
     territories[colorIndex] = DistrictTerritory(
       colorIndex: colorIndex,
       center: anchor,
       isCommercial: isCommercial,
       radius: isCommercial ? 15.0 : 6.0, 
+      districtType: districtType,
     );
   }
 
@@ -114,5 +123,66 @@ class DistrictPlanner {
       ((territory.center.x * (1.0 - driftFactor)) + (pos.x * driftFactor)).round(),
       ((territory.center.y * (1.0 - driftFactor)) + (pos.y * driftFactor)).round(),
     );
+  }
+
+  /// Look up the district profile for a given color index.
+  DistrictProfile getProfileFor(int colorIndex) {
+    return territories[colorIndex]?.profile ?? DistrictProfile.residential;
+  }
+
+  /// Get the district type for a given color.
+  DistrictType getDistrictType(int colorIndex) {
+    return territories[colorIndex]?.districtType ?? DistrictType.residential;
+  }
+
+  /// [NEW] Assigns a district type based on current distribution.
+  /// Week 1-2 colors are always residential. After that, we pick the
+  /// least-represented type to keep the city diverse.
+  DistrictType _assignDistrictType(int colorIndex) {
+    // First two colors are always residential (gentle onboarding)
+    if (colorIndex <= 1) return DistrictType.residential;
+
+    // Count existing types
+    final counts = <DistrictType, int>{};
+    for (final type in DistrictType.values) {
+      counts[type] = 0;
+    }
+    for (final territory in territories.values) {
+      counts[territory.districtType] = (counts[territory.districtType] ?? 0) + 1;
+    }
+
+    // Find least-represented type(s) and pick one randomly
+    final minCount = counts.values.reduce(min);
+    final underrepresented = counts.entries
+        .where((e) => e.value == minCount)
+        .map((e) => e.key)
+        .toList();
+    
+    return underrepresented[_random.nextInt(underrepresented.length)];
+  }
+
+  /// Serialize district type assignments for save/load.
+  Map<String, dynamic> toJson() {
+    final types = <String, int>{};
+    for (final entry in territories.entries) {
+      types[entry.key.toString()] = entry.value.districtType.index;
+    }
+    return {'districtTypes': types};
+  }
+
+  /// Restore district type assignments from save data.
+  void loadFromJson(Map<String, dynamic> data) {
+    final types = data['districtTypes'] as Map<String, dynamic>?;
+    if (types == null) return;
+    
+    for (final entry in types.entries) {
+      final colorIndex = int.tryParse(entry.key);
+      if (colorIndex != null && territories.containsKey(colorIndex)) {
+        final typeIndex = entry.value as int;
+        if (typeIndex >= 0 && typeIndex < DistrictType.values.length) {
+          territories[colorIndex]!.districtType = DistrictType.values[typeIndex];
+        }
+      }
+    }
   }
 }

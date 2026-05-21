@@ -2,21 +2,21 @@ import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flame/components.dart';
 import 'package:flame/extensions.dart';
-import 'package:flutter/material.dart';
 import '../../models/game_constants.dart';
 import '../../models/grid_cell.dart';
 import '../../game/flow_grid_game.dart';
+import '../pathfinder.dart';
 
 class CarComponent extends PositionComponent with HasGameReference<FlowGridGame> {
-  final int colorIndex;
+  int colorIndex;
   List<GridPosition> path;
-  final double cellSize;
-  final double offsetX;
-  final double offsetY;
-  final double speed;
-  final GridPosition spawnHousePos;
-  final GridPosition targetDest;
-  final VehicleType vehicleType;
+  double cellSize;
+  double offsetX;
+  double offsetY;
+  double speed;
+  GridPosition spawnHousePos;
+  GridPosition targetDest;
+  VehicleType vehicleType;
 
   int _currentPathIndex = 0;
   double _distanceTraveled = 0.0;
@@ -29,14 +29,25 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   bool isWaiting = false;
   double _waitTimer = 0.0;
   bool onExpressLane = false;
-  double travelTime = 0.0; // Delivery efficiency tracking
+  double travelTime = 0.0;
   bool _waitingAtSignal = false;
   static const double maxWaitTime = 1.5;
+  String? routeId;
 
-  // Follow-the-leader constants
-
+  // Follow-the-leader
   double _collisionCheckTimer = 0;
-  double _lastSpeedMultiplier = 1.0;
+  double _lastTargetMultiplier = 1.0;
+  double _currentSpeedMultiplier = 1.0;
+  
+  // Simulation throttling
+  double _simCheckTimer = 0;
+  double _congestionMultiplier = 1.0;
+  double _terrainSpeed = 1.0;
+  
+  // Acceleration
+  static const double accelerationRate = 1.5;
+  static const double decelerationRate = 2.8;
+  static const double startupAccelerationBonus = 1.3;
 
   CarComponent({
     required this.colorIndex,
@@ -48,12 +59,30 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     this.offsetY = 0,
     this.speed = GameConstants.carSpeed,
     this.vehicleType = VehicleType.car,
+    this.routeId,
     int? initialPathIndex,
     double? initialProgress,
     bool? initialReturning,
   }) {
+    _init(
+      initialPathIndex: initialPathIndex,
+      initialProgress: initialProgress,
+      initialReturning: initialReturning,
+    );
+  }
+
+  void _init({int? initialPathIndex, double? initialProgress, bool? initialReturning}) {
     _currentPathIndex = initialPathIndex ?? 0;
     isReturning = initialReturning ?? false;
+    arrived = false;
+    isWaiting = false;
+    _waitTimer = 0.0;
+    onExpressLane = false;
+    travelTime = 0.0;
+    _waitingAtSignal = false;
+    _distanceTraveled = 0.0;
+    _currentSpeedMultiplier = 1.0;
+    _lastTargetMultiplier = 1.0;
 
     _rebuildSmoothPath();
 
@@ -68,7 +97,13 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       );
     }
     
-    final baseSize = cellSize * 0.22;
+    anchor = Anchor.center;
+    priority = 10;
+    _updateVehicleSize();
+  }
+
+  void _updateVehicleSize() {
+    final baseSize = cellSize * 0.55;
     switch (vehicleType) {
       case VehicleType.car:
         size = Vector2(baseSize, baseSize);
@@ -76,9 +111,65 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
         size = Vector2(baseSize * 1.3, baseSize * 1.1);
       case VehicleType.serviceVan:
         size = Vector2(baseSize * 1.1, baseSize * 0.95);
+      case VehicleType.bus:
+        size = Vector2(baseSize * 1.5, baseSize * 1.2);
+      case VehicleType.emergency:
+        size = Vector2(baseSize * 1.2, baseSize);
     }
-    anchor = Anchor.center;
+  }
+
+  void reuseState({
+    required List<GridPosition> path,
+    required int colorIndex,
+    required GridPosition spawnHousePos,
+    required GridPosition targetDest,
+    required VehicleType vehicleType,
+    String? routeId,
+  }) {
+    this.path = path;
+    this.colorIndex = colorIndex;
+    this.spawnHousePos = spawnHousePos;
+    this.targetDest = targetDest;
+    this.vehicleType = vehicleType;
+    this.routeId = routeId;
+    
+    _currentPathIndex = 0;
+    _distanceTraveled = 0;
+    travelTime = 0;
+    _waitTimer = 0;
+    arrived = false;
+    isWaiting = false;
+    isReturning = false;
+    onExpressLane = false;
+    _waitingAtSignal = false;
+    _currentSpeedMultiplier = 0.0;
+    _lastTargetMultiplier = 1.0;
+    
     priority = 10;
+    _rebuildSmoothPath();
+
+    // Snap to the new path's starting cell so a reused-from-pool car doesn't
+    // render at its previous trip's endpoint before the first update tick.
+    if (path.isNotEmpty && _totalLength > 0) {
+      final tangent = _metric?.getTangentForOffset(0);
+      if (tangent != null) {
+        final fwd = tangent.vector;
+        final lane = cellSize * 0.14;
+        position = Vector2(
+          tangent.position.dx - fwd.dy * lane,
+          tangent.position.dy + fwd.dx * lane,
+        );
+        angle = -tangent.angle;
+      }
+    } else if (path.isNotEmpty) {
+      final startPos = path[0];
+      position = Vector2(
+        offsetX + startPos.x * cellSize + cellSize / 2,
+        offsetY + startPos.y * cellSize + cellSize / 2,
+      );
+    }
+
+    _updateVehicleSize();
   }
 
   double get _vehicleSpeedMultiplier {
@@ -86,6 +177,8 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       case VehicleType.car: return 1.0;
       case VehicleType.truck: return GameConstants.truckSpeedMultiplier;
       case VehicleType.serviceVan: return GameConstants.serviceVanSpeedMultiplier;
+      case VehicleType.bus: return 0.7;
+      case VehicleType.emergency: return 1.8;
     }
   }
 
@@ -99,9 +192,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     Offset getPos(GridPosition p) {
       final midX = offsetX + p.x * cellSize + cellSize / 2;
       final midY = offsetY + p.y * cellSize + cellSize / 2;
-      
       if (p.side == null) return Offset(midX, midY);
-      
       final r = cellSize * 0.4;
       switch (p.side!) {
         case Direction.north: return Offset(midX, midY - r);
@@ -117,15 +208,12 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     for (int i = 0; i < path.length - 1; i++) {
       final p1 = path[i];
       final p2 = path[i + 1];
-
       final c1 = getPos(p1);
       final c2 = getPos(p2);
 
-      // Check for Express Lane jump (non-adjacent tiles)
       final dx = (p1.x - p2.x).abs();
       final dy = (p1.y - p2.y).abs();
       if (dx > 1 || dy > 1) {
-        // Curved express lane logic (matches ExpressLaneComponent)
         final delta = c2 - c1;
         final dist = delta.distance;
         final mid = (c1 + c2) / 2;
@@ -140,20 +228,19 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       if (i < path.length - 2) {
         final p3 = path[i + 2];
         final c3 = getPos(p3);
-
         bool isStraight = (p1.x == p2.x && p2.x == p3.x && p1.side == null && p2.side == null && p3.side == null) ||
             (p1.y == p2.y && p2.y == p3.y && p1.side == null && p2.side == null && p3.side == null);
-
         if (!isStraight) {
+          // Endpoints at 0.5 land on the cell edges, matching the road
+          // renderer's quadratic-bezier endpoints exactly. Anything less and
+          // the car visibly cuts inside the painted curve at every corner.
           final cornerStart = c2 + (c1 - c2) * 0.5;
           _smoothPath.lineTo(cornerStart.dx, cornerStart.dy);
-
           final cornerEnd = c2 + (c3 - c2) * 0.5;
           _smoothPath.quadraticBezierTo(c2.dx, c2.dy, cornerEnd.dx, cornerEnd.dy);
           continue;
         }
       }
-
       _smoothPath.lineTo(c2.dx, c2.dy);
     }
 
@@ -168,23 +255,27 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
 
   void _updatePosition(double dt) {
     if (_totalLength <= 0) return;
-
     _distanceTraveled += dt * speed * game.timeScale;
     if (_distanceTraveled >= _totalLength) {
       _distanceTraveled = _totalLength;
     }
-
     final tangent = _metric!.getTangentForOffset(_distanceTraveled);
     if (tangent != null) {
-      position = Vector2(tangent.position.dx, tangent.position.dy);
+      // Drive on the right side of the road centerline. Right-perpendicular
+      // in screen coords (y-down) of forward (fx, fy) is (-fy, fx). Two cars
+      // going opposite directions land on opposite sides — no more overlap.
+      final fwd = tangent.vector;
+      final lane = cellSize * 0.14;
+      position = Vector2(
+        tangent.position.dx - fwd.dy * lane,
+        tangent.position.dy + fwd.dx * lane,
+      );
       angle = -tangent.angle;
     }
   }
 
   GridPosition? get currentTarget {
-    if (_currentPathIndex + 1 < path.length) {
-      return path[_currentPathIndex + 1];
-    }
+    if (_currentPathIndex + 1 < path.length) return path[_currentPathIndex + 1];
     return null;
   }
 
@@ -204,11 +295,42 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     _rebuildSmoothPath();
   }
 
+  void _onArrivedAtDestination() {
+    final gm = game.gridManager;
+    if (gm == null) {
+      arrived = true;
+      return;
+    }
+
+    // Credit the delivery once per outbound trip.
+    if (gm.isValid(targetDest.x, targetDest.y) &&
+        gm.getCell(targetDest.x, targetDest.y).isDestination) {
+      game.score += 100;
+      game.totalDeliveries += 1;
+    }
+
+    // Pathfind home from current path endpoint to the home driveway.
+    final returnStart = path.last;
+    final homeDriveway = gm.buildingDriveways['${spawnHousePos.x},${spawnHousePos.y}'];
+    if (homeDriveway == null) {
+      arrived = true;
+      return;
+    }
+
+    final returnPath = Pathfinder.findPath(gm, returnStart, homeDriveway);
+    if (returnPath != null && returnPath.length >= 2) {
+      startReturnTrip(returnPath);
+    } else {
+      // No way home (network broken). Vanish gracefully.
+      arrived = true;
+    }
+  }
+
   Map<String, dynamic> toJson() => {
     'colorIndex': colorIndex,
     'path': path.map((p) => {'x': p.x, 'y': p.y}).toList(),
     'currentPathIndex': _currentPathIndex,
-    'distanceTraveled': _distanceTraveled,
+    'progress': _totalLength > 0 ? _distanceTraveled / _totalLength : 0.0,
     'isReturning': isReturning,
     'spawnHousePos': {'x': spawnHousePos.x, 'y': spawnHousePos.y},
     'targetDest': {'x': targetDest.x, 'y': targetDest.y},
@@ -218,27 +340,52 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   @override
   void update(double dt) {
     super.update(dt);
-    if (game.paused) { return; }
+    if (game.paused) return;
 
     if (arrived || path.length < 2) {
       arrived = true;
       return;
     }
 
-    // Track delivery time
     travelTime += dt * game.timeScale;
+
+    // Bus stop logic
+    if (vehicleType == VehicleType.bus && !isWaiting && !arrived) {
+      final currentCellPos = _getCurrentGridPos();
+      final cell = game.gridManager!.getCell(currentCellPos.x, currentCellPos.y);
+      if (cell.isBusStop) {
+        isWaiting = true;
+        _waitTimer = 0;
+      }
+    }
 
     if (isWaiting) {
       _waitTimer += dt * game.timeScale;
-      if (_waitTimer >= maxWaitTime) {
+      double waitLimit;
+      if (vehicleType == VehicleType.bus) {
+        waitLimit = 1.5;
+      } else if (isReturning) {
+        waitLimit = 0.5;
+      } else {
+        waitLimit = maxWaitTime;
+      }
+      if (_waitTimer >= waitLimit) {
         isWaiting = false;
-        arrived = true;
+        // Bus: keep cruising along its route. Returning: this was the home stop, done.
+        // Outbound non-bus: deliver, then try to head back home before disappearing.
+        if (vehicleType != VehicleType.bus) {
+          if (isReturning) {
+            arrived = true;
+          } else {
+            _onArrivedAtDestination();
+          }
+        }
       }
       return;
     }
 
     if (_distanceTraveled >= _totalLength) {
-      if (!isReturning && !isWaiting) {
+      if (!isWaiting) {
         isWaiting = true;
         _waitTimer = 0;
         return;
@@ -247,14 +394,16 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       return;
     }
 
-    // --- Traffic Signal Check ---
-    _waitingAtSignal = false;
-    if (_currentPathIndex + 1 < path.length && game.gridManager != null) {
-      final nextPos = path[_currentPathIndex + 1];
-      if (game.gridManager!.isValid(nextPos.x, nextPos.y)) {
-        final nextCell = game.gridManager!.grid[nextPos.y][nextPos.x];
+    // --- Throttled Signal & Congestion Checks (15Hz) ---
+    _simCheckTimer += dt;
+    if (_simCheckTimer >= 1 / 15) {
+      _simCheckTimer = 0;
+      
+      _waitingAtSignal = false;
+      if (_currentPathIndex + 1 < path.length && game.gridManager != null) {
+        final nextPos = path[_currentPathIndex + 1];
+        final nextCell = game.gridManager!.getCell(nextPos.x, nextPos.y);
         if (nextCell.hasTrafficLight && nextPos.side == null) {
-          // Determine travel direction
           final curPos = path[_currentPathIndex];
           Direction? moveDir;
           if (nextPos.x > curPos.x) {
@@ -268,202 +417,144 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
           }
           
           if (moveDir != null && !game.gridManager!.isGreenForDirection(nextPos.x, nextPos.y, moveDir)) {
-            // RED signal — only stop if we're close to the signal tile
             final signalWorldX = offsetX + nextPos.x * cellSize + cellSize / 2;
             final signalWorldY = offsetY + nextPos.y * cellSize + cellSize / 2;
-            final distToSignal = position.distanceTo(Vector2(signalWorldX, signalWorldY));
-            if (distToSignal < cellSize * 0.8) {
+            if (position.distanceToSquared(Vector2(signalWorldX, signalWorldY)) < cellSize * cellSize) {
               _waitingAtSignal = true;
             }
           }
         }
       }
-    }
 
-    // --- Determine if on express lane ---
-    onExpressLane = false;
-    double terrainSpeed = 1.0;
-    if (_currentPathIndex < path.length && game.gridManager != null) {
-      final curPos = path[_currentPathIndex];
-      if (game.gridManager!.isValid(curPos.x, curPos.y)) {
-        final curCell = game.gridManager!.grid[curPos.y][curPos.x];
-        terrainSpeed = curCell.speedMultiplier;
-        onExpressLane = curCell.isExpressLaneNode || terrainSpeed >= GameConstants.expressLaneSpeed;
+      _congestionMultiplier = 1.0;
+      if (game.gridManager != null && _currentPathIndex < path.length) {
+        final curPos = path[_currentPathIndex];
+        if (game.gridManager!.isRoadCongested(curPos.x, curPos.y)) {
+          _congestionMultiplier = 0.5;
+        }
+      }
+      
+      onExpressLane = false;
+      _terrainSpeed = 1.0;
+      if (_currentPathIndex < path.length && game.gridManager != null) {
+        final curPos = path[_currentPathIndex];
+        final curCell = game.gridManager!.getCell(curPos.x, curPos.y);
+        _terrainSpeed = curCell.speedMultiplier;
+        onExpressLane = curCell.isExpressLaneNode || _terrainSpeed >= GameConstants.expressLaneSpeed;
       }
     }
 
-    // Dynamic rendering priority
-    priority = onExpressLane ? 20 : 10;
-
-    // --- Congestion slowdown ---
-    double congestionMultiplier = 1.0;
-    if (game.gridManager != null && _currentPathIndex < path.length) {
-      final curPos = path[_currentPathIndex];
-      if (game.gridManager!.isValid(curPos.x, curPos.y) && game.gridManager!.isRoadCongested(curPos.x, curPos.y)) {
-        congestionMultiplier = 0.5;
-      }
-    }
-
-    // --- Follow-the-leader speed modulation ---
-    double speedMultiplier = 1.0;
+    // --- Follow-the-leader ---
+    double targetMultiplier = 1.0;
     _collisionCheckTimer += dt;
-    if (_collisionCheckTimer >= 0.033) { // 30 FPS collision check rate
+    if (_collisionCheckTimer >= 0.1) {
       _collisionCheckTimer = 0;
       if (!onExpressLane && !_waitingAtSignal) {
         final myPos = position;
         final forward = Vector2(cos(angle), sin(angle));
-        final minGap = cellSize * 0.6; // Rule: MIN_GAP = 0.6 * tileSize
+        final minGap = cellSize * 0.7;
         double closestAheadDist = double.infinity;
-
         final myGridPos = path[_currentPathIndex.clamp(0, path.length - 1)];
         final gWidth = game.gridWidth;
 
-        // Check neighboring grid cells for other cars
         for (int dy = -1; dy <= 1; dy++) {
           for (int dx = -1; dx <= 1; dx++) {
             final key = (myGridPos.x + dx) + (myGridPos.y + dy) * gWidth;
             final others = game.carGrid[key];
             if (others == null) continue;
-
             for (final other in others) {
               if (identical(other, this) || other.onExpressLane || other.arrived) continue;
-
               final distSq = myPos.distanceToSquared(other.position);
-              if (distSq > (cellSize * 1.5) * (cellSize * 1.5)) continue; 
-              
+              if (distSq > (cellSize * 1.8) * (cellSize * 1.8)) continue;
               final toOther = other.position - myPos;
               final dotProduct = toOther.x * forward.x + toOther.y * forward.y;
-              if (dotProduct <= 0) continue; // Only care about cars ahead
-
+              if (dotProduct <= 0) continue;
               final dist = sqrt(distSq);
-              if (dist < closestAheadDist) {
-                closestAheadDist = dist;
-              }
+              if (dist < closestAheadDist) closestAheadDist = dist;
             }
           }
         }
 
         if (closestAheadDist < minGap) {
-          // Rule: speed = baseSpeed * (distance / MIN_GAP)
-          _lastSpeedMultiplier = (closestAheadDist / minGap).clamp(0.0, 1.0);
+          targetMultiplier = (closestAheadDist / minGap).clamp(0.0, 1.0);
         } else {
-          _lastSpeedMultiplier = 1.0;
+          targetMultiplier = 1.0;
+        }
+      }
+      _lastTargetMultiplier = targetMultiplier;
+    }
+
+    if (_waitingAtSignal) {
+      targetMultiplier = 0.0;
+    } else {
+      targetMultiplier = _lastTargetMultiplier;
+      if (_currentPathIndex + 1 < path.length) {
+        final nextPos = path[_currentPathIndex + 1];
+        if (game.gridManager!.isValid(nextPos.x, nextPos.y) && 
+            game.gridManager!.isRoadCongested(nextPos.x, nextPos.y)) {
+           targetMultiplier = min(targetMultiplier, 0.15);
         }
       }
     }
-    speedMultiplier = _lastSpeedMultiplier;
 
-    if (_waitingAtSignal) {
-      speedMultiplier = 0.0; // Full stop at red signal
+    // --- Acceleration/Deceleration ---
+    final baseTarget = targetMultiplier * _vehicleSpeedMultiplier * _terrainSpeed * _congestionMultiplier;
+    if (_currentSpeedMultiplier < baseTarget) {
+      double rate = accelerationRate;
+      if (_currentSpeedMultiplier < 0.1) rate *= startupAccelerationBonus;
+      _currentSpeedMultiplier = min(baseTarget, _currentSpeedMultiplier + rate * dt);
+    } else if (_currentSpeedMultiplier > baseTarget) {
+      _currentSpeedMultiplier = max(baseTarget, _currentSpeedMultiplier - decelerationRate * dt);
     }
 
-    final effectiveMultiplier = speedMultiplier * _vehicleSpeedMultiplier * terrainSpeed * congestionMultiplier;
-    
-    // RULE: Creep Speed - ensure cars never stay at exactly 0 speed unless at a red light
-    double finalMultiplier = effectiveMultiplier;
+    double finalMultiplier = _currentSpeedMultiplier;
     if (!_waitingAtSignal && !arrived && !isWaiting) {
-      finalMultiplier = max(0.02, effectiveMultiplier);
+      finalMultiplier = max(0.08, _currentSpeedMultiplier);
     }
 
     _updatePosition(dt * finalMultiplier);
-    
-    // Update current path index
+
     if (_totalLength > 0) {
       _currentPathIndex = ((_distanceTraveled / _totalLength) * (path.length - 1)).floor().clamp(0, path.length - 1);
     }
-    
-    // Position update based on smooth path
-    final tangentObj = _metric?.getTangentForOffset(_distanceTraveled);
-    if (tangentObj != null) {
-      position = Vector2(tangentObj.position.dx, tangentObj.position.dy);
-    }
   }
+
+  GridPosition _getCurrentGridPos() {
+    final x = ((position.x - offsetX) / cellSize).floor();
+    final y = ((position.y - offsetY) / cellSize).floor();
+    return GridPosition(
+      x.clamp(0, game.gridManager?.cols ?? 1 - 1), 
+      y.clamp(0, game.gridManager?.rows ?? 1 - 1)
+    );
+  }
+
+  // ============================================================
+  // RENDERING — single sprite from the shared 1x6 vehicle atlas.
+  // One drawImageRect call per car; all 6 colors share one GPU texture.
+  // ============================================================
 
   @override
   void render(Canvas canvas) {
-    final color = GameConstants.buildingColors[colorIndex];
-    final darkColor = GameConstants.getBuildingDarkColor(colorIndex);
-    final carSize = size.x;
+    final sprites = game.vehicleSprites;
+    if (sprites.isEmpty) return;
+    final sprite = sprites[colorIndex % sprites.length];
 
-    switch (vehicleType) {
-      case VehicleType.car:
-        _renderCar(canvas, color, darkColor, carSize);
-      case VehicleType.truck:
-        _renderTruck(canvas, color, darkColor, carSize);
-      case VehicleType.serviceVan:
-        _renderVan(canvas, color, darkColor, carSize);
-    }
-  }
+    // Flame's render() canvas has (0,0) at the component's top-left, not at
+    // the anchor — so we have to translate to size/2 to land on the world
+    // `position` (= the road centerline) before rotating + drawing.
+    canvas.save();
+    canvas.translate(size.x / 2, size.y / 2);
+    canvas.rotate(pi / 2);
 
-  void _renderCar(Canvas canvas, Color color, Color darkColor, double carSize) {
-    final bodyBase = Color.lerp(color, const Color(0xFFD0D3DA), 0.4)!;
-    final bodyRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset.zero, width: carSize, height: carSize * 0.7),
-      Radius.circular(carSize * 0.2),
+    // Source art faces "up" (north); after the pi/2 rotation that maps to +x
+    // (east), which is the component's forward direction.
+    final length = size.x;
+    final width = length / game.vehicleSpriteAspect;
+    sprite.render(
+      canvas,
+      position: Vector2(-width / 2, -length / 2),
+      size: Vector2(width, length),
     );
-
-    canvas.drawRRect(bodyRect.shift(const Offset(1, 2)), Paint()..color = Colors.black.withValues(alpha: 0.25));
-    canvas.drawRRect(bodyRect, Paint()..color = bodyBase);
-    canvas.drawRRect(bodyRect, Paint()..color = darkColor..style = PaintingStyle.stroke..strokeWidth = 1.5);
-
-    final windshieldRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset(carSize * 0.15, 0), width: carSize * 0.35, height: carSize * 0.5),
-      Radius.circular(carSize * 0.08),
-    );
-    canvas.drawRRect(windshieldRect, Paint()..color = GameConstants.carWindowColor);
-
-    final lightPaint = Paint()..color = Colors.white.withValues(alpha: 0.7);
-    canvas.drawCircle(Offset(carSize * 0.4, -carSize * 0.2), 1.5, lightPaint);
-    canvas.drawCircle(Offset(carSize * 0.4, carSize * 0.2), 1.5, lightPaint);
-  }
-
-  void _renderTruck(Canvas canvas, Color color, Color darkColor, double carSize) {
-    final bodyBase = Color.lerp(color, const Color(0xFF8A8D95), 0.5)!;
-    final bodyRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset.zero, width: carSize * 1.1, height: carSize * 0.8),
-      Radius.circular(carSize * 0.15),
-    );
-    canvas.drawRRect(bodyRect.shift(const Offset(1, 2)), Paint()..color = Colors.black.withValues(alpha: 0.3));
-    canvas.drawRRect(bodyRect, Paint()..color = bodyBase);
-    canvas.drawRRect(bodyRect, Paint()..color = darkColor..style = PaintingStyle.stroke..strokeWidth = 2.0);
-
-    // Cargo area
-    final cargoRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset(-carSize * 0.15, 0), width: carSize * 0.5, height: carSize * 0.65),
-      Radius.circular(carSize * 0.05),
-    );
-    canvas.drawRRect(cargoRect, Paint()..color = darkColor.withValues(alpha: 0.6));
-
-    final lightPaint = Paint()..color = Colors.amber.withValues(alpha: 0.8);
-    canvas.drawCircle(Offset(carSize * 0.5, -carSize * 0.25), 2.0, lightPaint);
-    canvas.drawCircle(Offset(carSize * 0.5, carSize * 0.25), 2.0, lightPaint);
-  }
-
-  void _renderVan(Canvas canvas, Color color, Color darkColor, double carSize) {
-    final bodyBase = Color.lerp(color, const Color(0xFFE8E8E8), 0.3)!;
-    final bodyRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset.zero, width: carSize, height: carSize * 0.75),
-      Radius.circular(carSize * 0.18),
-    );
-    canvas.drawRRect(bodyRect.shift(const Offset(1, 2)), Paint()..color = Colors.black.withValues(alpha: 0.25));
-    canvas.drawRRect(bodyRect, Paint()..color = bodyBase);
-    
-    // Color stripe accent
-    canvas.drawRect(
-      Rect.fromCenter(center: Offset.zero, width: carSize * 0.9, height: carSize * 0.12),
-      Paint()..color = color,
-    );
-
-    canvas.drawRRect(bodyRect, Paint()..color = darkColor..style = PaintingStyle.stroke..strokeWidth = 1.5);
-
-    final windshieldRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset(carSize * 0.2, 0), width: carSize * 0.3, height: carSize * 0.55),
-      Radius.circular(carSize * 0.06),
-    );
-    canvas.drawRRect(windshieldRect, Paint()..color = GameConstants.carWindowColor);
-
-    final lightPaint = Paint()..color = Colors.white.withValues(alpha: 0.7);
-    canvas.drawCircle(Offset(carSize * 0.4, -carSize * 0.2), 1.5, lightPaint);
-    canvas.drawCircle(Offset(carSize * 0.4, carSize * 0.2), 1.5, lightPaint);
+    canvas.restore();
   }
 }

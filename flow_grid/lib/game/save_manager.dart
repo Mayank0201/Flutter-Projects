@@ -3,8 +3,49 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'grid_manager.dart';
 import 'components/car_component.dart';
 
+class SaveMetadata {
+  final int slotIndex;
+  final int mapType;
+  final int week;
+  final int score;
+  final int totalDeliveries;
+  final int saveTime;
+  final double elapsedTime;
+
+  SaveMetadata({
+    required this.slotIndex,
+    required this.mapType,
+    required this.week,
+    required this.score,
+    required this.totalDeliveries,
+    required this.saveTime,
+    required this.elapsedTime,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'slotIndex': slotIndex,
+    'mapType': mapType,
+    'week': week,
+    'score': score,
+    'totalDeliveries': totalDeliveries,
+    'saveTime': saveTime,
+    'elapsedTime': elapsedTime,
+  };
+
+  factory SaveMetadata.fromJson(Map<String, dynamic> json) => SaveMetadata(
+    slotIndex: json['slotIndex'],
+    mapType: json['mapType'],
+    week: json['week'],
+    score: json['score'],
+    totalDeliveries: json['totalDeliveries'],
+    saveTime: json['saveTime'],
+    elapsedTime: (json['elapsedTime'] as num).toDouble(),
+  );
+}
+
 class SaveManager {
-  static const String _saveKey = 'flow_grid_save';
+  static const String _savePrefix = 'flow_grid_save_slot_';
+  static const int maxSlots = 3;
 
   static Future<void> saveGame(
     GridManager gridManager,
@@ -18,6 +59,11 @@ class SaveManager {
     required double elapsedTime,
     required Map<String, int> houseCarCounts,
     required List<CarComponent> cars,
+    required double cameraZoom,
+    required double cameraPosX,
+    required double cameraPosY,
+    int slotIndex = 0,
+    Map<String, dynamic> districtTypes = const {},
   }) async {
     final prefs = await SharedPreferences.getInstance();
     
@@ -33,6 +79,12 @@ class SaveManager {
           'isPendingDeletion': cell.isPendingDeletion,
           'isTunnelExtension': cell.isTunnelExtension,
           'hasTrafficLight': cell.hasTrafficLight,
+          'speedMultiplier': cell.speedMultiplier,
+          'entrySide': cell.entrySide?.index,
+          'isInfrastructureInternal': cell.isInfrastructureInternal,
+          'isConnectableEndpoint': cell.isConnectableEndpoint,
+          'infrastructureAxis': cell.infrastructureAxis?.index,
+          'owner': cell.owner.index,
         });
       }
       gridData.add(row);
@@ -72,6 +124,8 @@ class SaveManager {
         .map((c) => c.toJson())
         .toList();
 
+    final now = DateTime.now().millisecondsSinceEpoch;
+
     final data = {
       'gridCols': gridManager.cols,
       'gridRows': gridManager.rows,
@@ -94,37 +148,72 @@ class SaveManager {
       'destinationAges': destinationAgeData,
       'houseCarTimers': houseCarTimerData,
       'cars': carsData,
+      'cameraZoom': cameraZoom,
+      'cameraPosX': cameraPosX,
+      'cameraPosY': cameraPosY,
       'inventory': {
         'roads': gridManager.roads,
         'tunnels': gridManager.tunnels,
+        'bridges': gridManager.bridges,
         'trafficLights': gridManager.trafficLights,
         'smartJunctions': gridManager.smartJunctions,
         'expressLanes': gridManager.expressLanes,
       },
+      'mapType': gridManager.selectedMapType.index,
+      'saveTime': now,
+      'activeEdges': gridManager.activeEdges.toList(),
+      'districtTypes': districtTypes,
     };
 
-    await prefs.setString(_saveKey, jsonEncode(data));
+    await prefs.setString('$_savePrefix$slotIndex', jsonEncode(data));
   }
 
-  static Future<Map<String, dynamic>?> loadGame() async {
+  static Future<Map<String, dynamic>?> loadGame({int slotIndex = 0}) async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString(_saveKey);
+    final jsonStr = prefs.getString('$_savePrefix$slotIndex');
     if (jsonStr == null) return null;
 
     try {
-      return jsonDecode(jsonStr) as Map<String, dynamic>;
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      
+      // Basic schema validation
+      if (data['grid'] == null || data['gridCols'] == null || data['gridRows'] == null) {
+        return null;
+      }
+      
+      return data;
     } catch (e) {
       return null;
     }
   }
 
-  static Future<bool> hasSaveGame() async {
+  static Future<bool> hasSaveGame({int slotIndex = 0}) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.containsKey(_saveKey);
+    return prefs.containsKey('$_savePrefix$slotIndex');
   }
 
-  static Future<void> clearSave() async {
+  static Future<int> getNextAvailableSlot() async {
+    for (int i = 0; i < maxSlots; i++) {
+      if (!await hasSaveGame(slotIndex: i)) return i;
+    }
+    return 0; // Overwrite first if full (or handle differently)
+  }
+
+  static Future<Map<String, dynamic>?> getSaveMetadata(int slotIndex) async {
+    final save = await loadGame(slotIndex: slotIndex);
+    if (save == null) return null;
+    return {
+      'week': save['week'],
+      'score': save['score'],
+      'mapType': save['mapType'],
+      'saveTime': save['saveTime'],
+      'elapsedTime': save['elapsedTime'],
+      'deliveries': save['totalDeliveries'],
+    };
+  }
+
+  static Future<void> clearSave({int slotIndex = 0}) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_saveKey);
+    await prefs.remove('$_savePrefix$slotIndex');
   }
 }

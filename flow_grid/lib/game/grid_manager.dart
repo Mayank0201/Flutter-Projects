@@ -1,5 +1,9 @@
+import 'dart:math';
+import 'package:flutter/foundation.dart';
 import '../models/grid_cell.dart';
 import '../models/game_constants.dart';
+import 'map_generator.dart';
+import 'components/car_component.dart';
 
 class HouseCluster {
   final GridPosition center;
@@ -27,6 +31,9 @@ class MountainCluster {
 class GridManager {
   final int cols;
   final int rows;
+  
+  /// Callback when roads/tunnels/bridges are placed or removed, triggering path cache invalidation.
+  VoidCallback? onTopologyChanged;
 
   String _key(GridPosition pos) => "${pos.x},${pos.y}";
 
@@ -40,10 +47,16 @@ class GridManager {
   final Map<String, double> overflowLevels =
       {}; // Tracks game over countdown for max demand destinations
   final Map<String, int> destinationAges = {};
-  final Map<String, double> highDemandTimers = {}; // Tracks time spent at 6+ dots
-  final Map<String, bool> spawnedBonusHouse = {}; // Tracks if this dest hub already gave a bonus house
+  final Map<String, String> districtNames = {}; // [NEW] District Naming
+  final Set<String> upgradedRoads = {}; // [NEW] Manually upgraded roads (Avenue/Highway)
   final Map<String, double> houseCarTimers = {};
+  final Map<String, double> highDemandTimers = {};
+  final Map<String, bool> spawnedBonusHouse = {};
   final Set<GridPosition> infrastructure = {};
+  
+  // Satisfaction System
+  final Map<String, double> sectorSatisfaction = {}; // sectorId -> avg satisfaction
+  double regionalSatisfaction = 1.0;
 
   /// Combined list of all buildings (houses + destinations)
   List<GridPosition> get buildings => [...houses, ...destinations];
@@ -56,6 +69,7 @@ class GridManager {
 
   // Road capacity tracking (runtime)
   final Map<String, int> roadLoad = {};
+  int getRoadLoad(int x, int y) => roadLoad["$x,$y"] ?? 0;
 
   // Traffic signal state
   final Map<String, int> signalPhases = {}; // 0=NS green, 1=EW green
@@ -67,6 +81,9 @@ class GridManager {
   final List<GridPosition> regionA = [];
   final List<GridPosition> regionB = [];
 
+  // [NEW] Map Type
+  MapType selectedMapType = MapType.zen;
+
   // [NEW] Mountain Centering (Issue 2)
   int _mountainX = 0;
   int get mountainX => _mountainX;
@@ -75,6 +92,65 @@ class GridManager {
   GridPosition? _pendingExpressLaneStart;
   bool get isPlacingExpressLane => _pendingExpressLaneStart != null;
   GridPosition? get pendingExpressLaneStart => _pendingExpressLaneStart;
+
+  // [NEW] Interaction State Control (Issue 1)
+  InteractionState interactionState = InteractionState.idle;
+  bool _hasChargedMergeThisGesture = false;
+
+  void commitPlacement(VoidCallback action) {
+    final oldState = interactionState;
+    interactionState = InteractionState.commit;
+    _hasChargedMergeThisGesture = false; // Reset for new gesture
+    try {
+      action();
+    } finally {
+      interactionState = oldState;
+      _hasChargedMergeThisGesture = false;
+    }
+  }
+
+  void eraseCell(int x, int y) {
+    removeInfrastructure(x, y);
+  }
+
+  void toggleTrafficLight(int x, int y) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    if (cell.hasTrafficLight) {
+      grid[y][x] = cell.copyWith(hasTrafficLight: false);
+      trafficLights++; // Refund
+    } else {
+      if (trafficLights > 0) {
+        grid[y][x] = cell.copyWith(hasTrafficLight: true);
+        trafficLights--;
+      }
+    }
+  }
+
+  void toggleSmartJunction(int x, int y) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    if (cell.type == CellType.smartJunction) {
+      grid[y][x] = GridCell(); // Remove
+      smartJunctions++; // Refund
+      removeEdgesFor(x, y);
+    } else if (cell.isEmpty || cell.isRoad) {
+      if (smartJunctions > 0) {
+        grid[y][x] = GridCell(type: CellType.smartJunction, owner: InfrastructureOwner.player);
+        smartJunctions--;
+        // Re-connect
+        for (var d in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+          final nx = x + d[0];
+          final ny = y + d[1];
+          if (isValid(nx, ny) && grid[ny][nx].isPassable) {
+            addEdge(x, y, nx, ny);
+            updateNodeConnections(nx, ny);
+          }
+        }
+        updateNodeConnections(x, y);
+      }
+    }
+  }
 
 
   /// Set of explicit connections between adjacent tiles: "x1,y1|x2,y2"
@@ -89,6 +165,111 @@ class GridManager {
   }
 
   void addEdge(int x1, int y1, int x2, int y2) {
+    if (!isValid(x1, y1) || !isValid(x2, y2)) return;
+    
+    // [STRICT CORRIDOR PROTECTION]
+    // 1. Internal corridor tiles (middle of curved tunnel/bridge) block NEW external road connections.
+    // 2. Endpoints allow at most ONE external road connection (prevents T-junctions on corridors).
+    final cell1 = grid[y1][x1];
+    final cell2 = grid[y2][x2];
+
+    // Reject if either side is internal infrastructure
+    if (cell1.isInfrastructureInternal || cell2.isInfrastructureInternal) {
+      // Allow if it's an existing infrastructure edge (both are infrastructure)
+      bool isInfraEdge = (cell1.isTunnel || cell1.isBridge) && (cell2.isTunnel || cell2.isBridge);
+      if (!isInfraEdge) return; // Block road-to-internal connection
+    }
+
+    // [FIX] Infrastructure Portal Creation: 
+    // If we are connecting a road to a tunnel/bridge for the FIRST time,
+    // we must ensure the tunnel tile correctly marks itself as an endpoint.
+    if ((cell1.isTunnel || cell1.isBridge) && cell2.type == CellType.road) {
+      if (!cell1.isConnectableEndpoint && !cell1.isInfrastructureInternal) {
+         grid[y1][x1] = cell1.copyWith(isConnectableEndpoint: true);
+      }
+    }
+    if ((cell2.isTunnel || cell2.isBridge) && cell1.type == CellType.road) {
+      if (!cell2.isConnectableEndpoint && !cell2.isInfrastructureInternal) {
+         grid[y2][x2] = cell2.copyWith(isConnectableEndpoint: true);
+      }
+    }
+
+    // [ENDPOINT ORIENTATION VALIDATION]
+    // Redesigned: Use directional slots instead of a global limit.
+    // Each endpoint can have 1 internal connection (corridor) and 1 external connection (road/house).
+    // The specific direction must be allowed by the infrastructure axis.
+    
+    void validateEndpointSlots(GridCell ep, int ex, int ey, GridCell other, int ox, int oy) {
+      if (!ep.isConnectableEndpoint) return;
+      
+      final dx = ox - ex;
+      final dy = oy - ey;
+      Direction? dir;
+      if (dx == 1 && dy == 0) {
+        dir = Direction.east;
+      } else if (dx == -1 && dy == 0) {
+        dir = Direction.west;
+      } else if (dx == 0 && dy == 1) {
+        dir = Direction.south;
+      } else if (dx == 0 && dy == -1) {
+        dir = Direction.north;
+      }
+      
+      if (dir == null) return; // Not adjacent
+
+      // 1. Axis check: Must align with portal orientation
+      if (ep.infrastructureAxis != null) {
+        if (ep.infrastructureAxis == InfrastructureAxis.horizontal) {
+          if (dir != Direction.west && dir != Direction.east) {
+            throw 'REJECT';
+          }
+        } else if (ep.infrastructureAxis == InfrastructureAxis.vertical) {
+          if (dir != Direction.north && dir != Direction.south) {
+            throw 'REJECT';
+          }
+        }
+      }
+
+      // 2. Directional Slot Occupancy: Is this specific direction already taken?
+      bool isTaken = false;
+      if (dir == Direction.north) {
+        isTaken = ep.connUp;
+      } else if (dir == Direction.south) {
+        isTaken = ep.connDown;
+      } else if (dir == Direction.west) {
+        isTaken = ep.connLeft;
+      } else if (dir == Direction.east) {
+        isTaken = ep.connRight;
+      }
+
+      // [REGRESSION FIX] Allow connecting if this is the ONLY external connection 
+      // and it aligns with the axis. The global limit of 1 was blocking legitimate 
+      // tunnel exits if the connection was being formed during drag.
+      if (isTaken && !hasEdge(ex, ey, ox, oy)) {
+        throw 'REJECT';
+      }
+
+      // 3. Categorical Limit: a tunnel/bridge endpoint can have exactly ONE
+      //    external road mouth. The other side of the corridor is sealed —
+      //    so a single-cell tunnel is a dead-end, and chains have a mouth
+      //    only at each chain end (middle cells are corridor-internal).
+      bool isTargetInfra = other.isTunnel || other.isBridge;
+      if (!isTargetInfra && (other.isRoad || other.isHouse || other.isDestination)) {
+        int externalConns = _countExternalConnections(ex, ey);
+        if (externalConns >= 1 && !hasEdge(ex, ey, ox, oy)) {
+          throw 'REJECT';
+        }
+      }
+    }
+
+    try {
+      validateEndpointSlots(cell1, x1, y1, cell2, x2, y2);
+      validateEndpointSlots(cell2, x2, y2, cell1, x1, y1);
+    } catch (e) {
+      if (e == 'REJECT') return;
+      rethrow;
+    }
+
     final key = _edgeKey(x1, y1, x2, y2);
     if (!activeEdges.contains(key)) {
       activeEdges.add(key);
@@ -109,22 +290,62 @@ class GridManager {
     return activeEdges.contains(_edgeKey(x1, y1, x2, y2));
   }
 
+  // [NEW] Centralized Infrastructure Transaction Accounting
+  void _logInv(String type, int delta) {
+    final prefix = delta > 0 ? "+" : "";
+    if (GameConstants.debugInfrastructure) {
+      debugPrint('[ROAD_INV] $type: $prefix$delta');
+    }
+  }
+
+  void spendRoads(int count) {
+    roads -= count;
+    _logInv('road', -count);
+  }
+
+  void refundRoads(int count) {
+    roads += count;
+    _logInv('road', count);
+  }
+
+  void spendTunnel(int count) {
+    tunnels -= count;
+    _logInv('tunnel', -count);
+  }
+
+  void refundTunnel(int count) {
+    tunnels += count;
+    _logInv('tunnel', count);
+  }
+
+  void spendBridge(int count) {
+    bridges -= count;
+    _logInv('bridge', -count);
+  }
+
+  void refundBridge(int count) {
+    bridges += count;
+    _logInv('bridge', count);
+  }
+
   // Infrastructure Inventories
   int roads = 0;
   int tunnels = 0; // was: bridges
+  int bridges = 0;
   int trafficLights = 0;
   int smartJunctions = 0; // was: roundabouts
   int expressLanes = 0; // was: motorways
 
-  GridManager(this.cols, this.rows) {
+  GridManager(this.cols, this.rows, {this.selectedMapType = MapType.zen, bool initTerrain = true}) {
     grid = List.generate(rows, (y) => List.generate(cols, (x) => GridCell()));
-    _generateMountainRange();
+    if (initTerrain) {
+      // Terrain is handled by MapGenerator on first reset/init
+      final generator = MapGeneratorFactory.getGenerator(selectedMapType);
+      generator.generateInitialTerrain(this);
+    }
   }
 
-  void _generateMountainRange() {
-    _mountainX = cols ~/ 2;
-    rebuildMountain(_mountainX);
-  }
+
 
   /// Rebuilds the mountain divider at a specific X coordinate (Issue: Mountain Centering)
   void rebuildMountain(int newX) {
@@ -150,17 +371,20 @@ class GridManager {
       if (y == gap1 || y == gap2) continue; // The gaps
       
       if (isValid(_mountainX, y)) {
-        cluster.cells.add(GridPosition(_mountainX, y));
-        grid[y][_mountainX] = GridCell(type: CellType.mountain, region: null);
+        // [SAFETY] Only place mountain if cell is empty. Don't overwrite roads/tunnels/buildings.
+        if (grid[y][_mountainX].isEmpty) {
+          cluster.cells.add(GridPosition(_mountainX, y));
+          grid[y][_mountainX] = GridCell(type: CellType.mountain, region: null);
+        }
       }
     }
     
     mountainClusters.add(cluster);
-    _detectRegions();
-    _applyTerrainSpeeds();
+    detectRegions();
+    applyTerrainSpeeds();
   }
 
-  void _detectRegions() {
+  void detectRegions() {
     regionA.clear();
     regionB.clear();
     
@@ -185,9 +409,14 @@ class GridManager {
     }
   }
 
+  /// Generic region detection for endless expansion
+  void detectRegionsEndless() {
+    detectRegions(); // For now, keep simple mid-split
+  }
+
 
   /// Pre-compute speed multipliers based on mountain proximity
-  void _applyTerrainSpeeds() {
+  void applyTerrainSpeeds() {
     for (int y = 0; y < rows; y++) {
       for (int x = 0; x < cols; x++) {
         final cell = grid[y][x];
@@ -216,20 +445,60 @@ class GridManager {
     }
   }
 
-  /// Tick all traffic signals
-  void updateTrafficSignals(double dt) {
+  /// Tick all traffic signals with queue-aware timing logic
+  void updateTrafficSignals(double dt, Map<int, List<CarComponent>> carGrid, int gridWidth) {
     for (final pos in infrastructure) {
       final cell = grid[pos.y][pos.x];
       if (!cell.hasTrafficLight) continue;
       final key = _key(pos);
-      signalTimers[key] = (signalTimers[key] ?? 0) + dt;
-      if (signalTimers[key]! >= GameConstants.trafficSignalInterval) {
-        signalTimers[key] = 0;
-        final currentPhase = signalPhases[key] ?? 0;
-        signalPhases[key] = currentPhase == 0 ? 1 : 0;
-        // Update the cell's signal phase
-        grid[pos.y][pos.x] = cell.copyWith(signalPhase: signalPhases[key]);
+      
+      double timer = (signalTimers[key] ?? 0) + dt;
+      int currentPhase = signalPhases[key] ?? 0;
+      
+      int nsCount = 0;
+      int ewCount = 0;
+      
+      // Optimization: use spatial grid to check ONLY nearby cars
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          final neighborKey = (pos.x + dx) + (pos.y + dy) * gridWidth;
+          final nearbyCars = carGrid[neighborKey];
+          if (nearbyCars == null) continue;
+          
+          for (final car in nearbyCars) {
+            if (car.arrived || car.isWaiting) continue;
+            // Determine if car is NS or EW relative to this light
+            if (car.angle.abs() < 0.5 || (car.angle.abs() - pi).abs() < 0.5) {
+              ewCount++;
+            } else {
+              nsCount++;
+            }
+          }
+        }
       }
+
+      // Apply dynamic interval
+      double baseInterval = GameConstants.trafficSignalInterval;
+      double dynamicInterval = baseInterval;
+      
+      // If current green has way more cars, stay green longer (up to 1.5x)
+      // If other side is packed, switch sooner (down to 0.5x)
+      if (currentPhase == 0) { // NS is green
+        if (nsCount > ewCount + 2) dynamicInterval *= 1.5;
+        if (ewCount > nsCount + 3) dynamicInterval *= 0.5;
+      } else { // EW is green
+        if (ewCount > nsCount + 2) dynamicInterval *= 1.5;
+        if (nsCount > ewCount + 3) dynamicInterval *= 0.5;
+      }
+
+      if (timer >= dynamicInterval) {
+        timer = 0;
+        currentPhase = currentPhase == 0 ? 1 : 0;
+        signalPhases[key] = currentPhase;
+        grid[pos.y][pos.x] = cell.copyWith(signalPhase: currentPhase);
+      }
+      
+      signalTimers[key] = timer;
     }
   }
 
@@ -246,16 +515,71 @@ class GridManager {
   }
 
   // Road load tracking
-  int getRoadLoad(int x, int y) => roadLoad[_key(GridPosition(x, y))] ?? 0;
   void setRoadLoad(int x, int y, int val) =>
       roadLoad[_key(GridPosition(x, y))] = val;
-  bool isRoadCongested(int x, int y) {
-    final cell = grid[y][x];
-    return getRoadLoad(x, y) >=
-        (cell.capacity * GameConstants.roadCapacityCongestedThreshold).ceil();
+
+  void updateCongestion(List<CarComponent> cars) {
+    roadLoad.clear();
+    for (final car in cars) {
+      if (car.arrived) continue;
+      final pos = car.path[car.currentPathIndex.clamp(0, car.path.length - 1)];
+      final key = _key(pos);
+      roadLoad[key] = (roadLoad[key] ?? 0) + 1;
+    }
   }
 
-  void reset() {
+  bool isRoadCongested(int x, int y) {
+    if (!isValid(x, y)) return false;
+    final cell = grid[y][x];
+    final count = getRoadLoad(x, y);
+    return count >= (cell.capacity * GameConstants.roadCapacityCongestedThreshold).ceil();
+  }
+
+  void updateSatisfaction(double dt) {
+    double totalSatisfaction = 0;
+    int count = 0;
+    
+    final sectorSums = <String, double>{};
+    final sectorCounts = <String, int>{};
+
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        final cell = grid[y][x];
+        if (cell.isHouse || cell.isDestination) {
+          double current = cell.satisfaction;
+          final key = _key(GridPosition(x, y));
+          
+          // If high demand or congestion nearby, decay satisfaction
+          bool isStressed = (overflowLevels[key] ?? 0) > 0.5 || isRoadCongested(x, y);
+          if (isStressed) {
+            current = (current - GameConstants.satisfactionDecayRate * dt).clamp(0.0, 1.0);
+          } else {
+            current = (current + GameConstants.satisfactionRecoveryRate * dt).clamp(0.0, 1.0);
+          }
+          
+          grid[y][x] = cell.copyWith(satisfaction: current);
+          
+          totalSatisfaction += current;
+          count++;
+          
+          if (cell.sectorId != null) {
+            sectorSums[cell.sectorId!] = (sectorSums[cell.sectorId!] ?? 0) + current;
+            sectorCounts[cell.sectorId!] = (sectorCounts[cell.sectorId!] ?? 0) + 1;
+          }
+        }
+      }
+    }
+    
+    if (count > 0) {
+      regionalSatisfaction = totalSatisfaction / count;
+    }
+    
+    sectorSums.forEach((id, sum) {
+      sectorSatisfaction[id] = sum / sectorCounts[id]!;
+    });
+  }
+
+  void reset({int? minX, int? maxX, int? minY, int? maxY}) {
     grid = List.generate(rows, (y) => List.generate(cols, (x) => GridCell()));
     houses.clear();
     destinations.clear();
@@ -272,37 +596,88 @@ class GridManager {
     roadLoad.clear();
     signalPhases.clear();
     signalTimers.clear();
-    _generateMountainRange();
+    
+    // Reset inventory based on starting constants
+    roads = GameConstants.startingRoadBudget;
+    tunnels = GameConstants.startingTunnels;
+    bridges = GameConstants.startingBridges;
+    trafficLights = GameConstants.startingTrafficLights;
+    smartJunctions = GameConstants.startingSmartJunctions;
+    expressLanes = GameConstants.startingExpressLanes;
+    
+    // Terrain is now handled by the selected MapGenerator
+    final generator = MapGeneratorFactory.getGenerator(selectedMapType);
+    generator.generateInitialTerrain(this, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
   }
 
   void loadFromSave(Map<String, dynamic> data) {
     reset(); // Clear first
 
     // Grid
-    final gridData = data['grid'] as List<dynamic>;
+    final gridData = data['grid'] as List<dynamic>?;
+    if (gridData == null) return;
+
+    final savedRows = gridData.length;
     for (int y = 0; y < rows; y++) {
-      final rowData = gridData[y] as List<dynamic>;
+      if (y >= savedRows) break;
+      final rowData = gridData[y] as List<dynamic>?;
+      if (rowData == null) continue;
+
+      final savedCols = rowData.length;
       for (int x = 0; x < cols; x++) {
-        final cellData = rowData[x] as Map<String, dynamic>;
-        final type = CellType.values[cellData['type'] as int];
+        if (x >= savedCols) break;
+        final cellData = rowData[x] as Map<String, dynamic>?;
+        if (cellData == null) continue;
+
+        final typeIndex = cellData['type'] as int? ?? 0;
+        final type = CellType.values[typeIndex.clamp(0, CellType.values.length - 1)];
+        
+        final ownerIndex = cellData['owner'] as int? ?? 0;
+        final owner = InfrastructureOwner.values[ownerIndex.clamp(0, InfrastructureOwner.values.length - 1)];
+
         grid[y][x] = GridCell(
           type: type,
           colorIndex: cellData['colorIndex'] as int?,
           isPendingDeletion: cellData['isPendingDeletion'] as bool? ?? false,
           isTunnelExtension: cellData['isTunnelExtension'] as bool? ?? false,
           hasTrafficLight: cellData['hasTrafficLight'] as bool? ?? false,
+          entrySide: cellData['entrySide'] != null ? Direction.values[cellData['entrySide'] as int] : null,
+          isInfrastructureInternal: cellData['isInfrastructureInternal'] as bool? ?? false,
+          isConnectableEndpoint: cellData['isConnectableEndpoint'] as bool? ?? false,
+          infrastructureAxis: cellData['infrastructureAxis'] != null ? InfrastructureAxis.values[cellData['infrastructureAxis'] as int] : null,
+          owner: owner,
         );
 
         final pos = GridPosition(x, y);
         if (type == CellType.house) houses.add(pos);
         if (type == CellType.destination) destinations.add(pos);
 
-        // Rebuild infrastructure list
+        // Rebuild infrastructure list (Including buildings for rendering)
         if (type != CellType.empty &&
             type != CellType.mountain &&
-            type != CellType.house &&
-            type != CellType.destination) {
+            type != CellType.water) {
           infrastructure.add(pos);
+        }
+      }
+    }
+
+    // [NEW] Best-effort axis restoration for legacy saves or missing axis
+    for (final pos in infrastructure) {
+      final cell = grid[pos.y][pos.x];
+      if (cell.isConnectableEndpoint && cell.infrastructureAxis == null) {
+        // Infer axis from neighbors
+        final neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+        for (final d in neighbors) {
+          final nx = pos.x + d[0];
+          final ny = pos.y + d[1];
+          if (isValid(nx, ny)) {
+            final neighbor = grid[ny][nx];
+            if (neighbor.isTunnel || neighbor.isBridge) {
+              final axis = (d[0] == 0) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
+              grid[pos.y][pos.x] = grid[pos.y][pos.x].copyWith(infrastructureAxis: axis);
+              break;
+            }
+          }
         }
       }
     }
@@ -311,11 +686,14 @@ class GridManager {
     if (data['placedExpressLanes'] != null) {
       final mws = data['placedExpressLanes'] as List<dynamic>;
       for (final mw in mws) {
-        final pair = mw as List<dynamic>;
-        placedExpressLanes.add([
-          GridPosition(pair[0]['x'], pair[0]['y']),
-          GridPosition(pair[1]['x'], pair[1]['y']),
-        ]);
+        try {
+          final pair = mw as List<dynamic>;
+          if (pair.length < 2) continue;
+          placedExpressLanes.add([
+            GridPosition(pair[0]['x'] as int, pair[0]['y'] as int),
+            GridPosition(pair[1]['x'] as int, pair[1]['y'] as int),
+          ]);
+        } catch (_) {}
       }
     }
 
@@ -323,17 +701,20 @@ class GridManager {
     if (data['driveways'] != null) {
       final dws = data['driveways'] as Map<String, dynamic>;
       dws.forEach((key, value) {
-        buildingDriveways[key] = GridPosition(value['x'], value['y']);
+        try {
+          buildingDriveways[key] = GridPosition(value['x'] as int, value['y'] as int);
+        } catch (_) {}
       });
     }
 
     // Inventory
-    final inv = data['inventory'] as Map<String, dynamic>;
-    roads = inv['roads'] ?? 0;
-    tunnels = inv['tunnels'] ?? 0;
-    trafficLights = inv['trafficLights'] ?? 0;
-    smartJunctions = inv['smartJunctions'] ?? 0;
-    expressLanes = inv['expressLanes'] ?? 0;
+    final inv = data['inventory'] as Map<String, dynamic>? ?? {};
+    roads = inv['roads'] as int? ?? 0;
+    tunnels = inv['tunnels'] as int? ?? 0;
+    trafficLights = inv['trafficLights'] as int? ?? 0;
+    smartJunctions = inv['smartJunctions'] as int? ?? 0;
+    bridges = inv['bridges'] as int? ?? 0;
+    expressLanes = inv['expressLanes'] as int? ?? 0;
 
     // Load demand/spawn timers
     if (data['demand'] != null) {
@@ -365,6 +746,62 @@ class GridManager {
         houseCarTimers[_key(pos)] = 0;
       }
     }
+
+    // [NEW] Restore Topology (Issue: Road Desync)
+    activeEdges.clear();
+    if (data['activeEdges'] != null) {
+      final edges = data['activeEdges'] as List<dynamic>;
+      for (final e in edges) {
+        activeEdges.add(e as String);
+      }
+    }
+
+    // [NEW] Reconstruct topology-dependent state
+    rebuildRoadGraph();
+
+    // [NEW] Reconstruct terrain clusters for rendering (Issue: Terrain Desync)
+    reconstructTerrainState();
+  }
+
+  /// Rebuilds mountain clusters and terrain data from the current grid state
+  void reconstructTerrainState() {
+    mountainClusters.clear();
+    final visited = <String>{};
+
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        final pos = GridPosition(x, y);
+        final key = _key(pos);
+        if (grid[y][x].type == CellType.mountain && !visited.contains(key)) {
+          // New cluster found
+          final cluster = MountainCluster(pos);
+          final queue = <GridPosition>[pos];
+          visited.add(key);
+          cluster.cells.add(pos);
+
+          while (queue.isNotEmpty) {
+            final current = queue.removeAt(0);
+            for (final d in [[-1,0],[1,0],[0,-1],[0,1]]) {
+              final nx = current.x + d[0];
+              final ny = current.y + d[1];
+              final nKey = "$nx,$ny";
+              if (isValid(nx, ny) && 
+                  grid[ny][nx].type == CellType.mountain && 
+                  !visited.contains(nKey)) {
+                visited.add(nKey);
+                final nPos = GridPosition(nx, ny);
+                cluster.cells.add(nPos);
+                queue.add(nPos);
+              }
+            }
+          }
+          mountainClusters.add(cluster);
+        }
+      }
+    }
+    
+    detectRegionsEndless();
+    applyTerrainSpeeds();
   }
 
   bool isCellReserved(int x, int y) {
@@ -380,23 +817,94 @@ class GridManager {
   bool canBuildRoadAt(int x, int y) {
     if (!isValid(x, y)) return false;
     final cell = grid[y][x];
-    // Can only build on empty, or replace existing road/tunnel
-    return cell.isEmpty || cell.isRoad || cell.type == CellType.mountain;
+    // Can only build on empty, or replace existing road/tunnel/bridge
+    return cell.isEmpty || cell.isRoad || cell.type == CellType.mountain || cell.type == CellType.water;
   }
 
-  bool placeRoad(int x, int y, {GridPosition? from}) {
+  bool placeRoad(int x, int y, {GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
     if (!isValid(x, y)) return false;
+    
+    // [HARD RULE] No grid modification during preview (Issue 4)
+    assert(interactionState != InteractionState.preview, 'CRITICAL: GridManager.placeRoad called during PREVIEW phase at ($x,$y)');
+
     final cell = grid[y][x];
+    final prevType = cell.type;
     
     // PART 3: Convert mountain to tunnel
     if (cell.type == CellType.mountain) {
-      return placeTunnel(x, y, from: from);
+      return placeTunnel(x, y, from: from, owner: owner);
+    }
+
+    // PART 4: Convert water to bridge
+    if (cell.type == CellType.water) {
+      return placeBridge(x, y, from: from, owner: owner);
     }
     
-    if (cell.type != CellType.empty && cell.type != CellType.road) return false;
+    bool isInfraEndpoint = (cell.isTunnel || cell.isBridge) && cell.isConnectableEndpoint;
+    if (cell.type != CellType.empty && cell.type != CellType.road && cell.type != CellType.bridge && !isInfraEndpoint) return false;
 
-    // Create or update the road cell
-    grid[y][x] = cell.copyWith(type: CellType.road);
+    // [STRICT] ROAD ACCOUNTING (Issue 1, 3 & 4)
+    // Rule: Deduct 1 road if this action creates NEW connectivity, merges, or takes over system roads.
+    // [FIX] Merge Double-Charge: Only charge for merges ONCE per gesture (Issue: Bug 1)
+    int deducted = 0;
+    bool isNewConnectivity = from != null && !hasEdge(from.x, from.y, x, y);
+    bool isTakingOverSystem = cell.owner == InfrastructureOwner.systemGenerated;
+    
+    // Special case: tunnel/bridge exits
+
+    if (owner == InfrastructureOwner.player) {
+      // [STRICT RULE] Only deduct 1 road if the tile is currently empty or system-generated.
+      // Merges and infra-exits do NOT cost extra if they land on an existing road.
+      if (cell.isEmpty || isTakingOverSystem) {
+        if (roads <= 0) return false;
+        deducted = 1;
+        spendRoads(1);
+      } else if (isNewConnectivity && !_hasChargedMergeThisGesture) {
+        // [FIX] Merge costing: Charge exactly 1 road for the FIRST merge connection in a gesture
+        if (roads <= 0) return false;
+        deducted = 1;
+        spendRoads(1);
+        _hasChargedMergeThisGesture = true;
+      } else {
+        // [FIX] Already charged for merge or just adding another segment
+        deducted = 0;
+      }
+    }
+
+    if (GameConstants.debugInfrastructure) {
+      debugPrint('[ROAD_COST] pos=($x,$y) prev=${prevType.name} new=ROAD owner=${owner.name} state=${interactionState.name} deducted=$deducted');
+    }
+
+    // [STRICT] OWNERSHIP PIPELINE
+    InfrastructureOwner finalOwner = owner;
+    if (owner == InfrastructureOwner.player) {
+      finalOwner = InfrastructureOwner.player;
+    }
+
+    // [ASSERT] Catch system-generated leaks (Issue 4)
+    // Rule: systemGenerated roads must NEVER be committed to the grid during PREVIEW.
+    assert(
+      !(finalOwner == InfrastructureOwner.systemGenerated && 
+        interactionState == InteractionState.preview),
+      'CRITICAL LEAK: systemGenerated owner committed to grid during preview phase!'
+    );
+
+    // Rule: player-initiated preview must NEVER modify the grid.
+    assert(
+      interactionState != InteractionState.preview,
+      'CRITICAL LEAK: GridManager.placeRoad called during PREVIEW phase at ($x,$y)'
+    );
+
+    // Create or update the road cell (Non-destructive for existing infra)
+    CellType finalType = cell.type;
+    if (cell.isEmpty || cell.owner == InfrastructureOwner.systemGenerated) {
+      finalType = CellType.road;
+    } else if (cell.isTunnel || cell.isBridge) {
+      // [STRICT] Never overwrite tunnel or bridge core with a road
+      finalType = cell.type;
+    }
+
+    grid[y][x] = cell.copyWith(type: finalType, owner: finalOwner);
     final pos = GridPosition(x, y);
     if (!infrastructure.contains(pos)) {
       infrastructure.add(pos);
@@ -408,47 +916,110 @@ class GridManager {
     }
 
     updateNodeConnections(x, y);
-    _assignAllDriveways(x, y);
+    // _resolveConnectivity(x, y); // Removed to ensure no side-effect reverts
+    onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
     return true;
   }
 
-  bool placeTunnel(
-    int x,
-    int y, {
-    bool isExtension = false,
-    GridPosition? from,
-  }) {
-    // 1. Basic Validation
-    if (!isValid(x, y)) {
-      print('[TUNNEL] FAILED: Invalid coordinates ($x, $y)');
-      return false;
-    }
+  bool placeTunnel(int x, int y, {bool isExtension = false, bool consumeRoad = false, GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
+    return _placeTransitCorridor(x, y, CellType.tunnel, isExtension: isExtension, consumeRoad: consumeRoad, from: from, owner: owner);
+  }
+
+  bool placeBridge(int x, int y, {bool isExtension = false, bool consumeRoad = false, GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
+    return _placeTransitCorridor(x, y, CellType.bridge, isExtension: isExtension, consumeRoad: consumeRoad, from: from, owner: owner);
+  }
+
+  /// [NEW] Unified Transit Logic (Issue 4)
+  /// Handles shared logic for Tunnels and Bridges: endpoints, orientation, validation.
+  bool _placeTransitCorridor(int x, int y, CellType type, {bool isExtension = false, bool consumeRoad = false, GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
+    if (!isValid(x, y)) return false;
     
+    // [HARD RULE] No grid modification during preview
+    assert(interactionState != InteractionState.preview, 'CRITICAL: GridManager._placeTransitCorridor called during PREVIEW phase at ($x,$y)');
+
     final cell = grid[y][x];
-    if (cell.type != CellType.mountain && cell.type != CellType.tunnel) {
-      print('[TUNNEL] FAILED: Tile ($x, $y) is not a mountain or tunnel (${cell.type.name})');
+    final validSurface = (type == CellType.tunnel) ? CellType.mountain : CellType.water;
+    
+    // [FIX] Tunnel Exit / Land Extension (Issue 3)
+    // If we are extending a tunnel/bridge onto land, it becomes a ROAD.
+    if (isExtension && cell.type != validSurface && cell.type != type) {
+       return placeRoad(x, y, from: from, owner: owner);
+    }
+
+    if (cell.type != validSurface && cell.type != type) {
       return false;
     }
 
-    // 2. Endpoint/Connectivity Validation (Horizontal Only)
+    // Overlap Protection (Relaxed for extensions to improve Zen consistency)
+    if (!isExtension && cell.type == type) {
+       return false;
+    }
+
+    // Proximity Protection
+    if (!isExtension && countNearbyInfrastructure(x, y, 1, type) > 0) {
+       return false;
+    }
+
+    // Inventory Guard (Player-owned, new tunnel/bridge only).
+    // Without this, spendTunnel / spendBridge silently push the counter negative.
+    if (owner == InfrastructureOwner.player && !isExtension) {
+      if (type == CellType.tunnel && tunnels <= 0) return false;
+      if (type == CellType.bridge && bridges <= 0) return false;
+    }
+
     if (from != null) {
-      if (from.y != y) {
-        print('[TUNNEL] FAILED: Vertical tunnels are not allowed');
-        return false;
-      }
-      final dist = (from.x - x).abs();
-      if (dist != 1) {
-        print('[TUNNEL] FAILED: Endpoint ${from.key} is not adjacent to ($x, $y)');
-        return false;
+      final dist = (from.x - x).abs() + (from.y - y).abs();
+      if (dist != 1) return false;
+
+      // Portal Preservation
+      final fromCell = getCell(from.x, from.y);
+      if (fromCell.type == type) {
+        final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
+        bool isPortal = _countExternalConnections(from.x, from.y) > 0;
+        grid[from.y][from.x] = fromCell.copyWith(
+          isInfrastructureInternal: !isPortal,
+          isConnectableEndpoint: isPortal,
+          infrastructureAxis: fromCell.infrastructureAxis ?? axis,
+        );
       }
     }
 
-    // 3. Transactional Commit
+    final axis = (from != null) ? ((from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal) : null;
+    
+    // Inventory Transaction
+    int roadDeducted = 0;
+    if (owner == InfrastructureOwner.player) {
+      if (!isExtension) {
+        if (type == CellType.tunnel) {
+          spendTunnel(1);
+        } else {
+          spendBridge(1);
+        }
+      } else if (consumeRoad) {
+        // [FIX] Tunnel Extension Costing (Bug 2)
+        if (roads <= 0) return false;
+        roadDeducted = 1;
+        spendRoads(1);
+      }
+    }
+
+    if (roadDeducted > 0 && GameConstants.debugInfrastructure) {
+      debugPrint('[ROAD_COST] pos=($x,$y) prev=${type.name} new=${type.name} owner=${owner.name} state=${interactionState.name} deducted=$roadDeducted');
+    }
+
+    // [STRICT] Ownership Rule: Tunnels/Bridges are infrastructure (system-owned by default).
+    // They are ONLY created through terrain (mountain/water).
+    // Extensions over land are handled by placeRoad directly.
+    InfrastructureOwner corridorOwner = owner;
+
     grid[y][x] = cell.copyWith(
-      type: CellType.tunnel,
+      type: type,
       isTunnelExtension: isExtension,
-      speedMultiplier:
-          GameConstants.tunnelSpeedBonus, // tunnels remove mountain penalty
+      isInfrastructureInternal: false, 
+      isConnectableEndpoint: true, // Initially an endpoint until more are added
+      infrastructureAxis: axis,
+      speedMultiplier: (type == CellType.tunnel) ? GameConstants.tunnelSpeedBonus : 1.0,
+      owner: corridorOwner,
     );
     
     final pos = GridPosition(x, y);
@@ -461,10 +1032,26 @@ class GridManager {
       updateNodeConnections(from.x, from.y);
     }
 
+    // Auto-wire to any adjacent road. A single-tap tunnel/bridge places with
+    // from=null, so without this it would have zero edges, count as 0-conn in
+    // the renderer, and disappear despite the inventory deduction.
+    for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      final nx = x + d[0];
+      final ny = y + d[1];
+      if (!isValid(nx, ny)) continue;
+      if (from != null && from.x == nx && from.y == ny) continue;
+      if (grid[ny][nx].type == CellType.road && !hasEdge(x, y, nx, ny)) {
+        addEdge(x, y, nx, ny);
+        updateNodeConnections(nx, ny);
+      }
+    }
+
     updateNodeConnections(x, y);
-    _cleanOrphanRoads();
+    // _resolveConnectivity(x, y); // Removed to prevent side-effect reverts
+
+    if (type == CellType.tunnel) _cleanOrphanRoads();
     
-    print('[TUNNEL] COMMITTED: Success at ($x, $y) ${isExtension ? "(Extension)" : ""} from ${from?.key ?? "start"}');
+    onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
     return true;
   }
 
@@ -520,6 +1107,16 @@ class GridManager {
           }
         }
 
+        // [NEW] Corridor Protection: 
+        // Standard roads can ONLY connect to Tunnel/Bridge ENDPOINTS (isConnectableEndpoint).
+        // Connections to internal corridor tiles are strictly blocked.
+        if (currentCell.type == CellType.road && (neighborCell.isTunnel || neighborCell.isBridge)) {
+          if (!neighborCell.isConnectableEndpoint) canConnect = false;
+        }
+        if (neighborCell.type == CellType.road && (currentCell.isTunnel || currentCell.isBridge)) {
+          if (!currentCell.isConnectableEndpoint) canConnect = false;
+        }
+
         if (canConnect) {
           if (i == 0) up = true;
           if (i == 1) right = true;
@@ -546,10 +1143,11 @@ class GridManager {
         }
       }
     }
+    onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
   }
 
 
-  bool placeExpressLane(GridPosition start, GridPosition end) {
+  bool placeExpressLane(GridPosition start, GridPosition end, {InfrastructureOwner owner = InfrastructureOwner.player}) {
     // print('[EXPRESSWAY] Attempting placement: ${start.key} -> ${end.key}');
     
     // 1. Validation
@@ -580,11 +1178,13 @@ class GridManager {
       overpass: OverpassType.start,
       speedMultiplier: GameConstants.expressLaneSpeed,
       isExpressLane: true,
+      upgradeOwner: owner,
     );
     grid[end.y][end.x] = endCell.copyWith(
       overpass: OverpassType.end,
       speedMultiplier: GameConstants.expressLaneSpeed,
       isExpressLane: true,
+      upgradeOwner: owner,
     );
 
     infrastructure.add(start);
@@ -618,19 +1218,7 @@ class GridManager {
     }
   }
 
-  void _assignAllDriveways(int rx, int ry) {
-    const offsets = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-    for (int i = 0; i < 4; i++) {
-      final nx = rx + offsets[i][0];
-      final ny = ry + offsets[i][1];
-      if (isValid(nx, ny)) {
-        final cell = grid[ny][nx];
-        if (cell.isHouse || cell.isDestination) {
-          connectBuilding(nx, ny, rx, ry);
-        }
-      }
-    }
-  }
+
 
   /// Handles strict single-entry logic for buildings
   void connectBuilding(int bx, int by, int rx, int ry) {
@@ -670,11 +1258,8 @@ class GridManager {
       
       // [NON-DESTRUCTIVE] Do NOT call removeEdgesFor here. (Architecture 1 Fix)
       // We only want to ADD the building connection, not wipe the existing road network.
-      final beforeCount = activeEdges.length;
       addEdge(bx, by, rx, ry);
-      final afterCount = activeEdges.length;
       
-      print('[GRAPH] Building inserted: ($bx,$by) connected to driveway ($rx,$ry). Edge count: $beforeCount -> $afterCount');
       
       buildingDriveways[_key(GridPosition(bx, by))] = GridPosition(rx, ry);
     }
@@ -689,16 +1274,16 @@ class GridManager {
     connectBuilding(bx, by, rx, ry);
   }
 
-  bool placeTrafficLight(int x, int y) {
+  bool placeTrafficLight(int x, int y, {InfrastructureOwner owner = InfrastructureOwner.player}) {
     if (!isValid(x, y)) return false;
     final cell = grid[y][x];
     if (!cell.isRoad) return false;
     if (cell.hasTrafficLight) return false;
 
-    grid[y][x] = GridCell(
-      type: cell.type,
+    grid[y][x] = cell.copyWith(
       hasTrafficLight: true,
       isPendingDeletion: cell.isPendingDeletion,
+      owner: owner,
     );
 
     final pos = GridPosition(x, y);
@@ -718,7 +1303,6 @@ class GridManager {
     // However, we still log it for debugging.
     final pos = GridPosition(x, y);
     if (isLockedEntrance(pos)) {
-      print('[GRAPH] Player deleting driveway at ($x,$y)');
     }
 
     if (cell.hasTrafficLight) {
@@ -731,15 +1315,11 @@ class GridManager {
     }
 
     if (cell.type == CellType.road) {
-      grid[y][x] = GridCell(type: CellType.road, isPendingDeletion: true);
+      grid[y][x] = cell.copyWith(isPendingDeletion: true);
       rebuildRoadGraph();
       return 'road';
     } else if (cell.type == CellType.tunnel) {
-      grid[y][x] = GridCell(
-        type: CellType.tunnel,
-        isPendingDeletion: true,
-        isTunnelExtension: cell.isTunnelExtension,
-      );
+      grid[y][x] = cell.copyWith(isPendingDeletion: true);
       rebuildRoadGraph();
       return 'tunnel';
     } else if (cell.type == CellType.smartJunction) {
@@ -759,23 +1339,30 @@ class GridManager {
         }
       }
       if (mwToRemove != null) {
-        // Immediate removal from graph (Part 1)
+        // Immediate removal from graph
         placedExpressLanes.remove(mwToRemove);
         removeEdge(mwToRemove[0].x, mwToRemove[0].y, mwToRemove[1].x, mwToRemove[1].y);
         
-        // Mark cells for cleanup (Layered: remove overpass, keep underlying structure)
-        grid[mwToRemove[0].y][mwToRemove[0].x] = grid[mwToRemove[0].y][mwToRemove[0].x].copyWith(
+        final startCell = grid[mwToRemove[0].y][mwToRemove[0].x];
+        final endCell = grid[mwToRemove[1].y][mwToRemove[1].x];
+
+        // Refund Rule: Only if player owned
+        final needsRefund = startCell.upgradeOwner == InfrastructureOwner.player;
+
+        grid[mwToRemove[0].y][mwToRemove[0].x] = startCell.copyWith(
           overpass: OverpassType.none,
           isExpressLane: false,
           speedMultiplier: 1.0,
+          upgradeOwner: InfrastructureOwner.none,
         );
-        grid[mwToRemove[1].y][mwToRemove[1].x] = grid[mwToRemove[1].y][mwToRemove[1].x].copyWith(
+        grid[mwToRemove[1].y][mwToRemove[1].x] = endCell.copyWith(
           overpass: OverpassType.none,
           isExpressLane: false,
           speedMultiplier: 1.0,
+          upgradeOwner: InfrastructureOwner.none,
         );
         
-        // Only remove from infrastructure if it's now truly empty
+        // Clean up infrastructure list ONLY if now truly empty
         if (grid[mwToRemove[0].y][mwToRemove[0].x].isEmpty) {
           infrastructure.remove(mwToRemove[0]);
         }
@@ -783,7 +1370,7 @@ class GridManager {
           infrastructure.remove(mwToRemove[1]);
         }
         
-        return 'expressLane';
+        return needsRefund ? 'expressLane' : 'expressLaneNoRefund';
       }
     }
     return '';
@@ -793,12 +1380,7 @@ class GridManager {
     if (!isValid(x, y)) return;
     final cell = grid[y][x];
     if (cell.isPendingDeletion) {
-      grid[y][x] = GridCell(
-        type: cell.type,
-        colorIndex: cell.colorIndex,
-        isTunnelExtension: cell.isTunnelExtension,
-        hasTrafficLight: cell.hasTrafficLight,
-      );
+      grid[y][x] = cell.copyWith(isPendingDeletion: false);
     }
   }
 
@@ -903,37 +1485,101 @@ class GridManager {
         grid[pos.y][pos.x] = grid[pos.y][pos.x].copyWith(
           hasTrafficLight: false,
         );
-        refunds['trafficLight'] = (refunds['trafficLight'] ?? 0) + 1;
-      } else if (cell.type == CellType.tunnel) {
+        if (cell.owner == InfrastructureOwner.player) {
+          refunds['trafficLight'] = (refunds['trafficLight'] ?? 0) + 1;
+        }
+      }
+
+      if (cell.type == CellType.tunnel) {
         grid[pos.y][pos.x] = GridCell(type: CellType.mountain);
         infrastructure.remove(pos);
-        if (cell.isTunnelExtension) {
+        
+        // [FIX] Portal Refund Rule: Endpoints are free connectors (NONE). 
+        // Only internal corridor segments refund tunnels.
+        if (cell.connectionType == ConnectionNodeType.corridorInternal) {
+          if (cell.owner == InfrastructureOwner.player && !cell.isTunnelExtension) {
+            refunds['tunnel'] = (refunds['tunnel'] ?? 0) + 1;
+          }
+        }
+      } else if (cell.type == CellType.bridge) {
+        grid[pos.y][pos.x] = GridCell(type: CellType.water);
+        infrastructure.remove(pos);
+        if (cell.connectionType == ConnectionNodeType.corridorInternal) {
+          if (cell.owner == InfrastructureOwner.player && !cell.isTunnelExtension) {
+            refunds['bridge'] = (refunds['bridge'] ?? 0) + 1;
+          }
+        }
+      } else if (cell.type == CellType.road) {
+        grid[pos.y][pos.x] = GridCell();
+        infrastructure.remove(pos);
+        if (cell.owner == InfrastructureOwner.player) {
           refunds['road'] = (refunds['road'] ?? 0) + 1;
-        } else {
-          refunds['tunnel'] = (refunds['tunnel'] ?? 0) + 1;
         }
       } else {
         grid[pos.y][pos.x] = GridCell();
         infrastructure.remove(pos);
-        if (cell.type == CellType.road) {
-          refunds['road'] = (refunds['road'] ?? 0) + 1;
+      }
+
+      // [NEW] Promotion Logic: If we deleted a tile, its neighbors might now be endpoints
+      final dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+      for (final d in dirs) {
+        final nx = pos.x + d[0];
+        final ny = pos.y + d[1];
+        if (isValid(nx, ny)) {
+          final neighbor = grid[ny][nx];
+          if (neighbor.isInfrastructureInternal && (neighbor.isTunnel || neighbor.isBridge)) {
+            // Re-evaluate if it should still be internal
+            // Count neighbors of same type
+            int sameTypeNeighbors = 0;
+            for (final d2 in dirs) {
+              final nnx = nx + d2[0];
+              final nny = ny + d2[1];
+              if (isValid(nnx, nny) && grid[nny][nnx].type == neighbor.type) {
+                sameTypeNeighbors++;
+              }
+            }
+            if (sameTypeNeighbors < 2) {
+              // Find the direction of the only remaining neighbor to determine axis
+              InfrastructureAxis? axis;
+              for (final d2 in dirs) {
+                final nnx = nx + d2[0];
+                final nny = ny + d2[1];
+                if (isValid(nnx, nny) && grid[nny][nnx].type == neighbor.type) {
+                  axis = (d2[0] == 0) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
+                  break;
+                }
+              }
+              grid[ny][nx] = neighbor.copyWith(
+                isInfrastructureInternal: false,
+                isConnectableEndpoint: true,
+                infrastructureAxis: axis,
+              );
+            }
+          }
         }
       }
     }
     if (toRemove.isNotEmpty) {
-      rebuildRoadGraph();
+      // [OPTIMIZED] Localized graph updates instead of full rebuild
+      for (final pos in toRemove) {
+        updateNodeConnections(pos.x, pos.y);
+        for (final d in [[0,1],[0,-1],[1,0],[-1,0]]) {
+          updateNodeConnections(pos.x + d[0], pos.y + d[1]);
+        }
+      }
+      onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
     }
     return refunds;
   }
 
   /// Place a 1x1 smart junction at (x, y).
-  bool placeSmartJunction(int x, int y) {
+  bool placeSmartJunction(int x, int y, {InfrastructureOwner owner = InfrastructureOwner.player}) {
     if (!isValid(x, y)) return false;
     final cell = grid[y][x];
 
     if (cell.type != CellType.empty && cell.type != CellType.road) return false;
 
-    grid[y][x] = GridCell(type: CellType.smartJunction);
+    grid[y][x] = GridCell(type: CellType.smartJunction, owner: owner);
     final pos = GridPosition(x, y);
     infrastructure.add(pos);
 
@@ -959,7 +1605,7 @@ class GridManager {
     return true;
   }
 
-  bool placeExpressLaneNode(int x, int y) {
+  bool placeExpressLaneNode(int x, int y, {InfrastructureOwner owner = InfrastructureOwner.player}) {
     final pos = GridPosition(x, y);
     // print('[EXPRESSWAY] INTERACTION at ${pos.key}');
 
@@ -988,7 +1634,7 @@ class GridManager {
       }
 
       // print('[EXPRESSWAY] VALIDATING endpoints: ${_pendingExpressLaneStart!.key} -> ${pos.key}');
-      final success = placeExpressLane(_pendingExpressLaneStart!, pos);
+      final success = placeExpressLane(_pendingExpressLaneStart!, pos, owner: owner);
       
       if (success) {
         // print('[EXPRESSWAY] COMMITTED: Placement successful. Consuming resource.');
@@ -1026,10 +1672,11 @@ class GridManager {
     );
     
     houses.add(pos);
+    infrastructure.add(pos); // [FIX] Add to infrastructure for rendering
     houseCarTimers[key] = 0;
   }
 
-  void placeDestination(int x, int y, int colorIndex, Direction entrySide) {
+  void placeDestination(int x, int y, int colorIndex, Direction entrySide, {String? name}) {
     if (!isValid(x, y)) return;
     final pos = GridPosition(x, y);
     final key = _key(pos);
@@ -1046,11 +1693,12 @@ class GridManager {
     );
     
     destinations.add(pos);
+    infrastructure.add(pos); // [FIX] Add to infrastructure for rendering
     demand[key] = 0;
     demandTimers[key] = 0;
+    if (name != null) districtNames[key] = name;
   }
 
-  int getDemand(GridPosition pos) => demand[_key(pos)] ?? 0;
   void setDemand(GridPosition pos, int val) => demand[_key(pos)] = val;
 
   int getClaimedDemand(GridPosition pos) => claimedDemand[_key(pos)] ?? 0;
@@ -1092,7 +1740,7 @@ class GridManager {
       // conn bits handle connectivity
     }
 
-    // Express Lane shortcuts (NOT teleport — just connectivity)
+    // Express Lane shortcuts (NOT teleport â€” just connectivity)
     for (final mw in placedExpressLanes) {
       if (x == mw[0].x && y == mw[0].y) {
         neighbors.add(mw[1]);
@@ -1149,6 +1797,10 @@ class GridManager {
         .toList();
   }
 
+  int getDemand(GridPosition pos) {
+    return demand[_key(pos)] ?? 0;
+  }
+
   bool isValid(int x, int y) => x >= 0 && x < cols && y >= 0 && y < rows;
   GridCell getCell(int x, int y) => grid[y][x];
   void _cleanOrphanRoads() {
@@ -1190,6 +1842,10 @@ class GridManager {
   }
 
   bool isLockedEntrance(GridPosition pos) {
+    // CATEGORY BYPASS: Infrastructure connectors are NEVER locked entrances
+    final cell = getCell(pos.x, pos.y);
+    if (cell.connectionType == ConnectionNodeType.infrastructureConnector) return false;
+    
     return buildingDriveways.values.contains(pos);
   }
 
@@ -1227,5 +1883,93 @@ class GridManager {
       }
     }
     return count;
+  }
+
+  int countNearbyInfrastructure(int cx, int cy, int radius, CellType type) {
+    int count = 0;
+    for (int x = cx - radius; x <= cx + radius; x++) {
+      for (int y = cy - radius; y <= cy + radius; y++) {
+        if (x == cx && y == cy) continue;
+        if (isValid(x, y) && getCell(x, y).type == type) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  int _countExternalConnections(int x, int y) {
+    int count = 0;
+    final neighbors = [
+      [x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]
+    ];
+    for (final n in neighbors) {
+      if (isValid(n[0], n[1])) {
+        final neighborCell = grid[n[1]][n[0]];
+        // An "external" connection is one to a road or building, NOT to another tunnel/bridge tile
+        if (hasEdge(x, y, n[0], n[1])) {
+          if (neighborCell.isRoad && !neighborCell.isTunnel && !neighborCell.isBridge) {
+            count++;
+          } else if (neighborCell.isHouse || neighborCell.isDestination) {
+            count++;
+          }
+        }
+      }
+    }
+    return count;
+  }
+  void upgradeRoad(int x, int y) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    if (cell.isRoad || cell.isTunnel || cell.isBridge) {
+      int nextLevel = (cell.roadLevel + 1).clamp(0, 2);
+      int nextCapacity = GameConstants.roadCapacityDefault;
+      if (nextLevel == 1) nextCapacity = GameConstants.avenueCapacity;
+      if (nextLevel == 2) nextCapacity = GameConstants.highwayCapacity;
+
+      grid[y][x] = cell.copyWith(
+        roadLevel: nextLevel,
+        capacity: nextCapacity,
+      );
+      upgradedRoads.add(_key(GridPosition(x, y)));
+    }
+  }
+
+  void setBusStop(int x, int y, {String? routeId}) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    // Bus stops can only be on roads or destination entrances
+    if (cell.isRoad || cell.isDestination) {
+      grid[y][x] = cell.copyWith(
+        isBusStop: true,
+        busRouteId: routeId,
+      );
+    }
+  }
+
+  void toggleBusLane(int x, int y) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    if (cell.isRoad) {
+      grid[y][x] = cell.copyWith(isBusLane: !cell.isBusLane);
+    }
+  }
+
+  void setOneWay(int x, int y, Direction? dir) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    if (cell.isRoad) {
+      grid[y][x] = cell.copyWith(
+        isOneWay: dir != null,
+        oneWayDirection: dir,
+      );
+    }
+  }
+
+  void toggleMetroStation(int x, int y) {
+    if (!isValid(x, y)) return;
+    final cell = grid[y][x];
+    // Metro stations can be anywhere but usually replace empty space or are near roads
+    grid[y][x] = cell.copyWith(isMetroStation: !cell.isMetroStation);
   }
 }
