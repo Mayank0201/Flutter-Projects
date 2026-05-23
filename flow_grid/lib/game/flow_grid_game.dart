@@ -21,7 +21,7 @@ import 'emergency_manager.dart';
 import 'economy_manager.dart';
 import 'utils/performance_logger.dart';
 import 'car_pool.dart';
-import 'package:flame/sprite.dart';
+
 
 
 enum GamePhase { menu, playing, paused, gameOver, weeklyUpgrade }
@@ -71,7 +71,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   int activeColorCount = 1;
   double timeScale = 1.0;
 
-  late SpawnController? spawnController;
+  SpawnController? spawnController;
   late ProgressionDirector progressionDirector;
   late DistrictPlanner districtPlanner;
   late EventManager eventManager;
@@ -86,9 +86,61 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   int gridRows = 10;
   double hudPanelWidth = 140;
 
-  double _baseTargetZoom = 1.0;
-  double _adaptiveZoomOffset = 0.0;
-  double get _targetZoom => (_baseTargetZoom - _adaptiveZoomOffset).clamp(0.35, 1.0);
+  // Active region (Mini-Motorways style): a smaller centered rectangle that
+  // grows each week. Both spawning AND player builds are confined to this
+  // region; the camera zoom is derived from its size so it always fills the
+  // visible area with a bit of padding.
+  //
+  // On a landscape phone (~2.0 aspect) the height drives the size — the
+  // aspect-fit in _syncSpawnBounds expands the half-width to hh*screenAspect.
+  // So Week 1 ends up ~20x10 cells, which is small enough that the spawn
+  // planner can't put a house and a destination 25+ tiles apart (which made
+  // the 20-road starting budget impossible to connect to anything).
+  static const int _initialActiveHalfWidth = 7;    // Week 1: 14 cells wide (base, before aspect-fit)
+  static const int _initialActiveHalfHeight = 5;   // Week 1: 10 cells tall
+  static const int _weeklyActiveExpansionX = 2;    // +4 width per week
+  static const int _weeklyActiveExpansionY = 1;    // +2 height per week
+
+  int get _activeHalfWidth {
+    final maxHalf = (gridCols - 4) ~/ 2;
+    return min(maxHalf, _initialActiveHalfWidth + (week - 1) * _weeklyActiveExpansionX);
+  }
+
+  int get _activeHalfHeight {
+    final maxHalf = (gridRows - 4) ~/ 2;
+    return min(maxHalf, _initialActiveHalfHeight + (week - 1) * _weeklyActiveExpansionY);
+  }
+
+  double get _targetZoom {
+    if (size.x <= 100 || size.y <= 100) return 0.5;
+
+    // Small inset for breathing room — large enough that the active region's
+    // vignette edge doesn't crowd the screen edge, but tight enough that on a
+    // phone the active region still fills most of the viewport.
+    const double padding = 16.0;
+    final screenW = size.x - hudPanelWidth - (2 * padding);
+    final screenH = size.y - (2 * padding);
+
+    if (screenW <= 0 || screenH <= 0) return 0.5;
+
+    double w;
+    double h;
+    if (spawnController != null) {
+      w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
+      h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+    } else {
+      w = (_activeHalfWidth * 2) * cellSize;
+      h = (_activeHalfHeight * 2) * cellSize;
+    }
+
+    final zoomX = screenW / w;
+    final zoomY = screenH / h;
+    // Fit the active region edge-to-edge into the inset screen rect — the 16px
+    // padding above is the only breathing room. Any further multiplier here
+    // (e.g. 0.85) leaves a visibly large empty band between the active region
+    // and the HUD on a phone.
+    return min(zoomX, zoomY).clamp(0.1, 8.0);
+  }
 
   MapType selectedMapType = MapType.zen;
   int currentSlotIndex = 0;
@@ -113,10 +165,19 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   GridPosition? _lastPlacedPos;
   GridPosition? lastHoverPos;
   bool _isDragging = false;
+  bool _initialSyncDone = false;
+  bool _pendingInitialSpawn = false;
   final PerformanceLogger perfLogger = PerformanceLogger();
   
-  SpriteSheet? carSpriteSheet;
+
   final CarPool carPool = CarPool();
+
+  // Shared vehicle sprite atlas — one row, six columns. Sliced once at boot
+  // and reused by every CarComponent so render becomes one drawImageRect.
+  final List<Sprite> vehicleSprites = [];
+  // Source aspect ratio (height / width) of a single sprite cell. Used to keep
+  // the rendered car from looking squished when the component is square.
+  double vehicleSpriteAspect = 1.0;
 
   
   // Tiered Tick Rates
@@ -127,36 +188,53 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   
   // Input Polish
   Vector2? _panStartPixel;
-  static const double dragThreshold = 8.0;
+  // Drag threshold in screen pixels. At a typical mobile zoom (~0.6) a single
+  // cell is ~24 screen pixels, so the old 8px threshold let normal finger
+  // jitter during a tap cross into an adjacent cell — both cells ended up in
+  // dragPath and the player was charged for two roads on what felt like a
+  // single tap. ~24px keeps a tap as a tap unless the user really intended
+  // to drag.
+  static const double dragThreshold = 24.0;
 
   VoidCallback? onStateChanged;
   Function(Map<String, dynamic>)? onStatsChanged;
 
   @override
   Future<void> onLoad() async {
-    print("[BOOT] onLoad started");
+    debugPrint("[BOOT] onLoad started");
     await super.onLoad();
     camera.viewfinder.anchor = Anchor.topLeft;
-    
-    // Load vehicle atlas
-    try {
-      final atlasImage = await images.load('vehicles.png');
-      carSpriteSheet = SpriteSheet(
-        image: atlasImage,
-        srcSize: Vector2(32, 16),
-      );
-      print("[BOOT] assets loaded");
-    } catch (e) {
-      print("[BOOT] ERROR loading assets: $e");
-    }
-    
+
+    await _loadVehicleSprites();
+
     overlays.add('mainMenu');
     paused = true;
-    print("[BOOT] onLoad complete, added mainMenu");
+    debugPrint("[BOOT] onLoad complete, added mainMenu");
+  }
+
+
+  Future<void> _loadVehicleSprites() async {
+    final image = await images.load('normal_vehicles.png');
+    const cols = 6;
+    final cellW = image.width / cols;
+    final cellH = image.height.toDouble();
+    vehicleSpriteAspect = cellH / cellW;
+    vehicleSprites.clear();
+    for (int i = 0; i < cols; i++) {
+      vehicleSprites.add(Sprite(
+        image,
+        srcPosition: Vector2(i * cellW, 0),
+        srcSize: Vector2(cellW, cellH),
+      ));
+    }
+    debugPrint('[BOOT] loaded ${vehicleSprites.length} vehicle sprites '
+        '(cell ${cellW.toStringAsFixed(1)}x${cellH.toStringAsFixed(1)})');
   }
 
 
   void startGame({required bool resume, MapType mapType = MapType.zen, int slotIndex = 0}) async {
+    _initialSyncDone = false;
+    _spawnAttempts = 0;
     currentSlotIndex = slotIndex;
     selectedMapType = mapType;
     
@@ -167,11 +245,12 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     weekTimer = 0;
     _elapsedTime = 0;
     activeColorCount = 1;
-    _adaptiveZoomOffset = 0.0;
-    _baseTargetZoom = 1.0;
     _pathCache.clear();
     _cars.clear();
     children.whereType<CarComponent>().forEach((c) => c.removeFromParent());
+    world.children.whereType<CarComponent>().forEach((c) => c.removeFromParent());
+    children.whereType<GridRenderer>().forEach((r) => r.removeFromParent());
+    world.children.whereType<GridRenderer>().forEach((r) => r.removeFromParent());
     
     if (resume) {
       final save = await SaveManager.loadGame(slotIndex: slotIndex);
@@ -180,26 +259,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
         gridRows = save['gridRows'] ?? 10;
         gridManager = GridManager(gridCols, gridRows, selectedMapType: MapType.values[save['mapType'] ?? 0], initTerrain: false);
         
-        // Restore Grid
-        final gridData = save['grid'] as List;
-        for (int y = 0; y < gridRows; y++) {
-          for (int x = 0; x < gridCols; x++) {
-            final cellData = gridData[y][x] as Map<String, dynamic>;
-            gridManager!.grid[y][x] = GridCell(
-              type: CellType.values[cellData['type']],
-              colorIndex: cellData['colorIndex'],
-              isPendingDeletion: cellData['isPendingDeletion'] ?? false,
-              isTunnelExtension: cellData['isTunnelExtension'] ?? false,
-              hasTrafficLight: cellData['hasTrafficLight'] ?? false,
-              speedMultiplier: (cellData['speedMultiplier'] as num).toDouble(),
-              entrySide: cellData['entrySide'] != null ? Direction.values[cellData['entrySide']] : null,
-              isInfrastructureInternal: cellData['isInfrastructureInternal'] ?? false,
-              isConnectableEndpoint: cellData['isConnectableEndpoint'] ?? false,
-              infrastructureAxis: cellData['infrastructureAxis'] != null ? InfrastructureAxis.values[cellData['infrastructureAxis']] : null,
-              owner: cellData['owner'] != null ? InfrastructureOwner.values[cellData['owner']] : InfrastructureOwner.player,
-            );
-          }
-        }
+        // Restore Grid, Inventories, Driveways, and Demand State Unifiedly
+        gridManager!.loadFromSave(save);
 
         // Restore Metadata
         week = save['week'] ?? 1;
@@ -208,17 +269,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
         weekTimer = (save['weekTimer'] as num?)?.toDouble() ?? 0;
         _elapsedTime = (save['elapsedTime'] as num?)?.toDouble() ?? 0;
         activeColorCount = save['activeColorCount'] ?? 1;
-        
-        // Restore Inventories
-        final inv = save['inventory'] as Map<String, dynamic>?;
-        if (inv != null) {
-          gridManager!.roads = inv['roads'] ?? 0;
-          gridManager!.tunnels = inv['tunnels'] ?? 0;
-          gridManager!.bridges = inv['bridges'] ?? 0;
-          gridManager!.trafficLights = inv['trafficLights'] ?? 0;
-          gridManager!.smartJunctions = inv['smartJunctions'] ?? 0;
-          gridManager!.expressLanes = inv['expressLanes'] ?? 0;
-        }
 
         // Camera
         camera.viewfinder.zoom = (save['cameraZoom'] as num?)?.toDouble() ?? 1.0;
@@ -229,25 +279,46 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       }
     } else {
       // New Game
-      gridCols = 64; // Default large map
-      gridRows = 40;
+      // Mini-Motorways style — the active play region grows from ~20x14 to
+      // around 32x22 by late game, so generating a 64x40 grid was 2-3x more
+      // cells than the player can ever see. The extra cells were a major
+      // mobile cost (chunk pictures, terrain scans, pathfinding) for no
+      // gameplay benefit.
+      gridCols = 32;
+      gridRows = 24;
       gridManager = GridManager(gridCols, gridRows, selectedMapType: mapType);
-      gridManager!.roads = 25; // Starting roads
       
+      final generator = MapGeneratorFactory.getGenerator(mapType);
+      gridManager!.roads = generator.config.startingRoads;
+      gridManager!.tunnels = generator.config.startingTunnels;
+      gridManager!.bridges = generator.config.startingBridges;
+      gridManager!.trafficLights = generator.config.startingTrafficLights;
+      gridManager!.smartJunctions = generator.config.startingSmartJunctions;
+      gridManager!.expressLanes = generator.config.startingExpressLanes;
+
       // Initial Camera
       _syncCameraCenter(instant: true);
     }
 
     // Initialize/Reset Systems
-    print("[WORLD_INIT] Initializing systems");
+    debugPrint("[WORLD_INIT] Initializing systems");
     districtPlanner = DistrictPlanner(gridManager: gridManager!);
     spawnController = SpawnController(
       gridManager: gridManager!,
       districtPlanner: districtPlanner,
     );
-    print("[SPAWN_MANAGER_INIT] SpawnController created");
+    spawnController!.initializeScoring();
+    spawnController!.onSpawnComplete = () {
+      gridRenderer?.markDirty();
+      onStateChanged?.call();
+    };
+    spawnController!.onBuildingSpawned = (pos) {
+      gridRenderer?.registerSpawnAnimation(pos);
+    };
+    spawnController!.onLog = (msg) => debugPrint('[SPAWN] $msg');
+    debugPrint("[SPAWN_MANAGER_INIT] SpawnController created and scoring initialized");
     gridRenderer = GridRenderer(gridManager: gridManager!, cellSize: cellSize);
-    add(gridRenderer!);
+    world.add(gridRenderer!);
     
     // Initialize Managers with valid references
     eventManager = EventManager(gridManager: gridManager!, districtPlanner: districtPlanner);
@@ -255,20 +326,45 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     emergencyManager = EmergencyManager();
     economyManager = EconomyManager();
     progressionDirector = ProgressionDirector(spawnController!);
+    progressionDirector.reset();
+    if (resume) {
+      for (int i = 0; i < activeColorCount; i++) {
+        progressionDirector.registerUnlockedColor(i, 1);
+      }
+    }
 
     // Add components to the game tree
     add(eventManager);
     add(transitManager);
     add(emergencyManager);
     add(economyManager);
-    print("[WORLD_INIT] Components added to game tree");
+    debugPrint("[WORLD_INIT] Components added to game tree");
 
     // Connect callbacks
     gridManager!.onTopologyChanged = () => _pathCache.clear();
 
     phase = GamePhase.playing;
     paused = false;
+    _syncSpawnBounds();
+    camera.viewfinder.zoom = _targetZoom;
+    _syncCameraCenter(instant: true);
+
+    // Defer initial district spawn to first update tick so that `size`
+    // is guaranteed populated â€” _focusCameraOn() depends on it.
+    // Always pending: the deferred handler bails out if buildings already exist,
+    // and recovers if a resumed save has no buildings yet.
+    _pendingInitialSpawn = true;
+
     _updateInventoryNotifiers();
+    
+    // Manage Overlays
+    overlays.remove('mainMenu');
+    overlays.remove('mapSelection');
+    overlays.remove('saveSlot');
+    overlays.remove('tutorial');
+    overlays.remove('gameOver');
+    overlays.add('hud');
+
     onStateChanged?.call();
   }
 
@@ -337,18 +433,42 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     satisfactionNotifier.value = gridManager!.regionalSatisfaction;
   }
 
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    if (phase == GamePhase.playing) {
+      _syncSpawnBounds();
+      camera.viewfinder.zoom = _targetZoom;
+      _syncCameraCenter(instant: true);
+      gridRenderer?.markDirty();
+    }
+  }
+
   double _debugLogTimer = 0;
 
   @override
   void update(double dt) {
     super.update(dt);
-    
-    // Tier 1: Real-time (Camera, Animations)
+
+    // First valid frame: snap the camera (zoom + position) to its target so
+    // the player doesn't watch a ~half-second zoom drift at start-up.
+    if (phase == GamePhase.playing && !_initialSyncDone && size.x > 100) {
+      _syncSpawnBounds();
+      camera.viewfinder.zoom = _targetZoom;
+      _syncCameraCenter(instant: true);
+      _initialSyncDone = true;
+      debugPrint("[SYNC] Initial camera and spawn bounds synchronized with size: $size");
+
+      _tryInitialSpawn();
+    }
+
+    // Tier 1: Real-time (Camera, Animations) — runs after the snap above so
+    // the first valid frame already lands at the target zoom.
     _updateCameraSmoothing(dt);
-    
+
     _debugLogTimer += dt;
     if (_debugLogTimer > 5.0) {
-      print("[UPDATE_LOOP_ACTIVE] phase: $phase, paused: $paused, week: $week");
+      debugPrint("[UPDATE_LOOP_ACTIVE] phase: $phase, paused: $paused, week: $week, zoom: ${camera.viewfinder.zoom.toStringAsFixed(3)}, targetZoom: ${_targetZoom.toStringAsFixed(3)}, activeArea: [${spawnController?.minSpawnX}..${spawnController?.maxSpawnX}, ${spawnController?.minSpawnY}..${spawnController?.maxSpawnY}]");
       _debugLogTimer = 0;
     }
     
@@ -360,21 +480,26 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     weekTimer += scaledDt;
 
     // Tier 2: 15Hz - Physics & Traffic AI
+    // Pass the accumulated tick interval (scaled), not just the last frame's dt,
+    // so per-house timers accrue at real-time speed.
     _logicTickTimer += safeDt;
     if (_logicTickTimer >= 1 / 15) {
-      _rebuildSpatialGrid();
-      trafficClock.update(scaledDt);
-      _updateTrafficSimulation(scaledDt);
-      gridManager?.updateTrafficSignals(scaledDt, carGrid, gridWidth);
+      final logicDt = _logicTickTimer * timeScale;
       _logicTickTimer = 0;
+      _rebuildSpatialGrid();
+      trafficClock.update(logicDt);
+      _updateTrafficSimulation(logicDt);
+      gridManager?.updateTrafficSignals(logicDt, carGrid, gridWidth);
     }
 
     // Tier 3: 5Hz - Simulation & Pathfinding
     _simTickTimer += safeDt;
     if (_simTickTimer >= 1 / 5) {
-      gridManager?.updateCongestion(cars);
-      gridManager?.updateSatisfaction(_simTickTimer);
+      final simDt = _simTickTimer * timeScale;
       _simTickTimer = 0;
+      gridManager?.updateCongestion(cars);
+      gridManager?.updateSatisfaction(simDt);
+      gridManager?.updateDemand(simDt);
     }
 
     // Tier 4: 2Hz - HUD & Analytics
@@ -387,9 +512,30 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     // Tier 5: 1Hz - Spawning & Progression
     _spawnTickTimer += safeDt;
     if (_spawnTickTimer >= 1 / 1) {
-      spawnController?.update(1.0);
-      _checkWeekTransition();
+      final spawnDt = _spawnTickTimer * timeScale;
       _spawnTickTimer = 0;
+      if (_pendingInitialSpawn) _tryInitialSpawn();
+      spawnController?.update(spawnDt);
+      progressionDirector.update(week, weekProgress, spawnDt);
+      _checkWeekTransition();
+      _checkGameOver();
+    }
+  }
+
+  void _checkGameOver() {
+    final gm = gridManager;
+    if (gm == null) return;
+    for (final dest in gm.destinations) {
+      final key = '${dest.x},${dest.y}';
+      final overflow = gm.overflowLevels[key] ?? 0.0;
+      if (overflow >= 1.0) {
+        phase = GamePhase.gameOver;
+        paused = true;
+        overlays.remove('hud');
+        overlays.add('gameOver');
+        onStateChanged?.call();
+        return;
+      }
     }
   }
 
@@ -406,6 +552,13 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       if (car.arrived) {
         toRemove.add(car);
         car.removeFromParent();
+        if (!car.isReturning && gridManager != null) {
+          final destKey = "${car.targetDest.x},${car.targetDest.y}";
+          final currentClaimed = gridManager!.claimedDemand[destKey] ?? 0;
+          if (currentClaimed > 0) {
+            gridManager!.claimedDemand[destKey] = currentClaimed - 1;
+          }
+        }
         carPool.returnCar(car);
         continue;
       }
@@ -431,7 +584,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     if ((camera.viewfinder.zoom - _targetZoom).abs() > 0.001) {
       final zoomLerp = 1.0 - pow(0.05, dt).toDouble();
       final delta = (_targetZoom - camera.viewfinder.zoom) * zoomLerp;
-      camera.viewfinder.zoom += delta.clamp(-0.02, 0.02);
+      camera.viewfinder.zoom += delta.clamp(-0.06, 0.06);
       _syncCameraCenter(dt: dt);
       _syncSpawnBounds();
     }
@@ -454,8 +607,28 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
             final path = Pathfinder.findPath(gridManager!, start, end);
             if (path != null) {
               final colorIndex = gridManager!.getCell(housePos.x, housePos.y).colorIndex ?? 0;
+
+              // Buildings aren't pathfinder nodes (they're not passable), so
+              // splice them onto the ends here. The `side` makes the car park
+              // at the building's door (where the driveway stub meets the body)
+              // instead of the cell center, which looks correct for both the
+              // small house sprites and the larger destinations.
+              final houseEntry = gridManager!.getCell(housePos.x, housePos.y).entrySide;
+              final destEntry = gridManager!.getCell(dest.x, dest.y).entrySide;
+              final fullPath = <GridPosition>[
+                if (houseEntry != null)
+                  GridPosition(housePos.x, housePos.y, houseEntry)
+                else
+                  GridPosition(housePos.x, housePos.y),
+                ...path,
+                if (destEntry != null)
+                  GridPosition(dest.x, dest.y, destEntry)
+                else
+                  GridPosition(dest.x, dest.y),
+              ];
+
               final car = carPool.getCar(
-                path: path,
+                path: fullPath,
                 colorIndex: colorIndex,
                 spawnHousePos: housePos,
                 targetDest: dest,
@@ -466,6 +639,11 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
               );
               _cars.add(car);
               world.add(car);
+              
+              // Claim the demand!
+              final destKey = "${dest.x},${dest.y}";
+              gridManager!.claimedDemand[destKey] = (gridManager!.claimedDemand[destKey] ?? 0) + 1;
+              
               timer = 0;
             }
           }
@@ -477,20 +655,152 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
   GridPosition? _findDestination(GridPosition housePos) {
     final houseCell = gridManager!.getCell(housePos.x, housePos.y);
-    final targets = gridManager!.destinations.where((d) => 
-      gridManager!.getCell(d.x, d.y).colorIndex == houseCell.colorIndex
-    ).toList();
+    final targets = gridManager!.destinations.where((d) {
+      final cell = gridManager!.getCell(d.x, d.y);
+      if (cell.colorIndex != houseCell.colorIndex) return false;
+      
+      final key = "${d.x},${d.y}";
+      final demandVal = gridManager!.demand[key] ?? 0;
+      final claimedVal = gridManager!.claimedDemand[key] ?? 0;
+      return demandVal > claimedVal;
+    }).toList();
     
     if (targets.isEmpty) return null;
     return targets[Random().nextInt(targets.length)];
   }
 
 
+  int _spawnAttempts = 0;
+
+  void _tryInitialSpawn() {
+    if (!_pendingInitialSpawn) return;
+    if (gridManager == null || spawnController == null) return;
+
+    // If the world already has a district (e.g. resumed save), we're done.
+    if (gridManager!.houses.isNotEmpty || gridManager!.destinations.isNotEmpty) {
+      _pendingInitialSpawn = false;
+      _spawnAttempts = 0;
+      return;
+    }
+
+    _spawnAttempts++;
+    final spawned = spawnController!.spawnInitialPair(0);
+    debugPrint('[SPAWN] attempt #$_spawnAttempts spawnInitialPair(0)=$spawned, '
+        'houses=${gridManager!.houses.length}, '
+        'destinations=${gridManager!.destinations.length}, '
+        'bounds=(${spawnController!.minSpawnX}..${spawnController!.maxSpawnX}, '
+        '${spawnController!.minSpawnY}..${spawnController!.maxSpawnY})');
+
+    if (spawned) {
+      // Keep the camera on grid center (= active-region center) so the playable
+      // border is symmetric on screen. Focusing on the destination instead
+      // shifted the visible active region off to one side.
+      gridRenderer?.markDirty();
+      _pendingInitialSpawn = false;
+      _spawnAttempts = 0;
+      return;
+    }
+
+    // SpawnController failed too many times — drop a guaranteed minimal district
+    // manually so the player always has something to work with.
+    if (_spawnAttempts >= 3) {
+      debugPrint('[SPAWN] SpawnController failed $_spawnAttempts times. Forcing manual district.');
+      if (_forceManualDistrict(0)) {
+        _pendingInitialSpawn = false;
+        _spawnAttempts = 0;
+      }
+    }
+  }
+
+  /// Deterministic backup district. Bypasses SpawnController validators and drops
+  /// 1 destination + 2 houses at hardcoded positions near the grid center, each
+  /// with its driveway road already laid.
+  bool _forceManualDistrict(int colorIndex) {
+    final gm = gridManager;
+    if (gm == null) return false;
+
+    final cx = gm.cols ~/ 2;
+    final cy = gm.rows ~/ 2;
+
+    // Tight cluster so the player can actually connect them with the starter
+    // road budget. Spread expands naturally over subsequent weeks via the
+    // SpawnController, not via this fallback.
+    final destPos = GridPosition(cx + 4, cy);
+    final house1Pos = GridPosition(cx - 4, cy - 1);
+    final house2Pos = GridPosition(cx - 4, cy + 1);
+
+    // Sanity check: all four target cells (building + its driveway) must be empty.
+    final spots = <GridPosition>[
+      destPos, destPos.getNeighbor(Direction.west),
+      house1Pos, house1Pos.getNeighbor(Direction.east),
+      house2Pos, house2Pos.getNeighbor(Direction.east),
+    ];
+    for (final s in spots) {
+      if (!gm.isValid(s.x, s.y) || !gm.grid[s.y][s.x].isEmpty) {
+        debugPrint('[SPAWN] Manual district aborted: cell ${s.key} is not empty');
+        return false;
+      }
+    }
+
+    gm.commitPlacement(() {
+      // Destination + driveway
+      gm.placeDestination(destPos.x, destPos.y, colorIndex, Direction.west);
+      gridRenderer?.registerSpawnAnimation(destPos);
+      final destDw = destPos.getNeighbor(Direction.west);
+      gm.placeRoad(destDw.x, destDw.y, owner: InfrastructureOwner.systemGenerated);
+      gm.connectBuilding(destPos.x, destPos.y, destDw.x, destDw.y);
+
+      // House 1 + driveway
+      gm.placeHouse(house1Pos.x, house1Pos.y, colorIndex, Direction.east);
+      gridRenderer?.registerSpawnAnimation(house1Pos);
+      final h1Dw = house1Pos.getNeighbor(Direction.east);
+      gm.placeRoad(h1Dw.x, h1Dw.y, owner: InfrastructureOwner.systemGenerated);
+      gm.connectBuilding(house1Pos.x, house1Pos.y, h1Dw.x, h1Dw.y);
+
+      // House 2 + driveway
+      gm.placeHouse(house2Pos.x, house2Pos.y, colorIndex, Direction.east);
+      gridRenderer?.registerSpawnAnimation(house2Pos);
+      final h2Dw = house2Pos.getNeighbor(Direction.east);
+      gm.placeRoad(h2Dw.x, h2Dw.y, owner: InfrastructureOwner.systemGenerated);
+      gm.connectBuilding(house2Pos.x, house2Pos.y, h2Dw.x, h2Dw.y);
+    });
+
+    // Register cluster center so later progression logic doesn't try to re-spawn color 0.
+    spawnController?.clusterCenters[colorIndex] = destPos;
+    spawnController?.residentialCenters[colorIndex] =
+        GridPosition((house1Pos.x + house2Pos.x) ~/ 2, (house1Pos.y + house2Pos.y) ~/ 2);
+
+    gridRenderer?.markDirty();
+    debugPrint('[SPAWN] Manual district committed at dest=${destPos.key}, '
+        'houses=[${house1Pos.key}, ${house2Pos.key}]');
+    return true;
+  }
+
   void _syncCameraCenter({bool instant = false, double dt = 0.016}) {
+    if (gridManager == null) return;
     final screenW = size.x - hudPanelWidth;
     final screenH = size.y;
-    final zoom = camera.viewfinder.zoom;
-    final target = Vector2(-(screenW / zoom - screenW) / 2, -(screenH / zoom - screenH) / 2);
+    double zoom = camera.viewfinder.zoom;
+    if (zoom <= 0.0 || zoom.isNaN || zoom.isInfinite) {
+      zoom = 1.0;
+    }
+
+    Vector2 target;
+    if (spawnController != null) {
+      final w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
+      final h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+      final targetX = (boardOffsetX + spawnController!.minSpawnX * cellSize) - ((screenW / zoom) - w) / 2;
+      final targetY = (boardOffsetY + spawnController!.minSpawnY * cellSize) - ((screenH / zoom) - h) / 2;
+      target = Vector2(targetX, targetY);
+    } else {
+      final gridW = gridCols * cellSize;
+      final gridH = gridRows * cellSize;
+      target = Vector2(
+        (gridW - screenW / zoom) / 2,
+        (gridH - screenH / zoom) / 2,
+      );
+    }
+
     if (instant) {
       camera.viewfinder.position = target;
     } else {
@@ -503,16 +813,19 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     if (weekTimer >= GameConstants.weekDuration) {
       weekTimer = 0;
       week++;
-      _updateTargetZoom();
+      if (gridManager != null) {
+        for (final dest in gridManager!.destinations) {
+          final key = "${dest.x},${dest.y}";
+          gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
+        }
+      }
+      // Active region grows with the week — refresh spawn bounds so new
+      // buildings can land in the newly opened ring of cells, and the camera
+      // zoom (derived from the region size) widens to match.
+      _syncSpawnBounds();
       MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
       _triggerWeeklyUpgrade();
     }
-  }
-
-  void _updateTargetZoom() {
-    double expansion = week <= 3 ? 0.08 : (week <= 8 ? 0.05 : 0.02);
-    _adaptiveZoomOffset += expansion;
-    _baseTargetZoom = max(0.65, 1.0 - (week * 0.025));
   }
 
   void _triggerWeeklyUpgrade() {
@@ -528,13 +841,56 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
   void _syncSpawnBounds() {
     if (spawnController == null || gridManager == null) return;
-    final zoom = camera.viewfinder.zoom;
-    final pos = camera.viewfinder.position;
-    spawnController!.minSpawnX = max(0, ((pos.x - boardOffsetX) / cellSize).ceil() + 2);
-    spawnController!.maxSpawnX = min(gridManager!.cols - 1, ((pos.x + (size.x - hudPanelWidth) / zoom - boardOffsetX) / cellSize).floor() - 2);
-    spawnController!.minSpawnY = max(0, ((pos.y - boardOffsetY) / cellSize).ceil() + 2);
-    spawnController!.maxSpawnY = min(gridManager!.rows - 1, ((pos.y + size.y / zoom - boardOffsetY) / cellSize).floor() - 2);
+    
+    // Base active half-dimensions for the current week
+    int hw = _activeHalfWidth;
+    int hh = _activeHalfHeight;
+    
+    // Adjust to match the viewport aspect ratio to eliminate black bars.
+    // Keep this padding in sync with _targetZoom so the active region's aspect
+    // matches the screen rect the camera is fitting it into.
+    if (size.x > 100 && size.y > 100) {
+      const double padding = 16.0;
+      final screenW = size.x - hudPanelWidth - (2 * padding);
+      final screenH = size.y - (2 * padding);
+      if (screenW > 0 && screenH > 0) {
+        final screenAspect = screenW / screenH;
+        final baseAspect = hw / hh;
+        if (screenAspect > baseAspect) {
+          // Screen is wider: expand hw to match height
+          hw = (hh * screenAspect).round();
+          // Clamp to grid limits
+          final maxHw = (gridCols - 4) ~/ 2;
+          if (hw > maxHw) hw = maxHw;
+        } else {
+          // Screen is taller: expand hh to match width
+          hh = (hw / screenAspect).round();
+          // Clamp to grid limits
+          final maxHh = (gridRows - 4) ~/ 2;
+          if (hh > maxHh) hh = maxHh;
+        }
+      }
+    }
+
+    final cx = gridCols ~/ 2;
+    final cy = gridRows ~/ 2;
+    spawnController!.minSpawnX = max(2, cx - hw);
+    spawnController!.maxSpawnX = min(gridManager!.cols - 3, cx + hw - 1);
+    spawnController!.minSpawnY = max(2, cy - hh);
+    spawnController!.maxSpawnY = min(gridManager!.rows - 3, cy + hh - 1);
   }
+
+
+  /// Returns true if [pos] is inside the current active region — used to block
+  /// player builds outside the playable area until weekly expansions open it up.
+  bool _isInActiveArea(GridPosition pos) {
+    if (spawnController == null) return true;
+    return pos.x >= spawnController!.minSpawnX &&
+           pos.x <= spawnController!.maxSpawnX &&
+           pos.y >= spawnController!.minSpawnY &&
+           pos.y <= spawnController!.maxSpawnY;
+  }
+
 
   @override
   void onPanStart(DragStartInfo info) {
@@ -559,6 +915,21 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     final pos = GridPosition(x, y);
 
     if (gridManager!.isValid(pos.x, pos.y)) {
+      // Don't preview/queue placements outside the active region — but always
+      // allow terrain cells (mountain/water) and existing tunnels/bridges so a
+      // road drag can route through them via auto-tunnel / auto-bridge.
+      final dragCell = gridManager!.getCell(pos.x, pos.y);
+      final isTerrainOrCorridor =
+          dragCell.type == CellType.mountain ||
+          dragCell.type == CellType.water ||
+          dragCell.isTunnel ||
+          dragCell.isBridge;
+      if (activeTool != BuildTool.erase &&
+          !isTerrainOrCorridor &&
+          !_isInActiveArea(pos)) {
+        return;
+      }
+
       if (activeTool == BuildTool.expressLane) {
         expressLanePendingStart ??= pos;
         expressLaneDraggingEnd = pos;
@@ -576,18 +947,46 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   void onPanEnd(DragEndInfo info) {
     if (activeTool == BuildTool.expressLane) {
       if (expressLanePendingStart != null && expressLaneDraggingEnd != null) {
-        gridManager!.placeExpressLane(expressLanePendingStart!, expressLaneDraggingEnd!);
+        final placed = gridManager!.placeExpressLane(
+            expressLanePendingStart!, expressLaneDraggingEnd!);
+        if (placed) {
+          _updateInventoryNotifiers();
+          onStateChanged?.call();
+        }
       }
     } else if (_isDragging && _isDeferredTool) {
       gridManager!.commitPlacement(() => _commitDragBuild());
+      if (activeTool == BuildTool.erase) _applyEraseRefunds();
     } else if (!_isDragging && _panStartPixel != null) {
       // Single click action
       final worldPos = camera.viewfinder.globalToLocal(_panStartPixel!);
       final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
       final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
       _handleSingleClick(GridPosition(x, y));
+      if (activeTool == BuildTool.erase) _applyEraseRefunds();
     }
     _cleanupInput();
+  }
+
+  /// Finalize cells marked `isPendingDeletion` by the erase tool: actually
+  /// remove them and credit the inventory with whatever the player paid.
+  void _applyEraseRefunds() {
+    if (gridManager == null) return;
+    final activeCarTiles = <GridPosition>{};
+    for (final car in _cars) {
+      if (car.arrived || car.path.isEmpty) continue;
+      final idx = car.currentPathIndex.clamp(0, car.path.length - 1);
+      activeCarTiles.add(car.path[idx]);
+    }
+    final refunds = gridManager!.cleanupPendingDeletions(activeCarTiles);
+    if (refunds.isEmpty) return;
+    gridManager!.roads += refunds['road'] ?? 0;
+    gridManager!.tunnels += refunds['tunnel'] ?? 0;
+    gridManager!.bridges += refunds['bridge'] ?? 0;
+    gridManager!.trafficLights += refunds['trafficLight'] ?? 0;
+    _updateInventoryNotifiers();
+    gridRenderer?.markDirty();
+    onStateChanged?.call();
   }
 
   void _cleanupInput() {
@@ -605,22 +1004,153 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     for (final pos in _dragPath) {
       _handleBuild(pos);
     }
+    _autoExtendTunnelExit();
+  }
+
+  /// If the drag ended inside terrain (mountain/water) without exiting onto land,
+  /// continue the corridor in the drag direction: extend the tunnel/bridge through
+  /// matching terrain and lay a road on the first land cell beyond. Players who
+  /// drag onto a mountain expect to come out the other side — this closes that gap.
+  void _autoExtendTunnelExit() {
+    if (gridManager == null || _dragPath.length < 2) return;
+    if (activeTool != BuildTool.road &&
+        activeTool != BuildTool.tunnel &&
+        activeTool != BuildTool.bridge) {
+      return;
+    }
+
+    final last = _dragPath.last;
+    if (!gridManager!.isValid(last.x, last.y)) return;
+    final lastCell = gridManager!.getCell(last.x, last.y);
+    if (!lastCell.isTunnel && !lastCell.isBridge) return;
+
+    final prev = _dragPath[_dragPath.length - 2];
+    final dx = last.x - prev.x;
+    final dy = last.y - prev.y;
+    if (dx.abs() + dy.abs() != 1) return;
+
+    GridPosition from = last;
+    final extendingTunnel = lastCell.isTunnel;
+    for (int i = 0; i < 12; i++) {
+      final next = GridPosition(from.x + dx, from.y + dy);
+      if (!gridManager!.isValid(next.x, next.y)) break;
+      final nextCell = gridManager!.getCell(next.x, next.y);
+
+      bool ok;
+      if (extendingTunnel && nextCell.type == CellType.mountain) {
+        ok = gridManager!.placeTunnel(next.x, next.y, from: from, isExtension: true, consumeRoad: true);
+      } else if (!extendingTunnel && nextCell.type == CellType.water) {
+        ok = gridManager!.placeBridge(next.x, next.y, from: from, isExtension: true, consumeRoad: true);
+      } else if (nextCell.isEmpty) {
+        gridManager!.placeRoad(next.x, next.y, from: from);
+        break;
+      } else {
+        break;
+      }
+
+      if (!ok) break;
+      from = next;
+    }
+  }
+
+  void _placeTunnelOrExit(GridPosition pos) {
+    final cell = gridManager!.getCell(pos.x, pos.y);
+    // Tunnel core: only legal on a mountain tile or an existing tunnel tile.
+    if (cell.type == CellType.mountain || cell.isTunnel) {
+      // If the previous drag cell is already a tunnel/bridge, treat this as an
+      // extension so the proximity check in _placeTransitCorridor doesn't
+      // reject the rest of a multi-cell mountain crossing. Extensions also
+      // consume a road tile — otherwise one tunnel ticket would buy an
+      // arbitrarily long chain of tunnels for free.
+      bool isExtension = false;
+      final lp = _lastPlacedPos;
+      if (lp != null && gridManager!.isValid(lp.x, lp.y)) {
+        final fromCell = gridManager!.getCell(lp.x, lp.y);
+        if (fromCell.isTunnel || fromCell.isBridge) isExtension = true;
+      }
+      gridManager!.placeTunnel(
+        pos.x,
+        pos.y,
+        from: _lastPlacedPos,
+        isExtension: isExtension,
+        consumeRoad: isExtension,
+      );
+      return;
+    }
+    // Otherwise, if we're continuing from a tunnel/bridge cell, this is the exit:
+    // lay a normal road so the tunnel actually connects to the road network.
+    if (_lastPlacedPos != null && gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
+      final fromCell = gridManager!.getCell(_lastPlacedPos!.x, _lastPlacedPos!.y);
+      if (fromCell.isTunnel || fromCell.isBridge) {
+        gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+      }
+    }
+  }
+
+  void _placeBridgeOrExit(GridPosition pos) {
+    final cell = gridManager!.getCell(pos.x, pos.y);
+    if (cell.type == CellType.water || cell.isBridge) {
+      bool isExtension = false;
+      final lp = _lastPlacedPos;
+      if (lp != null && gridManager!.isValid(lp.x, lp.y)) {
+        final fromCell = gridManager!.getCell(lp.x, lp.y);
+        if (fromCell.isTunnel || fromCell.isBridge) isExtension = true;
+      }
+      gridManager!.placeBridge(
+        pos.x,
+        pos.y,
+        from: _lastPlacedPos,
+        isExtension: isExtension,
+        consumeRoad: isExtension,
+      );
+      return;
+    }
+    if (_lastPlacedPos != null && gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
+      final fromCell = gridManager!.getCell(_lastPlacedPos!.x, _lastPlacedPos!.y);
+      if (fromCell.isTunnel || fromCell.isBridge) {
+        gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+      }
+    }
   }
 
   void _handleBuild(GridPosition pos) {
     if (gridManager == null) return;
-    
+
+    final cell = gridManager!.getCell(pos.x, pos.y);
+    final isTerrainOrCorridor =
+        cell.type == CellType.mountain ||
+        cell.type == CellType.water ||
+        cell.isTunnel ||
+        cell.isBridge;
+
+    // Confine player builds to the active region — but only for plain cells.
+    // Terrain (mountain/water) and existing tunnels/bridges can be acted on
+    // anywhere, so a road drag can dig its own tunnel through a nearby
+    // mountain even if that mountain is outside the current playable border.
+    if (activeTool != BuildTool.erase && !isTerrainOrCorridor && !_isInActiveArea(pos)) {
+      return;
+    }
+
     switch (activeTool) {
       case BuildTool.road:
-        gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+        // Mini-Motorways behaviour: a road drag auto-digs tunnels through
+        // mountains and auto-spans bridges over water without the player
+        // having to switch tools mid-gesture.
+        if (cell.type == CellType.mountain || cell.isTunnel) {
+          _placeTunnelOrExit(pos);
+        } else if (cell.type == CellType.water || cell.isBridge) {
+          _placeBridgeOrExit(pos);
+        } else {
+          gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+        }
         _lastPlacedPos = pos;
         break;
       case BuildTool.tunnel:
-        gridManager!.placeTunnel(pos.x, pos.y, from: _lastPlacedPos, consumeRoad: true);
+        _placeTunnelOrExit(pos);
         _lastPlacedPos = pos;
         break;
       case BuildTool.bridge:
-        gridManager!.placeBridge(pos.x, pos.y, from: _lastPlacedPos, consumeRoad: true);
+        _placeBridgeOrExit(pos);
         _lastPlacedPos = pos;
         break;
       case BuildTool.erase:

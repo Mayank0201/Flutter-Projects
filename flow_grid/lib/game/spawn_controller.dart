@@ -81,9 +81,12 @@ class SpawnConfig {
   // ============================================================
   // [NEW] District Locality & Spacing Rules (Issue 1 & 2)
   // ============================================================
-  static const int maxDistrictExpansionRadius = 24; // [NEW] Increased for better map coverage
-  static const int destinationToHouseMinDistance = 16; // [FIX] Increased separation (was 12)
-  static const int destinationToDestinationMinDistance = 15;
+  // Sized for a Mini-Motorways style starting region (~20x14). Larger
+  // separations would force the spawn planner to push buildings across the
+  // whole grid, which is impossible to connect with the early road budget.
+  static const int maxDistrictExpansionRadius = 14;
+  static const int destinationToHouseMinDistance = 5;
+  static const int destinationToDestinationMinDistance = 7;
   static const int sameColorHouseClusterRadius = 4;
 }
 
@@ -238,6 +241,11 @@ class SpawnController {
   // Callback: notify game when a spawn succeeds so it can markDirty etc.
   void Function(String message)? onLog;
   void Function()? onSpawnComplete;
+  /// Fires once for each building (house or destination) the controller
+  /// places, so the renderer can register a spawn-pulse animation at that
+  /// cell. Distinct from [onSpawnComplete] which fires once per logical
+  /// spawn event (and may batch multiple buildings).
+  void Function(GridPosition pos)? onBuildingSpawned;
 
   SpawnController({
     required this.gridManager,
@@ -259,12 +267,13 @@ class SpawnController {
   void update(double dt) {
     _elapsedTime += dt;
     _pressureTimer += dt;
-    
+
     if (_pressureTimer >= SpawnConfig.pressureSampleInterval) {
       _pressureTimer -= SpawnConfig.pressureSampleInterval;
       _updateDemandPressure();
     }
-    
+
+    _processStagedInitialDistrict();
     _maybeEnqueueDemandDrivenHouse();
     _processQueue();
   }
@@ -280,6 +289,85 @@ class SpawnController {
     _demandPressure.clear();
     _lastSpawnTimeForColor.clear();
     activeColorCount = 1;
+    _stagedInitialPlan = null;
+    _stagedInitialColor = null;
+    _stagedDestSpawnAt = null;
+    _stagedHouse2SpawnAt = null;
+  }
+
+  // ============================================================
+  // STAGED INITIAL DISTRICT
+  // The first district is committed in three beats instead of all at once
+  // (house → +2s destination → +5s second house) so the player gets a moment
+  // to register what's appearing instead of three buildings popping in
+  // simultaneously. Positions are still planned atomically up front so we
+  // never strand a house without a matching destination.
+  // ============================================================
+  DistrictPlan? _stagedInitialPlan;
+  int? _stagedInitialColor;
+  double? _stagedDestSpawnAt;
+  double? _stagedHouse2SpawnAt;
+
+  static const double _stagedDestDelay = 2.0;
+  static const double _stagedHouse2Delay = 5.0;
+
+  void _processStagedInitialDistrict() {
+    final plan = _stagedInitialPlan;
+    final ci = _stagedInitialColor;
+    if (plan == null || ci == null) return;
+
+    if (_stagedDestSpawnAt != null && _elapsedTime >= _stagedDestSpawnAt!) {
+      _stagedDestSpawnAt = null;
+      gridManager.commitPlacement(() => _placeStagedDestination(ci, plan));
+      onSpawnComplete?.call();
+    }
+
+    if (_stagedHouse2SpawnAt != null && _elapsedTime >= _stagedHouse2SpawnAt!) {
+      _stagedHouse2SpawnAt = null;
+      if (plan.houses.length >= 2) {
+        gridManager.commitPlacement(() => _placeStagedSecondHouse(ci, plan));
+        onSpawnComplete?.call();
+      }
+      // Clear the slot — staging is complete regardless of whether house 2
+      // was in the plan, so the next initial-district request can start fresh.
+      _stagedInitialPlan = null;
+      _stagedInitialColor = null;
+    }
+  }
+
+  void _placeStagedDestination(int colorIndex, DistrictPlan plan) {
+    if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return;
+    if (!gridManager.grid[plan.destPos.y][plan.destPos.x].isEmpty) {
+      _log('STAGED DEST: dest spot ${plan.destPos} no longer empty; skipping');
+      return;
+    }
+    final profile = districtPlanner.getProfileFor(colorIndex);
+    final name = DistrictNameGenerator.generate(profile.type);
+    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry, name: name);
+    onBuildingSpawned?.call(plan.destPos);
+    scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
+    final dDP = plan.destPos.getNeighbor(plan.destEntry);
+    gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
+    gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
+    districtPlanner.claimSector(colorIndex, plan.destPos, isCommercial: true);
+    _log('STAGED DEST PLACED: Color $colorIndex at ${plan.destPos}');
+  }
+
+  void _placeStagedSecondHouse(int colorIndex, DistrictPlan plan) {
+    final hPlan = plan.houses[1];
+    if (!gridManager.isValid(hPlan.pos.x, hPlan.pos.y)) return;
+    if (!gridManager.grid[hPlan.pos.y][hPlan.pos.x].isEmpty) {
+      _log('STAGED HOUSE 2: spot ${hPlan.pos} no longer empty; skipping');
+      return;
+    }
+    gridManager.placeHouse(hPlan.pos.x, hPlan.pos.y, colorIndex, hPlan.entry);
+    onBuildingSpawned?.call(hPlan.pos);
+    scoringService.reserveEntranceCorridor(hPlan.pos, hPlan.entry, isDestination: false);
+    final hDP = hPlan.pos.getNeighbor(hPlan.entry);
+    gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
+    gridManager.connectBuilding(hPlan.pos.x, hPlan.pos.y, hDP.x, hDP.y);
+    districtPlanner.claimSector(colorIndex, hPlan.pos, isCommercial: false);
+    _log('STAGED HOUSE 2 PLACED: Color $colorIndex at ${hPlan.pos}');
   }
 
   /// ATOMIC TRANSACTION: Spawn a new district (1 Destination + 2 Houses)
@@ -298,7 +386,7 @@ class SpawnController {
       final destPos = _findDestinationSpot(colorIndex, stage: stage, anchor: resCenter);
       if (destPos == null) continue;
       
-      final destEntry = findValidEntrySide(destPos);
+      final destEntry = findValidEntrySide(destPos, profile: BuildingProfile.commercial, stage: stage);
       if (destEntry == null) continue;
       
       // 3. FIND NEARBY HOUSES (Complete with entries)
@@ -359,7 +447,7 @@ class SpawnController {
     // Pick best spots that HAVE valid entry sides
     final result = <HousePlan>[];
     for (final pos in candidates) {
-      final entry = findValidEntrySide(pos);
+      final entry = findValidEntrySide(pos, profile: BuildingProfile.residential, stage: stage);
       if (entry == null) continue;
 
       bool tooClose = false;
@@ -384,7 +472,9 @@ class SpawnController {
 
   void _doCommitInitialDistrict(int colorIndex, DistrictPlan plan) {
     // 1. ATOMIC VALIDATION (Ghost Reservation check)
-    // Ensure all target cells are still empty/valid before committing
+    // Validate ALL spots up front even though we'll commit them in stages —
+    // we don't want to lay down house 1 only to discover the destination
+    // spot got taken by something else in the meantime.
     for (final spot in plan.allSpots) {
       if (!gridManager.isValid(spot.x, spot.y) || !gridManager.grid[spot.y][spot.x].isEmpty) {
         _log('INITIAL DISTRICT ATOMIC FAIL: Spot $spot became occupied. Aborting all.');
@@ -392,45 +482,50 @@ class SpawnController {
       }
     }
 
-    // 2. Destination
-    _log('[VALIDATE] type=DESTINATION reservation=${BuildingProfile.commercial.corridorLength} influence=${BuildingProfile.commercial.influenceRadius}');
-    final profile = districtPlanner.getProfileFor(colorIndex);
-    final name = DistrictNameGenerator.generate(profile.type);
-    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry, name: name);
-    scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
-    final dDP = plan.destPos.getNeighbor(plan.destEntry);
-    gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
-    gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
-    districtPlanner.claimSector(colorIndex, plan.destPos, isCommercial: true);
-
-    // 3. Houses
-    for (final hPlan in plan.houses) {
-      _log('[VALIDATE] type=HOUSE reservation=${BuildingProfile.residential.corridorLength} influence=${BuildingProfile.residential.influenceRadius}');
-      gridManager.placeHouse(hPlan.pos.x, hPlan.pos.y, colorIndex, hPlan.entry);
-      
-      // HARD ASSERTION
-      assert(gridManager.grid[hPlan.pos.y][hPlan.pos.x].isHouse, 'CRITICAL: Position ${hPlan.pos} must be a HOUSE');
-      
-      scoringService.reserveEntranceCorridor(hPlan.pos, hPlan.entry, isDestination: false);
-      final hDP = hPlan.pos.getNeighbor(hPlan.entry);
-      gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
-      gridManager.connectBuilding(hPlan.pos.x, hPlan.pos.y, hDP.x, hDP.y);
-      districtPlanner.claimSector(colorIndex, hPlan.pos, isCommercial: false);
+    if (plan.houses.isEmpty) {
+      _log('INITIAL DISTRICT FAIL: plan has no houses');
+      return;
     }
 
-    // 4. State setup
+    // 2. Commit ONLY the first house immediately. The destination and the
+    //    second house are scheduled via _processStagedInitialDistrict so the
+    //    player sees them appear one at a time:
+    //      t=0  : house 1
+    //      t=+2 : destination
+    //      t=+5 : house 2
+    final h1 = plan.houses.first;
+    _log('[VALIDATE] type=HOUSE reservation=${BuildingProfile.residential.corridorLength} influence=${BuildingProfile.residential.influenceRadius}');
+    gridManager.placeHouse(h1.pos.x, h1.pos.y, colorIndex, h1.entry);
+    onBuildingSpawned?.call(h1.pos);
+    assert(gridManager.grid[h1.pos.y][h1.pos.x].isHouse, 'CRITICAL: Position ${h1.pos} must be a HOUSE');
+    scoringService.reserveEntranceCorridor(h1.pos, h1.entry, isDestination: false);
+    final h1DP = h1.pos.getNeighbor(h1.entry);
+    gridManager.placeRoad(h1DP.x, h1DP.y, owner: InfrastructureOwner.systemGenerated);
+    gridManager.connectBuilding(h1.pos.x, h1.pos.y, h1DP.x, h1DP.y);
+    districtPlanner.claimSector(colorIndex, h1.pos, isCommercial: false);
+
+    // 3. State setup — done immediately so subsequent spawn logic knows about
+    //    this color even before the destination and second house land.
     clusterCenters[colorIndex] = plan.destPos;
     residentialCenters[colorIndex] = plan.resCenter;
-    
+
     final houseZone = _getZoneAt(plan.resCenter.x, plan.resCenter.y);
     colorHomeZones[colorIndex] = houseZone;
     colorAllowedHouseZones[colorIndex] = [houseZone];
-    
+
     final destZone = _getZoneAt(plan.destPos.x, plan.destPos.y);
     colorAllowedDestZones[colorIndex] = [destZone];
     dnaMap[colorIndex] = DistrictDNA.random(_random);
 
-    _log('INITIAL DISTRICT COMMITTED: Color $colorIndex. Dest at ${plan.destPos}, Houses clustered at ${plan.resCenter}.');
+    // 4. Schedule the remaining commits.
+    _stagedInitialPlan = plan;
+    _stagedInitialColor = colorIndex;
+    _stagedDestSpawnAt = _elapsedTime + _stagedDestDelay;
+    _stagedHouse2SpawnAt = plan.houses.length >= 2
+        ? _elapsedTime + _stagedHouse2Delay
+        : null;
+
+    _log('INITIAL DISTRICT STAGE 1 COMMITTED: Color $colorIndex. House at ${h1.pos}; dest @+${_stagedDestDelay}s, house 2 @+${_stagedHouse2Delay}s.');
     onSpawnComplete?.call();
   }
 
@@ -476,7 +571,8 @@ class SpawnController {
   void _doCommitHouse(int colorIndex, GridPosition pos, Direction entry) {
     _log('[SPAWN] Placing HOUSE for Color $colorIndex at ${pos.key}');
     gridManager.placeHouse(pos.x, pos.y, colorIndex, entry);
-    
+    onBuildingSpawned?.call(pos);
+
     assert(gridManager.grid[pos.y][pos.x].isHouse, 'CRITICAL: Position $pos must be a HOUSE');
     
     scoringService.reserveEntranceCorridor(pos, entry, isDestination: false);
@@ -574,7 +670,7 @@ class SpawnController {
     });
 
     for (final destPos in destCandidates.take(8)) {
-      final destEntry = findValidEntrySide(destPos);
+      final destEntry = findValidEntrySide(destPos, profile: BuildingProfile.commercial, stage: stage);
       if (destEntry == null) continue;
 
       // [NEW] Find Residential Center for the expansion
@@ -618,6 +714,7 @@ class SpawnController {
     final profile = districtPlanner.getProfileFor(colorIndex);
     final name = DistrictNameGenerator.generate(profile.type);
     gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry, name: name);
+    onBuildingSpawned?.call(plan.destPos);
     scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
     final dDP = plan.destPos.getNeighbor(plan.destEntry);
     gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
@@ -628,7 +725,8 @@ class SpawnController {
     for (final hPlan in plan.houses) {
       _log('[VALIDATE] type=HOUSE reservation=${BuildingProfile.residential.corridorLength} influence=${BuildingProfile.residential.influenceRadius}');
       gridManager.placeHouse(hPlan.pos.x, hPlan.pos.y, colorIndex, hPlan.entry);
-      
+      onBuildingSpawned?.call(hPlan.pos);
+
       // HARD ASSERTION
       assert(gridManager.grid[hPlan.pos.y][hPlan.pos.x].isHouse, 'CRITICAL: Position ${hPlan.pos} must be a HOUSE');
       
@@ -667,6 +765,28 @@ class SpawnController {
   int getHouseCount(int colorIndex) {
     return gridManager.getHousesForColor(colorIndex).length;
   }
+
+  /// Highest weekly-transition age among this color's destinations. age == 0
+  /// for a destination that hasn't survived a weekly transition yet, == 1
+  /// after one transition, etc. Used to gate demand-driven extra houses so a
+  /// newly spawned destination can't push past the initial pair until it has
+  /// actually aged.
+  int _maxDestinationAgeForColor(int colorIndex) {
+    int maxAge = 0;
+    final dests = gridManager.getDestinationsForColor(colorIndex);
+    for (final dest in dests) {
+      final age = gridManager.destinationAges['${dest.x},${dest.y}'] ?? 0;
+      if (age > maxAge) maxAge = age;
+    }
+    return maxAge;
+  }
+
+  /// Minimum age (in weekly transitions) a color's oldest destination must
+  /// have before demand pressure can push the house count past
+  /// [SpawnConfig.earlyHouseCap]. Two means the destination has survived two
+  /// weekly transitions — i.e. it is "more than 1 week old" — matching the
+  /// player-facing rule that 1-week-old destinations stay capped at 2 houses.
+  static const int _minDestAgeForExtraHouse = 2;
 
   /// Get current queue depth (for debugging)
   int get queueDepth => _queue.length;
@@ -728,16 +848,28 @@ class SpawnController {
 
     // DEMAND GATE: Don't exceed early cap unless demand justifies it
     if (houseCount >= SpawnConfig.earlyHouseCap) {
+      // Per-destination age gate: backstop the same rule from
+      // _maybeEnqueueDemandDrivenHouse so any request that slipped into the
+      // queue still gets refused if the color's oldest destination hasn't
+      // aged past the threshold.
+      final destAge = _maxDestinationAgeForColor(colorIndex);
+      if (destAge < _minDestAgeForExtraHouse) {
+        _log('HOUSE REJECTED: Color $colorIndex has $houseCount houses; '
+            'oldest destination age=$destAge < $_minDestAgeForExtraHouse, '
+            'cap holds at ${SpawnConfig.earlyHouseCap}.');
+        lastFailure = SpawnFailure.demand;
+        return false;
+      }
       final pressure = _demandPressure[colorIndex] ?? 0; // Non-linear threshold scaling for expansion (values in samples, e.g. 5 samples = 15s)
       int requiredPressure = 5; // default for 3rd house (15s)
       if (houseCount == 3) requiredPressure = 8; // 4th house (24s)
       if (houseCount >= 4) requiredPressure = 10; // 5th+ house (30s)
-      
+
       if (pressure < requiredPressure) {
         _log('HOUSE REJECTED: Color $colorIndex has $houseCount houses, '
             'demand pressure=$pressure < threshold=$requiredPressure');
         lastFailure = SpawnFailure.demand;
-        return false; // Don't re-queue â€” demand gate blocks until pressure rises
+        return false; // Don't re-queue — demand gate blocks until pressure rises
       }
       _log('HOUSE ALLOWED: Demand pressure=$pressure justifies house #${houseCount + 1} for Color $colorIndex');
     }
@@ -784,7 +916,7 @@ class SpawnController {
     }
 
     // Validate
-    final entry = findValidEntrySide(pos);
+    final entry = findValidEntrySide(pos, profile: BuildingProfile.residential, stage: finalStage);
     if (entry == null) {
       _log('HOUSE REJECTED: No entry side at $pos');
       return false;
@@ -797,14 +929,15 @@ class SpawnController {
 
     // Place
     gridManager.placeHouse(pos.x, pos.y, colorIndex, entry);
-    
+    onBuildingSpawned?.call(pos);
+
     // HARD ASSERTION (Issue 3: Role Contamination)
     assert(gridManager.grid[pos.y][pos.x].isHouse, 'CRITICAL: Position $pos must be a HOUSE');
 
     scoringService.reserveEntranceCorridor(pos, entry, isDestination: false);
-    final dP = pos.getNeighbor(entry);
-    gridManager.placeRoad(dP.x, dP.y, owner: InfrastructureOwner.systemGenerated);
-    gridManager.connectBuilding(pos.x, pos.y, dP.x, dP.y);
+    final drivewayPos = pos.getNeighbor(entry);
+    gridManager.placeRoad(drivewayPos.x, drivewayPos.y, owner: InfrastructureOwner.systemGenerated);
+    gridManager.connectBuilding(pos.x, pos.y, drivewayPos.x, drivewayPos.y);
     districtPlanner.claimSector(colorIndex, pos, isCommercial: false);
     _lastSpawnTimeForColor[colorIndex] = _elapsedTime;
 
@@ -816,12 +949,6 @@ class SpawnController {
       dna.spawnAngles.add(angle);
       if (dna.spawnAngles.length > 5) dna.spawnAngles.removeAt(0);
     }
-    
-    // [NEW] Fixed Driveway Creation (Decision 6)
-    // Immediately create the road stub attached to the house
-    final drivewayPos = pos.getNeighbor(entry);
-    gridManager.placeRoad(drivewayPos.x, drivewayPos.y);
-    gridManager.connectBuilding(pos.x, pos.y, drivewayPos.x, drivewayPos.y);
 
     _log('HOUSE PLACED: Color $colorIndex House #${houseCount + 1} at $pos with $entry driveway at $drivewayPos');
 
@@ -851,11 +978,13 @@ class SpawnController {
     final colorIndex = request.colorIndex;
 
     GridPosition? pos;
+    PlanningStage finalStage = PlanningStage.stage1Ideal;
     for (final stage in PlanningStage.values) {
       _log('PLANNER: Attempting Incremental Dest for Color $colorIndex at Stage ${stage.index + 1} (${stage.name})');
       pos = _findDestinationSpot(colorIndex, stage: stage);
       if (pos != null) {
         _log('PLANNER: Success at Stage ${stage.index + 1} for Color $colorIndex at $pos');
+        finalStage = stage;
         break;
       }
     }
@@ -867,7 +996,7 @@ class SpawnController {
       return false;
     }
 
-    final entry = findValidEntrySide(pos);
+    final entry = findValidEntrySide(pos, profile: BuildingProfile.commercial, stage: finalStage);
     if (entry == null) {
       _log('DEST REJECTED: No entry side at $pos');
       lastFailure = SpawnFailure.space; // Effectively space limit
@@ -883,16 +1012,18 @@ class SpawnController {
     final districtProfile = districtPlanner.getProfileFor(colorIndex);
     final name = DistrictNameGenerator.generate(districtProfile.type);
     gridManager.placeDestination(pos.x, pos.y, colorIndex, entry, name: name);
-    
+    onBuildingSpawned?.call(pos);
+
     // HARD ASSERTION (Issue 3: Role Contamination)
     assert(gridManager.grid[pos.y][pos.x].isDestination, 'CRITICAL: Position $pos must be a DESTINATION');
 
     scoringService.reserveEntranceCorridor(pos, entry, isDestination: true);
     districtPlanner.claimSector(colorIndex, pos, isCommercial: true);
     
-    // [FIX] Destination Driveway Creation (Bug #1 Fix)
+    // Destination driveway — systemGenerated so it doesn't consume the
+    // player's road inventory.
     final drivewayPos = pos.getNeighbor(entry);
-    gridManager.placeRoad(drivewayPos.x, drivewayPos.y);
+    gridManager.placeRoad(drivewayPos.x, drivewayPos.y, owner: InfrastructureOwner.systemGenerated);
     gridManager.connectBuilding(pos.x, pos.y, drivewayPos.x, drivewayPos.y);
 
     _log('DEST PLACED: Color $colorIndex at $pos with driveway at $drivewayPos');
@@ -1154,7 +1285,7 @@ class SpawnController {
     }
 
     // 3. Reachable Driveway
-    final entrySide = findValidEntrySide(pos);
+    final entrySide = findValidEntrySide(pos, profile: profile, stage: stage);
     if (entrySide == null) return false;
 
     // 4. Basic Neighboring Check (Preserved)
@@ -1390,7 +1521,7 @@ class SpawnController {
   }
 
   /// Find a valid entry side for a building at pos based on map position constraints
-  Direction? findValidEntrySide(GridPosition pos) {
+  Direction? findValidEntrySide(GridPosition pos, {BuildingProfile profile = BuildingProfile.residential, PlanningStage stage = PlanningStage.stage1Ideal}) {
     final List<Direction> allowed = [
       Direction.north,
       Direction.east,
@@ -1436,7 +1567,11 @@ class SpawnController {
     }
 
     // REQUIRE minimum accessibility score (Rule: can player build a good network?)
-    if (best != null && bestScore >= BuildingProfile.residential.minOpenness) {
+    int floor = profile.minOpenness;
+    if (stage.index >= PlanningStage.stage3MoreRelaxed.index) floor = 1;
+    if (stage.index >= PlanningStage.stage5ExtremeRelax.index) floor = 0;
+
+    if (best != null && bestScore >= floor) {
       return best;
     }
 
@@ -1632,20 +1767,29 @@ class SpawnController {
       if (houseCount == 3) requiredPressure = 8; // 4th house (24s)
       if (houseCount >= 4) requiredPressure = 10; // 5th+ house (30s)
 
-      // Priority 2: Colors needing demand-driven expansion
+      // Priority 2: Colors needing demand-driven expansion.
+      // Per-destination age gate: the initial pair of houses stays as the
+      // firm cap until at least one destination for this color has aged
+      // [_minDestAgeForExtraHouse] weekly transitions. A brand-new
+      // destination — even one spawned mid-game in week 5 — starts capped
+      // at the initial pair regardless of demand pressure, because demand
+      // pressure on a fresh destination usually reflects an unconnected
+      // road network rather than genuine over-capacity.
+      final destAge = _maxDestinationAgeForColor(c);
       if (houseCount >= SpawnConfig.earlyHouseCap &&
           pressure >= requiredPressure &&
-          pressure > bestPressure) {
-            
+          pressure > bestPressure &&
+          destAge >= _minDestAgeForExtraHouse) {
+
         // Enforce same-color spawn cooldown to prevent panic-flooding
         if (timeSinceLastSpawn >= SpawnConfig.sameColorSpawnCooldown) {
           bestColor = c;
           bestPressure = pressure;
-          
+
           // Destination Capacity Check
           final destCount = gridManager.getDestinationsForColor(c).length;
           final capacity = destCount * SpawnConfig.housesPerDestination;
-          
+
           if (houseCount >= capacity) {
             nodeToSpawn = SpawnNodeType.destination; // District is saturated, add new destination
           } else {

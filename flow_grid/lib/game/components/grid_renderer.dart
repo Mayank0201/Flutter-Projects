@@ -29,13 +29,29 @@ class GridRenderer extends PositionComponent
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.round;
 
+  final Paint _tunnelPaint = Paint()
+    ..color = GameConstants.tunnelColor
+    ..strokeWidth = GameConstants.cellSize * 0.4
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  final Paint _bridgePaint = Paint()
+    ..color = GameConstants.bridgeColor
+    ..strokeWidth = GameConstants.cellSize * 0.4
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  // MaskFilter.blur is fine on CanvasKit/web but absolutely lethal on mobile
+  // Skia — even when cached into a chunk Picture, the rasterizer pays the
+  // blur cost the first time the picture is rendered to the screen, and that
+  // first paint is enough to ANR/crash on lower-end Android devices.
   final Paint _mountainBasePaint = Paint()
-    ..color = GameConstants.mountainColor
-    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0);
+    ..color = GameConstants.mountainColor;
 
   final Paint _mountainPeakPaint = Paint()
-    ..color = GameConstants.mountainHighlightColor.withValues(alpha: 0.4)
-    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
+    ..color = GameConstants.mountainHighlightColor.withValues(alpha: 0.4);
 
   GridRenderer({
     required this.gridManager,
@@ -45,6 +61,15 @@ class GridRenderer extends PositionComponent
   });
 
   final List<_FloatingMessage> _floatingMessages = [];
+
+  /// Active spawn-pulse animations. Drawn on top of the cached chunk picture
+  /// so newly-placed buildings get a brief expanding gray ring instead of
+  /// just popping into existence.
+  final List<_SpawnAnimation> _spawnAnimations = [];
+
+  void registerSpawnAnimation(GridPosition pos) {
+    _spawnAnimations.add(_SpawnAnimation(pos, game.elapsedTime));
+  }
 
   /// [OPTIMIZATION] Mark only infrastructure as dirty (Roads, Buildings, etc.)
   /// Previews and Demand indicators remain per-frame and don't trigger cache rebuilds.
@@ -91,6 +116,7 @@ class GridRenderer extends PositionComponent
     _drawChunks(canvas);
 
     // Tier 3: Per-Frame Overlay (Demand, Previews, Selection Highlights)
+    _drawParkingHighlights(canvas);
     _drawDemandIndicators(canvas);
     _drawExpressLanePreview(canvas);
     _drawRoadPreview(canvas);
@@ -99,8 +125,47 @@ class GridRenderer extends PositionComponent
     // [PREMIUM] City Reveal Vignette
     _drawCityVignette(canvas);
 
+    // Spawn pulses (drawn over the cached chunks so brand-new buildings get
+    // a brief expanding ring instead of popping in unannounced).
+    _drawSpawnAnimations(canvas);
+
     // Floating Messages (Upgrades, Events)
     _drawFloatingMessages(canvas);
+  }
+
+  void _drawSpawnAnimations(Canvas canvas) {
+    if (_spawnAnimations.isEmpty) return;
+    final now = game.elapsedTime;
+    _spawnAnimations.removeWhere((a) => now - a.startTime >= _SpawnAnimation.duration);
+    if (_spawnAnimations.isEmpty) return;
+
+    for (final anim in _spawnAnimations) {
+      final t = ((now - anim.startTime) / _SpawnAnimation.duration).clamp(0.0, 1.0);
+      // Ease-out cubic for the radius so the ring shoots out quickly then settles.
+      final ease = 1.0 - math.pow(1.0 - t, 3).toDouble();
+      final cx = offsetX + anim.pos.x * cellSize + cellSize / 2;
+      final cy = offsetY + anim.pos.y * cellSize + cellSize / 2;
+
+      // Outer expanding ring — very light gray, fades to transparent.
+      final outerRadius = cellSize * (0.35 + ease * 1.1);
+      final outerAlpha = (1.0 - t) * 0.16;
+      canvas.drawCircle(
+        Offset(cx, cy),
+        outerRadius,
+        Paint()..color = Colors.white.withValues(alpha: outerAlpha),
+      );
+
+      // Soft inner glow that shrinks as the building "settles in".
+      final innerRadius = cellSize * (0.45 - t * 0.25);
+      if (innerRadius > 0) {
+        final innerAlpha = (1.0 - t) * 0.10;
+        canvas.drawCircle(
+          Offset(cx, cy),
+          innerRadius,
+          Paint()..color = Colors.white.withValues(alpha: innerAlpha),
+        );
+      }
+    }
   }
 
   ui.Picture _buildTerrainPicture() {
@@ -195,35 +260,33 @@ class GridRenderer extends PositionComponent
     return recorder.endRecording();
   }
 
-  Path? _mountainPathCache;
-  Path? _mountainPeaksCache;
-
+  // Mountain paths are now built per-chunk so each chunk picture only carries
+  // its own mountains. The old global cache replayed every mountain in the
+  // world into every chunk picture, which choked mobile GPUs on first paint.
   void _drawMountains(Canvas canvas, int minX, int minY, int maxX, int maxY) {
-    if (_mountainPathCache == null) {
-      _buildMountainPathCache();
-    }
-    canvas.drawPath(_mountainPathCache!, _mountainBasePaint);
-    canvas.drawPath(_mountainPeaksCache!, _mountainPeakPaint);
-  }
+    final basePath = Path();
+    final peaksPath = Path();
+    bool any = false;
 
-  void _buildMountainPathCache() {
-    _mountainPathCache = Path();
-    _mountainPeaksCache = Path();
     for (final cluster in gridManager.mountainClusters) {
       for (final cell in cluster.cells) {
+        if (cell.x < minX || cell.x >= maxX || cell.y < minY || cell.y >= maxY) {
+          continue;
+        }
+        any = true;
         final rect = Rect.fromLTWH(
           offsetX + cell.x * cellSize,
           offsetY + cell.y * cellSize,
           cellSize,
           cellSize,
         );
-        _mountainPathCache!.addRRect(
+        basePath.addRRect(
           RRect.fromRectAndRadius(
             rect.inflate(cellSize * 0.15),
             Radius.circular(cellSize * 0.45),
           ),
         );
-        _mountainPeaksCache!.addRRect(
+        peaksPath.addRRect(
           RRect.fromRectAndRadius(
             Rect.fromCenter(
               center: rect.center.translate(0, -cellSize * 0.1),
@@ -235,24 +298,29 @@ class GridRenderer extends PositionComponent
         );
       }
     }
+
+    if (!any) return;
+    canvas.drawPath(basePath, _mountainBasePaint);
+    canvas.drawPath(peaksPath, _mountainPeakPaint);
   }
 
   void _drawRoadsAndExpressLanes(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     final roadPath = Path();
     final tunnelPath = Path();
+    final bridgePath = Path();
 
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
-        
+
         if ((!cell.isRoad && !cell.isExpressLaneNode && !cell.isTunnel && !cell.isBridge) || cell.isPendingDeletion) {
           continue;
         }
-
-        if (cell.isExpressLane && (cell.type == CellType.road || cell.type == CellType.tunnel)) {
-          continue;
-        }
+        // Note: previously we skipped drawing the road at express-lane endpoint
+        // cells. That left a visible gap underneath the lane — looked like the
+        // road tile was deleted. The lane is drawn additively in
+        // _drawExpressLanesGlobal, so render the road normally here.
 
         final cx = offsetX + x * cellSize;
         final cy = offsetY + y * cellSize;
@@ -264,7 +332,14 @@ class GridRenderer extends PositionComponent
         final s = cell.connDown;
         final w = cell.connLeft;
 
-        final targetPath = (cell.isTunnel || cell.isBridge) ? tunnelPath : roadPath;
+        final Path targetPath;
+        if (cell.isTunnel) {
+          targetPath = tunnelPath;
+        } else if (cell.isBridge) {
+          targetPath = bridgePath;
+        } else {
+          targetPath = roadPath;
+        }
         int connCount = (n ? 1 : 0) + (e ? 1 : 0) + (s ? 1 : 0) + (w ? 1 : 0);
 
         if (connCount == 1) {
@@ -300,35 +375,64 @@ class GridRenderer extends PositionComponent
           if (e) { targetPath.moveTo(midX, midY); targetPath.lineTo(cx + cellSize, midY); }
           if (s) { targetPath.moveTo(midX, midY); targetPath.lineTo(midX, cy + cellSize); }
           if (w) { targetPath.moveTo(midX, midY); targetPath.lineTo(cx, midY); }
+        } else if (cell.isTunnel || cell.isBridge) {
+          // 0-conn corridor: still draw a stub so the player can see the tile
+          // they paid for. Orient along its infrastructure axis if known.
+          if (cell.infrastructureAxis == InfrastructureAxis.vertical) {
+            targetPath.moveTo(midX, midY - cellSize * 0.25);
+            targetPath.lineTo(midX, midY + cellSize * 0.25);
+          } else {
+            targetPath.moveTo(midX - cellSize * 0.25, midY);
+            targetPath.lineTo(midX + cellSize * 0.25, midY);
+          }
         }
       }
     }
-    
+
     canvas.drawPath(roadPath, _roadPaint);
-    canvas.drawPath(tunnelPath, _roadPaint); // For now shared, can split later
-    
+    canvas.drawPath(tunnelPath, _tunnelPaint);
+    canvas.drawPath(bridgePath, _bridgePaint);
+
     _drawExpressLanesGlobal(canvas);
   }
   
   void _drawExpressLanesGlobal(Canvas canvas) {
-    final rw = (cellSize * 0.4) * 0.8;
-    final borderPaint = Paint()
-      ..color = GameConstants.expressLaneBorderColor
+    // Wide enough that the car (cellSize * 0.55) actually fits inside the
+    // lane, with a darker outer rim for a "highway shoulders" feel. The arc
+    // direction and height MUST match CarComponent._rebuildSmoothPath's
+    // long-jump arc (perp = right-perp of forward, arcHeight = dist * 0.15)
+    // or the car will visibly drive off the painted lane.
+    // Match the car's visible width (cellSize * 0.55) so the car sits
+    // *inside* the lane stroke rather than overhanging both sides — that
+    // overhang is what made cars look like they were floating in the air
+    // above a too-narrow ribbon. Alpha is high enough that the lane reads
+    // as a solid overlay but the road and grid are still visible through.
+    final laneStroke = cellSize * 0.58;
+    final lanePaint = Paint()
+      ..color = GameConstants.expressLaneColor.withValues(alpha: 0.7)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = rw + 2
+      ..strokeWidth = laneStroke
       ..strokeCap = StrokeCap.round;
 
-    final lanePaint = Paint()
-      ..color = GameConstants.expressLaneColor
+    final laneOutlinePaint = Paint()
+      ..color = GameConstants.expressLaneBorderColor.withValues(alpha: 0.6)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = rw
+      ..strokeWidth = laneStroke + 3
       ..strokeCap = StrokeCap.round;
 
     final arrowPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.4)
+      ..color = Colors.white.withValues(alpha: 0.7)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
+      ..strokeWidth = 1.6
       ..strokeCap = StrokeCap.round;
+
+    final rampFillPaint = Paint()
+      ..color = GameConstants.expressLaneColor.withValues(alpha: 0.85)
+      ..style = PaintingStyle.fill;
+    final rampOutlinePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.7)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
 
     for (final lane in gridManager.placedExpressLanes) {
       if (lane.length < 2) continue;
@@ -344,26 +448,96 @@ class GridRenderer extends PositionComponent
         offsetY + p2.y * cellSize + cellSize / 2,
       );
 
-      canvas.drawLine(o1, o2, borderPaint);
-      canvas.drawLine(o1, o2, lanePaint);
-
       final delta = o2 - o1;
       final length = delta.distance;
-      if (length > 10) {
-        final dir = Offset(delta.dx / length, delta.dy / length);
-        final perp = Offset(-dir.dy, dir.dx);
-        for (double d = 15; d < length; d += 25) {
-          final tip = o1 + dir * d;
-          canvas.drawLine(tip - dir * 4 + perp * 3, tip, arrowPaint);
-          canvas.drawLine(tip - dir * 4 - perp * 3, tip, arrowPaint);
+      if (length < 1) continue;
+      final dir = Offset(delta.dx / length, delta.dy / length);
+      // Direction-independent perpendicular: always pick the half-plane with
+      // perp.dy < 0 (ties broken by perp.dx < 0). CarComponent's long-jump
+      // bezier uses the same sign rule, so the painted curve and the car
+      // trajectory match for BOTH the outbound and the return trip. Using
+      // raw right-of-forward made the return car arc to the wrong side.
+      final perp = Offset(-dir.dy, dir.dx);
+      final perpSign = (perp.dy < 0 || (perp.dy == 0 && perp.dx < 0))
+          ? 1.0
+          : -1.0;
+      final arcHeight = length * 0.15 * perpSign;
+      final mid = Offset((o1.dx + o2.dx) / 2, (o1.dy + o2.dy) / 2);
+      final cp = Offset(
+        mid.dx + perp.dx * arcHeight,
+        mid.dy + perp.dy * arcHeight,
+      );
+
+      final lanePath = Path()
+        ..moveTo(o1.dx, o1.dy)
+        ..quadraticBezierTo(cp.dx, cp.dy, o2.dx, o2.dy);
+
+      canvas.drawPath(lanePath, laneOutlinePaint);
+      canvas.drawPath(lanePath, lanePaint);
+
+      // Directional chevrons sampled along the bezier so they hug the curve.
+      final metrics = lanePath.computeMetrics().toList();
+      if (metrics.isNotEmpty) {
+        final metric = metrics.first;
+        final totalLen = metric.length;
+        for (double d = totalLen * 0.2; d < totalLen; d += 34) {
+          final tan = metric.getTangentForOffset(d);
+          if (tan == null) continue;
+          final tip = tan.position;
+          final tdir = tan.vector;
+          final tperp = Offset(-tdir.dy, tdir.dx);
+          final back = tip - Offset(tdir.dx, tdir.dy) * 6;
+          canvas.drawLine(back + tperp * 3.5, tip, arrowPaint);
+          canvas.drawLine(back - tperp * 3.5, tip, arrowPaint);
         }
       }
+
+      // Small ramp markers at each endpoint so the lane visibly "starts"
+      // and "ends" at the road tile rather than melting into it.
+      _drawExpressLaneRamp(canvas, o1, dir, rampFillPaint, rampOutlinePaint);
+      _drawExpressLaneRamp(canvas, o2, -dir, rampFillPaint, rampOutlinePaint);
     }
   }
 
+  void _drawExpressLaneRamp(Canvas canvas, Offset center, Offset forward,
+      Paint fill, Paint outline) {
+    final perp = Offset(-forward.dy, forward.dx);
+    final r = cellSize * 0.18;
+    final tip = center + forward * r;
+    final baseL = center - forward * (r * 0.4) + perp * (r * 0.7);
+    final baseR = center - forward * (r * 0.4) - perp * (r * 0.7);
+    final path = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(baseL.dx, baseL.dy)
+      ..lineTo(baseR.dx, baseR.dy)
+      ..close();
+    canvas.drawPath(path, fill);
+    canvas.drawPath(path, outline);
+  }
+
+  // Dedicated paints for the smart-junction donut. Previously this code
+  // mutated _roadPaint (shared with road drawing) which leaked style/color
+  // changes back into the road renderer and produced a fuzzy blob instead
+  // of a clean roundabout symbol.
+  static final Paint _smartJunctionRingPaint = Paint()
+    ..color = GameConstants.roadFillColor
+    ..style = PaintingStyle.fill;
+  static final Paint _smartJunctionHolePaint = Paint()
+    ..color = GameConstants.backgroundColor
+    ..style = PaintingStyle.fill;
+  static final Paint _smartJunctionOutlinePaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.25)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5;
+
   void _drawSmartJunctions(Canvas canvas, int minX, int minY, int maxX, int maxY) {
-    final radius = cellSize * 0.35;
-    
+    // Outer radius equals half a cell so the disk touches the cell boundary
+    // exactly where the road stroke from each neighbour terminates — the
+    // road and junction meet at the boundary with no visible gap. Inner
+    // radius gives the donut its hole for the "roundabout" read.
+    final outerR = cellSize * 0.5;
+    final innerR = cellSize * 0.24;
+
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
@@ -373,11 +547,11 @@ class GridRenderer extends PositionComponent
         final cx = offsetX + x * cellSize + cellSize / 2;
         final cy = offsetY + y * cellSize + cellSize / 2;
 
-        // Flares (Using _roadPaint)
-        canvas.drawCircle(Offset(cx, cy), radius, _roadPaint..style = PaintingStyle.fill..color = GameConstants.roadFillColor);
-        canvas.drawCircle(Offset(cx, cy), radius, _roadPaint..style = PaintingStyle.stroke..color = Colors.white12);
-        // Reset paint
-        _roadPaint..style = PaintingStyle.stroke..color = GameConstants.roadColor;
+        // Outer disk + punched-out center give a clean donut/roundabout
+        // silhouette without depending on blur or paint mutation.
+        canvas.drawCircle(Offset(cx, cy), outerR, _smartJunctionRingPaint);
+        canvas.drawCircle(Offset(cx, cy), innerR, _smartJunctionHolePaint);
+        canvas.drawCircle(Offset(cx, cy), outerR, _smartJunctionOutlinePaint);
       }
     }
   }
@@ -446,15 +620,13 @@ class GridRenderer extends PositionComponent
       height: size,
     );
 
-    // Shadow
+    // Shadow — flat offset RRect (no blur) for cheap mobile rasterization.
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         rect.shift(const Offset(0, 2)),
         Radius.circular(size * 0.2),
       ),
-      Paint()
-        ..color = Colors.black26
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
+      Paint()..color = Colors.black26,
     );
 
     // Body
@@ -560,9 +732,10 @@ class GridRenderer extends PositionComponent
         
         if (cell.hasTrafficLight) {
           _drawTrafficLight(canvas, x, y, cell);
-        } else if (cell.overpass == OverpassType.start || cell.overpass == OverpassType.end) {
-          _drawOverpassPortal(canvas, x, y, cell);
         }
+        // Express lane endpoints are now drawn as small ramp markers in
+        // _drawExpressLanesGlobal (per-frame), so the chunked overpass
+        // pentagon is intentionally not redrawn here.
       }
     }
   }
@@ -596,23 +769,23 @@ class GridRenderer extends PositionComponent
     canvas.drawCircle(Offset(cx, cy + pillH * 0.22), pillW * 0.35, Paint()..color = greenColor.withValues(alpha: opacity));
   }
 
-  void _drawOverpassPortal(Canvas canvas, int x, int y, GridCell cell) {
-    final opacity = cell.isPendingDeletion ? 0.3 : 1.0;
-    final cx = offsetX + x * cellSize + cellSize / 2;
-    final cy = offsetY + y * cellSize + cellSize / 2;
-    final r = cellSize * 0.35;
-
-    final path = Path()
-      ..moveTo(cx, cy - r)
-      ..lineTo(cx + r, cy - r * 0.5)
-      ..lineTo(cx + r, cy + r * 0.2)
-      ..quadraticBezierTo(cx + r, cy + r, cx, cy + r * 1.2)
-      ..quadraticBezierTo(cx - r, cy + r, cx - r, cy + r * 0.2)
-      ..lineTo(cx - r, cy - r * 0.5)
-      ..close();
-
-    canvas.drawPath(path, Paint()..color = GameConstants.expressLaneColor.withValues(alpha: opacity));
-    canvas.drawPath(path, Paint()..color = Colors.white.withValues(alpha: 0.8 * opacity)..style = PaintingStyle.stroke..strokeWidth = 2);
+  void _drawParkingHighlights(Canvas canvas) {
+    final cars = game.cars;
+    if (cars.isEmpty) return;
+    final pulse = 0.5 + 0.5 * math.sin(game.elapsedTime * 6);
+    // Keep the pulse inside the building cell so it doesn't visibly bleed
+    // onto the road tiles next to the building (which read as "the road is
+    // blinking yellow"). Half a cell radius is the cell edge.
+    final r = cellSize * (0.3 + pulse * 0.05);
+    final paint = Paint()
+      ..color = const Color(0xFFFFD54F).withValues(alpha: 0.22 + pulse * 0.22);
+    for (final car in cars) {
+      if (!car.isWaiting || car.arrived) continue;
+      final pos = car.isReturning ? car.spawnHousePos : car.targetDest;
+      final cx = offsetX + pos.x * cellSize + cellSize / 2;
+      final cy = offsetY + pos.y * cellSize + cellSize / 2;
+      canvas.drawCircle(Offset(cx, cy), r, paint);
+    }
   }
 
   void _drawDemandIndicators(Canvas canvas) {
@@ -634,7 +807,7 @@ class GridRenderer extends PositionComponent
       final age = gridManager.destinationAges[key] ?? 0;
       final isMature = age >= GameConstants.maturityThresholdWeeks;
 
-      // Draw Maturity Aura (Subtle glow for hubs)
+      // Draw Maturity Aura — flat alpha pulse (no blur) for mobile.
       if (isMature) {
         final t = game.elapsedTime * 2.0;
         final pulse = (0.5 + 0.5 * math.sin(t)).clamp(0.0, 1.0);
@@ -644,8 +817,7 @@ class GridRenderer extends PositionComponent
           Offset(cx, cy),
           auraRadius,
           Paint()
-            ..color = Colors.white.withValues(alpha: 0.05 + pulse * 0.05)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+            ..color = Colors.white.withValues(alpha: 0.05 + pulse * 0.05),
         );
       }
 
@@ -843,9 +1015,7 @@ class GridRenderer extends PositionComponent
       }
       canvas.drawRRect(
         RRect.fromRectAndRadius(rect.deflate(2), const Radius.circular(6)),
-        Paint()
-          ..color = color
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
+        Paint()..color = color,
       );
     }
   }
@@ -863,34 +1033,19 @@ class GridRenderer extends PositionComponent
       offsetY + (sc.maxSpawnY + 1) * cellSize,
     );
 
-    // Draw dark overlay outside the active rectangle
+    // Draw fully opaque solid overlay outside the active rectangle
     final paint = Paint()
-      ..color = GameConstants.backgroundColor.withValues(alpha: 0.4)
+      ..color = GameConstants.backgroundColor
       ..style = PaintingStyle.fill;
 
-    // We can use clipPath to draw everywhere EXCEPT the rect
+    // Use clipPath/evenOdd path to draw solid color everywhere in the camera viewport EXCEPT the rect
+    final viewport = game.camera.visibleWorldRect;
     final path = Path()
-      ..addRect(
-        Rect.fromLTWH(
-          offsetX,
-          offsetY,
-          gridManager.cols * cellSize,
-          gridManager.rows * cellSize,
-        ),
-      )
+      ..addRect(viewport)
       ..addRect(rect)
       ..fillType = PathFillType.evenOdd;
 
     canvas.drawPath(path, paint);
-
-    // Inner soft glow/border for the reveal area
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.05)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0,
-    );
   }
 
   void _drawFloatingMessages(Canvas canvas) {
@@ -957,4 +1112,11 @@ class _RenderChunk {
   ui.Picture? picture;
   bool dirty = true;
   _RenderChunk(this.x, this.y);
+}
+
+class _SpawnAnimation {
+  static const double duration = 1.2; // seconds
+  final GridPosition pos;
+  final double startTime;
+  _SpawnAnimation(this.pos, this.startTime);
 }

@@ -21,9 +21,12 @@ class MapConfig {
     this.startingRoads = 20,
     this.startingTunnels = 0,
     this.startingBridges = 0,
-    this.startingTrafficLights = 0,
-    this.startingSmartJunctions = 0,
-    this.startingExpressLanes = 0,
+    // Testing defaults: hand the player a couple of traffic lights, a smart
+    // junction, and an express lane out of the gate so those tools can be
+    // exercised on a fresh save without grinding weekly upgrades.
+    this.startingTrafficLights = 2,
+    this.startingSmartJunctions = 1,
+    this.startingExpressLanes = 1,
   });
 }
 

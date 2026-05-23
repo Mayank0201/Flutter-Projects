@@ -24,7 +24,11 @@ class AndesMapGenerator extends MapGenerator {
     int attempts = 0;
     bool valid = false;
 
-    while (!valid && attempts < 5) {
+    // Cap retries at 2: each retry rebuilds 800+ cells, runs detectRegions,
+    // and re-scans for terrain speeds. On mobile this is the difference
+    // between a 200ms hitch and a multi-second freeze that the OS sometimes
+    // kills as an ANR.
+    while (!valid && attempts < 2) {
       _generate(grid, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
       valid = _validate(grid);
       attempts++;
@@ -56,7 +60,11 @@ class AndesMapGenerator extends MapGenerator {
 
     // Andes Terrain: Rugged, fragmented, and naturally chaotic.
     // Instead of one big blob, we want multiple systems and chains.
-    final clusterCount = 4 + _random.nextInt(7); // 4-10 clusters
+    // Cluster count scales with grid area so the new 32x24 default doesn't
+    // get the same density as the old 64x40 (which choked mobile chunk
+    // rasterization once every mountain hit the GPU through MaskFilter.blur).
+    final cellsScale = (grid.cols * grid.rows) / (64 * 40);
+    final clusterCount = max(4, ((12 + _random.nextInt(8)) * cellsScale).round());
     
     for (int i = 0; i < clusterCount; i++) {
       int cx, cy;
@@ -72,21 +80,23 @@ class AndesMapGenerator extends MapGenerator {
         cy = yMin + _random.nextInt(max(1, yMax - yMin));
       }
       
-      final clusterSize = 4 + _random.nextInt(12);
+      final clusterSize = 8 + _random.nextInt(12); // 8-20 cells per cluster
       currentCoverage += _growBlob(grid, cx, cy, clusterSize);
       
       if (currentCoverage >= targetCoverage) break;
     }
 
     // Fill in extra texture with small isolated clusters
-    final extraCount = 6 + _random.nextInt(6);
+    final extraCount = max(4, ((15 + _random.nextInt(15)) * cellsScale).round());
     for (int i = 0; i < extraCount; i++) {
-       final rx = _random.nextInt(grid.cols);
-       final ry = _random.nextInt(grid.rows);
+       final rx = xMin + _random.nextInt(max(1, xMax - xMin));
+       final ry = yMin + _random.nextInt(max(1, yMax - yMin));
        if (grid.isValid(rx, ry) && grid.grid[ry][rx].isEmpty) {
-         _growBlob(grid, rx, ry, 1 + _random.nextInt(2));
+          _growBlob(grid, rx, ry, 2 + _random.nextInt(2));
        }
     }
+
+    _cleanupIsolatedMountains(grid);
 
     grid.detectRegionsEndless();
     grid.applyTerrainSpeeds();
@@ -141,8 +151,8 @@ class AndesMapGenerator extends MapGenerator {
     final totalCells = grid.cols * grid.rows;
     final coverage = mountainCount / totalCells;
     
-    // Ensure coverage is between 8% and 20%
-    if (coverage < 0.08 || coverage > 0.20) return false;
+    // Ensure coverage is between 4% and 25% (highly permissive for random generation)
+    if (coverage < 0.04 || coverage > 0.25) return false;
     
     // Ensure no complete partition
     for (int x = 0; x < grid.cols; x++) {
@@ -168,8 +178,42 @@ class AndesMapGenerator extends MapGenerator {
       final y = _random.nextInt(grid.rows);
       
       _growBlob(grid, x, y, 5 + _random.nextInt(8));
+      _cleanupIsolatedMountains(grid);
       grid.detectRegionsEndless();
       grid.applyTerrainSpeeds();
+    }
+  }
+
+  void _cleanupIsolatedMountains(GridManager grid) {
+    for (int y = 0; y < grid.rows; y++) {
+      for (int x = 0; x < grid.cols; x++) {
+        if (grid.grid[y][x].type == CellType.mountain) {
+          int neighbors = 0;
+          List<GridPosition> emptyNeighbors = [];
+          for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            final nx = x + d[0];
+            final ny = y + d[1];
+            if (grid.isValid(nx, ny)) {
+              if (grid.grid[ny][nx].type == CellType.mountain) {
+                neighbors++;
+              } else if (grid.grid[ny][nx].isEmpty) {
+                emptyNeighbors.add(GridPosition(nx, ny));
+              }
+            }
+          }
+          if (neighbors == 0) {
+            // Isolated single mountain tile!
+            if (emptyNeighbors.isNotEmpty) {
+              // Try to grow it by choosing a random empty neighbor
+              final target = emptyNeighbors[_random.nextInt(emptyNeighbors.length)];
+              grid.grid[target.y][target.x] = GridCell(type: CellType.mountain);
+            } else {
+              // If no empty neighbors, just remove the mountain tile
+              grid.grid[y][x] = GridCell();
+            }
+          }
+        }
+      }
     }
   }
 }

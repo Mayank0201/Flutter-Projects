@@ -113,6 +113,24 @@ class GridManager {
     removeInfrastructure(x, y);
   }
 
+  /// Cell qualifies for traffic-light placement when it's a road with at
+  /// least two active connections — i.e. anything that's actually part of
+  /// the network (rejects dead-end stubs that wouldn't benefit from a
+  /// signal). Intersections (3+ connections) are still the most useful
+  /// spots but the looser rule lets the player drop signals on a straight
+  /// segment or a curve too, which matches their expectation.
+  bool _isTrafficLightCandidate(int x, int y) {
+    if (!isValid(x, y)) return false;
+    final cell = grid[y][x];
+    if (!cell.isRoad) return false;
+    int connCount = 0;
+    if (cell.connUp) connCount++;
+    if (cell.connRight) connCount++;
+    if (cell.connDown) connCount++;
+    if (cell.connLeft) connCount++;
+    return connCount >= 2;
+  }
+
   void toggleTrafficLight(int x, int y) {
     if (!isValid(x, y)) return;
     final cell = grid[y][x];
@@ -120,7 +138,7 @@ class GridManager {
       grid[y][x] = cell.copyWith(hasTrafficLight: false);
       trafficLights++; // Refund
     } else {
-      if (trafficLights > 0) {
+      if (trafficLights > 0 && _isTrafficLightCandidate(x, y)) {
         grid[y][x] = cell.copyWith(hasTrafficLight: true);
         trafficLights--;
       }
@@ -249,14 +267,13 @@ class GridManager {
         throw 'REJECT';
       }
 
-      // 3. Categorical Limit: Max 1 External Road and 1 Internal Corridor.
+      // 3. Categorical Limit: a tunnel/bridge endpoint can have exactly ONE
+      //    external road mouth. The other side of the corridor is sealed —
+      //    so a single-cell tunnel is a dead-end, and chains have a mouth
+      //    only at each chain end (middle cells are corridor-internal).
       bool isTargetInfra = other.isTunnel || other.isBridge;
       if (!isTargetInfra && (other.isRoad || other.isHouse || other.isDestination)) {
         int externalConns = _countExternalConnections(ex, ey);
-        
-        // [FIX] Forward Continuation: If we are building forward (opposite of existing internal connection),
-        // we should allow it even if externalConns >= 1, but ONLY if we are connecting to a new tile.
-        // We also explicitly allow building from an endpoint if it aligns with the axis.
         if (externalConns >= 1 && !hasEdge(ex, ey, ox, oy)) {
           throw 'REJECT';
         }
@@ -580,6 +597,56 @@ class GridManager {
     });
   }
 
+  void updateDemand(double dt) {
+    for (final dest in destinations) {
+      final key = _key(dest);
+      final cell = grid[dest.y][dest.x];
+      if (!cell.isDestination) continue;
+
+      final age = destinationAges[key] ?? 0;
+      final isMature = age >= GameConstants.maturityThresholdWeeks;
+
+      double rateMultiplier = 1.0 + (age * GameConstants.demandAgeScalingRate);
+      if (isMature) {
+        rateMultiplier *= GameConstants.matureRequestSpeedMultiplier;
+      }
+      
+      double interval = GameConstants.demandTickInterval / rateMultiplier;
+      if (interval < GameConstants.minDemandInterval) {
+        interval = GameConstants.minDemandInterval;
+      }
+
+      double timer = demandTimers[key] ?? 0.0;
+      timer += dt;
+
+      if (timer >= interval) {
+        timer = 0.0;
+        int currentDemand = demand[key] ?? 0;
+        int maxD = isMature ? GameConstants.matureMaxDemand : GameConstants.maxDemand;
+        if (currentDemand < maxD) {
+          demand[key] = currentDemand + 1;
+        }
+      }
+      demandTimers[key] = timer;
+
+      int currentDemand = demand[key] ?? 0;
+      int maxD = isMature ? GameConstants.matureMaxDemand : GameConstants.maxDemand;
+      if (currentDemand >= maxD) {
+        double overflow = overflowLevels[key] ?? 0.0;
+        double speedMult = isMature ? GameConstants.matureOverflowBuildupMultiplier : 1.0;
+        overflow += (dt / GameConstants.criticalDuration) * speedMult;
+        overflowLevels[key] = overflow.clamp(0.0, 1.0);
+      } else {
+        double overflow = overflowLevels[key] ?? 0.0;
+        if (overflow > 0.0) {
+          overflow -= dt / GameConstants.overflowRecoveryDuration;
+          overflowLevels[key] = overflow.clamp(0.0, 1.0);
+        }
+      }
+    }
+  }
+
+
   void reset({int? minX, int? maxX, int? minY, int? maxY}) {
     grid = List.generate(rows, (y) => List.generate(cols, (x) => GridCell()));
     houses.clear();
@@ -849,23 +916,28 @@ class GridManager {
     // [FIX] Merge Double-Charge: Only charge for merges ONCE per gesture (Issue: Bug 1)
     int deducted = 0;
     bool isNewConnectivity = from != null && !hasEdge(from.x, from.y, x, y);
-    bool isTakingOverSystem = cell.owner == InfrastructureOwner.systemGenerated;
-    
-    // Special case: tunnel/bridge exits
+    // System-owned roads are exclusively building driveways. Treat them as a
+    // free pass-through: the player did not pay for the driveway when the
+    // building spawned, and they shouldn't be charged 1 road just to drag
+    // their build cursor through it to reach the cell beyond.
+    bool isSystemRoad = cell.type == CellType.road &&
+        cell.owner == InfrastructureOwner.systemGenerated;
 
     if (owner == InfrastructureOwner.player) {
-      // [STRICT RULE] Only deduct 1 road if the tile is currently empty or system-generated.
+      // [STRICT RULE] Only deduct 1 road if the tile is currently empty.
       // Merges and infra-exits do NOT cost extra if they land on an existing road.
-      if (cell.isEmpty || isTakingOverSystem) {
+      if (cell.isEmpty) {
+        if (roads <= 0) return false;
         deducted = 1;
         spendRoads(1);
-      } else if (isNewConnectivity && !_hasChargedMergeThisGesture) {
+      } else if (isNewConnectivity && !_hasChargedMergeThisGesture && !isSystemRoad) {
         // [FIX] Merge costing: Charge exactly 1 road for the FIRST merge connection in a gesture
+        if (roads <= 0) return false;
         deducted = 1;
         spendRoads(1);
         _hasChargedMergeThisGesture = true;
       } else {
-        // [FIX] Already charged for merge or just adding another segment
+        // [FIX] Already charged for merge, a system driveway pass-through, or just adding another segment
         deducted = 0;
       }
     }
@@ -875,10 +947,10 @@ class GridManager {
     }
 
     // [STRICT] OWNERSHIP PIPELINE
-    InfrastructureOwner finalOwner = owner;
-    if (owner == InfrastructureOwner.player) {
-      finalOwner = InfrastructureOwner.player;
-    }
+    // Driveways (system roads) stay system-owned even when a player drag
+    // passes over them — the player paid nothing for them above, so erase
+    // should not refund a player road either.
+    InfrastructureOwner finalOwner = isSystemRoad ? cell.owner : owner;
 
     // [ASSERT] Catch system-generated leaks (Issue 4)
     // Rule: systemGenerated roads must NEVER be committed to the grid during PREVIEW.
@@ -959,6 +1031,13 @@ class GridManager {
        return false;
     }
 
+    // Inventory Guard (Player-owned, new tunnel/bridge only).
+    // Without this, spendTunnel / spendBridge silently push the counter negative.
+    if (owner == InfrastructureOwner.player && !isExtension) {
+      if (type == CellType.tunnel && tunnels <= 0) return false;
+      if (type == CellType.bridge && bridges <= 0) return false;
+    }
+
     if (from != null) {
       final dist = (from.x - x).abs() + (from.y - y).abs();
       if (dist != 1) return false;
@@ -989,6 +1068,7 @@ class GridManager {
         }
       } else if (consumeRoad) {
         // [FIX] Tunnel Extension Costing (Bug 2)
+        if (roads <= 0) return false;
         roadDeducted = 1;
         spendRoads(1);
       }
@@ -1023,10 +1103,24 @@ class GridManager {
       updateNodeConnections(from.x, from.y);
     }
 
+    // Auto-wire to any adjacent road. A single-tap tunnel/bridge places with
+    // from=null, so without this it would have zero edges, count as 0-conn in
+    // the renderer, and disappear despite the inventory deduction.
+    for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      final nx = x + d[0];
+      final ny = y + d[1];
+      if (!isValid(nx, ny)) continue;
+      if (from != null && from.x == nx && from.y == ny) continue;
+      if (grid[ny][nx].type == CellType.road && !hasEdge(x, y, nx, ny)) {
+        addEdge(x, y, nx, ny);
+        updateNodeConnections(nx, ny);
+      }
+    }
+
     updateNodeConnections(x, y);
     // _resolveConnectivity(x, y); // Removed to prevent side-effect reverts
 
-    if (type == CellType.tunnel) _cleanOrphanRoads();
+    if (type == CellType.tunnel || type == CellType.bridge) _cleanOrphanRoads();
     
     onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
     return true;
@@ -1150,6 +1244,22 @@ class GridManager {
       return false;
     }
 
+    // Inventory gate: an express lane is a paid item, one inventory point
+    // per pair of endpoints. Without this check the player could drop any
+    // number of expressways for free.
+    if (owner == InfrastructureOwner.player && expressLanes <= 0) {
+      return false;
+    }
+
+    // Capture whether each endpoint was on an existing road BEFORE the
+    // overpass commit. We use this below to gate auto-connectivity: if the
+    // endpoint is already a road its existing edges are the ones the
+    // player intended, and we shouldn't silently splice in fresh edges to
+    // every adjacent road tile (which used to merge two parallel road
+    // networks together the moment a lane endpoint landed between them).
+    final startWasEmpty = startCell.isEmpty;
+    final endWasEmpty = endCell.isEmpty;
+
     // 2. Commit Overpass Property (Layered)
     grid[start.y][start.x] = startCell.copyWith(
       overpass: OverpassType.start,
@@ -1169,10 +1279,15 @@ class GridManager {
 
     // 3. Commit Graph Edge
     placedExpressLanes.add([start, end]);
-    
-    // 4. Automatic Connectivity (Rule 5)
-    _connectExpressToRoad(start);
-    _connectExpressToRoad(end);
+
+    // 4. Automatic Connectivity (Rule 5) — only for endpoints that landed
+    //    on previously empty cells.
+    if (startWasEmpty) _connectExpressToRoad(start);
+    if (endWasEmpty) _connectExpressToRoad(end);
+
+    if (owner == InfrastructureOwner.player) {
+      expressLanes -= 1;
+    }
 
     // print('[EXPRESSWAY] COMMITTED: Success from ${start.key} to ${end.key}');
     return true;
@@ -1366,6 +1481,8 @@ class GridManager {
     final cell = grid[y][x];
     if (cell.type == CellType.tunnel) {
       grid[y][x] = GridCell(type: CellType.mountain);
+    } else if (cell.type == CellType.bridge) {
+      grid[y][x] = GridCell(type: CellType.water);
     } else {
       grid[y][x] = GridCell();
     }
@@ -1671,8 +1788,16 @@ class GridManager {
     
     destinations.add(pos);
     infrastructure.add(pos); // [FIX] Add to infrastructure for rendering
+
+    // Start at 0 demand and pre-load the demand timer so the first +1 fires
+    // ~4s later. Without this, a brand-new destination shows a demand pip the
+    // instant it appears and the demand-pressure planner can queue an extra
+    // house spawn before the player has had a chance to react (or before the
+    // staged second house from the initial district has even landed).
+    const double initialDemandGrace = 4.0;
+    final preloadedTimer = GameConstants.demandTickInterval - initialDemandGrace;
     demand[key] = 0;
-    demandTimers[key] = 0;
+    demandTimers[key] = preloadedTimer.clamp(0.0, GameConstants.demandTickInterval);
     if (name != null) districtNames[key] = name;
   }
 

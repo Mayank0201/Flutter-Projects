@@ -5,8 +5,9 @@ import 'package:flame/extensions.dart';
 import '../../models/game_constants.dart';
 import '../../models/grid_cell.dart';
 import '../../game/flow_grid_game.dart';
+import '../pathfinder.dart';
 
-class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
+class CarComponent extends PositionComponent with HasGameReference<FlowGridGame> {
   int colorIndex;
   List<GridPosition> path;
   double cellSize;
@@ -28,13 +29,12 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
   bool isWaiting = false;
   double _waitTimer = 0.0;
   bool onExpressLane = false;
-  double travelTime = 0.0; // Delivery efficiency tracking
+  double travelTime = 0.0;
   bool _waitingAtSignal = false;
   static const double maxWaitTime = 1.5;
-  String? routeId; // For buses
-  double _sirenTimer = 0; // For emergency vehicles
+  String? routeId;
 
-  // Follow-the-leader constants
+  // Follow-the-leader
   double _collisionCheckTimer = 0;
   double _lastTargetMultiplier = 1.0;
   double _currentSpeedMultiplier = 1.0;
@@ -43,8 +43,15 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
   double _simCheckTimer = 0;
   double _congestionMultiplier = 1.0;
   double _terrainSpeed = 1.0;
+
+  // Lane offset multiplier on the perpendicular drive-on-the-right offset.
+  // +1.0 = right side (default), -1.0 = left side. Smoothly interpolated
+  // toward _targetLaneSign so the car visually arcs across the centerline
+  // instead of teleporting when it needs to pull alongside a parked car.
+  double _currentLaneSign = 1.0;
+  double _targetLaneSign = 1.0;
   
-  // Acceleration constants
+  // Acceleration
   static const double accelerationRate = 1.5;
   static const double decelerationRate = 2.8;
   static const double startupAccelerationBonus = 1.3;
@@ -83,7 +90,8 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
     _distanceTraveled = 0.0;
     _currentSpeedMultiplier = 1.0;
     _lastTargetMultiplier = 1.0;
-    _sirenTimer = 0.0;
+    _currentLaneSign = 1.0;
+    _targetLaneSign = 1.0;
 
     _rebuildSmoothPath();
 
@@ -92,37 +100,39 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       _updatePosition(0);
     } else if (path.isNotEmpty) {
       final startPos = path[0];
-      position = Vector2(
-        offsetX + startPos.x * cellSize + cellSize / 2,
-        offsetY + startPos.y * cellSize + cellSize / 2,
-      );
+      double sx = offsetX + startPos.x * cellSize + cellSize / 2;
+      double sy = offsetY + startPos.y * cellSize + cellSize / 2;
+      if (startPos.side != null) {
+        final r = cellSize * 0.4;
+        switch (startPos.side!) {
+          case Direction.north: sy -= r;
+          case Direction.east:  sx += r;
+          case Direction.south: sy += r;
+          case Direction.west:  sx -= r;
+        }
+      }
+      position = Vector2(sx, sy);
     }
     
     anchor = Anchor.center;
     priority = 10;
-    _updateVehicleVisuals();
+    _updateVehicleSize();
   }
 
-  void _updateVehicleVisuals() {
-    final baseSize = cellSize * 0.22;
+  void _updateVehicleSize() {
+    final baseSize = cellSize * 0.55;
     switch (vehicleType) {
       case VehicleType.car:
-        size = Vector2(baseSize * 2.0, baseSize); // Match sprite aspect ratio
-        break;
+        size = Vector2(baseSize, baseSize);
       case VehicleType.truck:
-        size = Vector2(baseSize * 2.6, baseSize * 1.3);
-        break;
+        size = Vector2(baseSize * 1.3, baseSize * 1.1);
       case VehicleType.serviceVan:
-        size = Vector2(baseSize * 2.2, baseSize * 1.1);
-        break;
+        size = Vector2(baseSize * 1.1, baseSize * 0.95);
       case VehicleType.bus:
-        size = Vector2(baseSize * 3.4, baseSize * 1.5);
-        break;
+        size = Vector2(baseSize * 1.5, baseSize * 1.2);
       case VehicleType.emergency:
-        size = Vector2(baseSize * 2.2, baseSize * 1.2);
-        break;
+        size = Vector2(baseSize * 1.2, baseSize);
     }
-    _updateSprite();
   }
 
   void reuseState({
@@ -149,42 +159,37 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
     isReturning = false;
     onExpressLane = false;
     _waitingAtSignal = false;
-    _sirenTimer = 0;
     _currentSpeedMultiplier = 0.0;
     _lastTargetMultiplier = 1.0;
+    _currentLaneSign = 1.0;
+    _targetLaneSign = 1.0;
     
     priority = 10;
     _rebuildSmoothPath();
-    _updateVehicleVisuals();
-  }
 
-  void _updateSprite() {
-    if (!isMounted || game.carSpriteSheet == null) return;
-    
-    int spriteIndex = 0;
-    switch (vehicleType) {
-      case VehicleType.car:
-        spriteIndex = colorIndex.clamp(0, 5);
-        break;
-      case VehicleType.truck:
-        spriteIndex = 6;
-        break;
-      case VehicleType.serviceVan:
-      case VehicleType.bus:
-      case VehicleType.emergency:
-        spriteIndex = 7;
-        break;
+    // Snap to the new path's starting cell so a reused-from-pool car doesn't
+    // render at its previous trip's endpoint before the first update tick.
+    if (path.isNotEmpty && _totalLength > 0) {
+      final tangent = _metric?.getTangentForOffset(0);
+      if (tangent != null) {
+        final fwd = tangent.vector;
+        final lane = cellSize * 0.18 * _currentLaneSign;
+        position = Vector2(
+          tangent.position.dx - fwd.dy * lane,
+          tangent.position.dy + fwd.dx * lane,
+        );
+        angle = -tangent.angle;
+      }
+    } else if (path.isNotEmpty) {
+      final startPos = path[0];
+      position = Vector2(
+        offsetX + startPos.x * cellSize + cellSize / 2,
+        offsetY + startPos.y * cellSize + cellSize / 2,
+      );
     }
-    
-    sprite = game.carSpriteSheet!.getSpriteById(spriteIndex);
-  }
 
-  @override
-  void onMount() {
-    super.onMount();
-    _updateSprite();
+    _updateVehicleSize();
   }
-
 
   double get _vehicleSpeedMultiplier {
     switch (vehicleType) {
@@ -203,13 +208,29 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       return;
     }
 
-    Offset getPos(GridPosition p) {
+    // Smart-junction sub-nodes are the only path entries that share their
+    // (x, y) with a path neighbor — buildings have a unique cell. Detect
+    // structurally so we don't reach into the game (which throws on a
+    // pooled car that hasn't reattached yet — that error then aborted the
+    // path build and left the car invisible on the road).
+    bool isJunctionNodeAt(int i) {
+      if (path[i].side == null) return false;
+      final p = path[i];
+      final prevSame = i > 0 && path[i - 1].x == p.x && path[i - 1].y == p.y;
+      final nextSame =
+          i < path.length - 1 && path[i + 1].x == p.x && path[i + 1].y == p.y;
+      return prevSame || nextSame;
+    }
+
+    Offset getPos(int i) {
+      final p = path[i];
       final midX = offsetX + p.x * cellSize + cellSize / 2;
       final midY = offsetY + p.y * cellSize + cellSize / 2;
-      
       if (p.side == null) return Offset(midX, midY);
-      
-      final r = cellSize * 0.4;
+      // Junction sub-nodes sit on the cell's outer edge so the smooth-path
+      // bezier hugs the visible donut ring; building entries keep the
+      // tighter 0.4 offset so the parking position lands at the door.
+      final r = isJunctionNodeAt(i) ? cellSize * 0.5 : cellSize * 0.4;
       switch (p.side!) {
         case Direction.north: return Offset(midX, midY - r);
         case Direction.east:  return Offset(midX + r, midY);
@@ -218,49 +239,119 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       }
     }
 
-    final start = getPos(path[0]);
+    // Side angle in canvas (y-down) coords: 0=east, pi/2=south, pi=west,
+    // -pi/2=north. Used by the smart-junction arc.
+    double sideAngle(Direction d) {
+      switch (d) {
+        case Direction.east: return 0;
+        case Direction.south: return pi / 2;
+        case Direction.west: return pi;
+        case Direction.north: return -pi / 2;
+      }
+    }
+
+    bool isJunctionTransitionAt(int i) {
+      if (i < 0 || i >= path.length - 1) return false;
+      final a = path[i];
+      final b = path[i + 1];
+      return a.x == b.x &&
+          a.y == b.y &&
+          isJunctionNodeAt(i) &&
+          isJunctionNodeAt(i + 1);
+    }
+
+    bool isLongJumpAt(int i) {
+      if (i < 0 || i >= path.length - 1) return false;
+      final a = path[i];
+      final b = path[i + 1];
+      return (a.x - b.x).abs() > 1 || (a.y - b.y).abs() > 1;
+    }
+
+    final start = getPos(0);
     _smoothPath.moveTo(start.dx, start.dy);
 
     for (int i = 0; i < path.length - 1; i++) {
       final p1 = path[i];
       final p2 = path[i + 1];
+      final c1 = getPos(i);
+      final c2 = getPos(i + 1);
 
-      final c1 = getPos(p1);
-      final c2 = getPos(p2);
-
-      // Check for Express Lane jump (non-adjacent tiles)
-      final dx = (p1.x - p2.x).abs();
-      final dy = (p1.y - p2.y).abs();
-      if (dx > 1 || dy > 1) {
-        // Curved express lane logic (matches ExpressLaneComponent)
+      // Long jump (express lane): bezier with a perpendicular arc.
+      //
+      // Sign of the perpendicular is chosen by a fixed rule (always the
+      // half-plane with perp.dy < 0, ties broken by perp.dx < 0) instead of
+      // "right of forward". That makes the bezier curve identical whether
+      // the car is traveling A→B or B→A — without this, the return trip
+      // arced to the opposite side of the painted lane and the car looked
+      // like it was floating off in space. The painted lane in
+      // _drawExpressLanesGlobal uses the same rule so the two match.
+      //
+      // Pen is guaranteed to be at c1 here because the previous iteration's
+      // look-ahead skipped its corner-cut when this segment was about to
+      // run — see the !nextSpecial branch below.
+      if (isLongJumpAt(i)) {
         final delta = c2 - c1;
         final dist = delta.distance;
         final mid = (c1 + c2) / 2;
         final unitDir = delta / dist;
         final perp = Offset(-unitDir.dy, unitDir.dx);
-        final arcHeight = dist * 0.15;
+        final perpSign = (perp.dy < 0 || (perp.dy == 0 && perp.dx < 0))
+            ? 1.0
+            : -1.0;
+        final arcHeight = dist * 0.15 * perpSign;
         final cp = mid + perp * arcHeight;
         _smoothPath.quadraticBezierTo(cp.dx, cp.dy, c2.dx, c2.dy);
         continue;
       }
 
-      if (i < path.length - 2) {
+      // Sub-node → sub-node within the same smart junction: draw a true
+      // circular arc along the outer ring of the donut so the car visibly
+      // goes *through* the roundabout instead of cutting across the inner
+      // half. Sweep is +pi/2 CW because the pathfinder always rotates in
+      // the N→E→S→W→N order, which is clockwise in canvas y-down coords.
+      if (isJunctionTransitionAt(i)) {
+        final cx = offsetX + p1.x * cellSize + cellSize / 2;
+        final cy = offsetY + p1.y * cellSize + cellSize / 2;
+        final ringR = cellSize * 0.5;
+        final rect = Rect.fromCircle(center: Offset(cx, cy), radius: ringR);
+        final startAngle = sideAngle(p1.side!);
+        const sweepAngle = pi / 2;
+        _smoothPath.arcTo(rect, startAngle, sweepAngle, false);
+        continue;
+      }
+
+      // Look ahead: if the next iteration's segment is a long jump or a
+      // junction transition, do NOT corner-cut here. Corner-cutting drops
+      // the pen at cornerEnd (between c2 and c3) which would sit halfway
+      // along the express-lane bezier or off the donut ring. Instead end
+      // cleanly at c2 so the next iteration's curve starts at its c1.
+      final nextSpecial =
+          isLongJumpAt(i + 1) || isJunctionTransitionAt(i + 1);
+
+      if (!nextSpecial && i < path.length - 2) {
         final p3 = path[i + 2];
-        final c3 = getPos(p3);
-
-        bool isStraight = (p1.x == p2.x && p2.x == p3.x && p1.side == null && p2.side == null && p3.side == null) ||
-            (p1.y == p2.y && p2.y == p3.y && p1.side == null && p2.side == null && p3.side == null);
-
+        final c3 = getPos(i + 2);
+        bool isStraight = (p1.x == p2.x &&
+                p2.x == p3.x &&
+                p1.side == null &&
+                p2.side == null &&
+                p3.side == null) ||
+            (p1.y == p2.y &&
+                p2.y == p3.y &&
+                p1.side == null &&
+                p2.side == null &&
+                p3.side == null);
         if (!isStraight) {
-          final cornerStart = c2 + (c1 - c2) * 0.4;
+          // Endpoints at 0.5 land on the cell edges, matching the road
+          // renderer's quadratic-bezier endpoints exactly. Anything less and
+          // the car visibly cuts inside the painted curve at every corner.
+          final cornerStart = c2 + (c1 - c2) * 0.5;
           _smoothPath.lineTo(cornerStart.dx, cornerStart.dy);
-
-          final cornerEnd = c2 + (c3 - c2) * 0.4;
+          final cornerEnd = c2 + (c3 - c2) * 0.5;
           _smoothPath.quadraticBezierTo(c2.dx, c2.dy, cornerEnd.dx, cornerEnd.dy);
           continue;
         }
       }
-
       _smoothPath.lineTo(c2.dx, c2.dy);
     }
 
@@ -275,23 +366,70 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
 
   void _updatePosition(double dt) {
     if (_totalLength <= 0) return;
-
     _distanceTraveled += dt * speed * game.timeScale;
     if (_distanceTraveled >= _totalLength) {
       _distanceTraveled = _totalLength;
     }
-
     final tangent = _metric!.getTangentForOffset(_distanceTraveled);
     if (tangent != null) {
-      position = Vector2(tangent.position.dx, tangent.position.dy);
+      // Drive on the right side of the road centerline. Right-perpendicular
+      // in screen coords (y-down) of forward (fx, fy) is (-fy, fx). Two cars
+      // going opposite directions land on opposite sides — no more overlap.
+      // _currentLaneSign flips the offset (+1 right, -1 left) so a car can
+      // pull alongside a parked one in the other lane.
+      final fwd = tangent.vector;
+      final lane = cellSize * 0.18 * _currentLaneSign;
+      position = Vector2(
+        tangent.position.dx - fwd.dy * lane,
+        tangent.position.dy + fwd.dx * lane,
+      );
       angle = -tangent.angle;
     }
   }
 
-  GridPosition? get currentTarget {
-    if (_currentPathIndex + 1 < path.length) {
-      return path[_currentPathIndex + 1];
+  /// Sets [_targetLaneSign] to -1 when this car is about to arrive at a
+  /// destination that already has a parked car, so it pulls into the other
+  /// lane instead of stacking on top. Reverts to +1 (right side) otherwise.
+  void _updateLaneTarget() {
+    if (arrived || isReturning) {
+      _targetLaneSign = 1.0;
+      return;
     }
+    // Only swap when approaching the final cell — within the last 3 path nodes
+    // (building + driveway + last road tile). Earlier swaps look like aimless
+    // weaving.
+    if (path.length < 2 || _currentPathIndex < path.length - 3) {
+      _targetLaneSign = 1.0;
+      return;
+    }
+    final gWidth = game.gridWidth;
+    if (gWidth <= 0) {
+      _targetLaneSign = 1.0;
+      return;
+    }
+    final destKeyX = targetDest.x;
+    final destKeyY = targetDest.y;
+    bool parkedAtDest = false;
+    for (int dy = -1; dy <= 1 && !parkedAtDest; dy++) {
+      for (int dx = -1; dx <= 1 && !parkedAtDest; dx++) {
+        final bucketKey = (destKeyX + dx) + (destKeyY + dy) * gWidth;
+        final bucket = game.carGrid[bucketKey];
+        if (bucket == null) continue;
+        for (final other in bucket) {
+          if (identical(other, this) || other.arrived) continue;
+          if (!other.isWaiting || other.isReturning) continue;
+          if (other.targetDest.x == destKeyX && other.targetDest.y == destKeyY) {
+            parkedAtDest = true;
+            break;
+          }
+        }
+      }
+    }
+    _targetLaneSign = parkedAtDest ? -1.0 : 1.0;
+  }
+
+  GridPosition? get currentTarget {
+    if (_currentPathIndex + 1 < path.length) return path[_currentPathIndex + 1];
     return null;
   }
 
@@ -311,6 +449,70 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
     _rebuildSmoothPath();
   }
 
+  void _onArrivedAtDestination() {
+    final gm = game.gridManager;
+    if (gm == null) {
+      arrived = true;
+      return;
+    }
+
+    // Credit the delivery once per outbound trip.
+    if (gm.isValid(targetDest.x, targetDest.y) &&
+        gm.getCell(targetDest.x, targetDest.y).isDestination) {
+      game.score += 100;
+      game.totalDeliveries += 1;
+
+      // Decrease demand and claimed demand
+      final destKey = "${targetDest.x},${targetDest.y}";
+      final currentDemand = gm.demand[destKey] ?? 0;
+      if (currentDemand > 0) {
+        gm.demand[destKey] = currentDemand - 1;
+      }
+      final currentClaimed = gm.claimedDemand[destKey] ?? 0;
+      if (currentClaimed > 0) {
+        gm.claimedDemand[destKey] = currentClaimed - 1;
+      }
+    }
+
+    // The outbound path was extended into the building cells, so path.last is
+    // the destination tile itself (not passable). Pathfind from the dest
+    // driveway back to the home driveway, then splice the buildings onto
+    // both ends so the return trip mirrors the outbound — leave the dest
+    // doorstep, drive home, park at the home doorstep, then disappear.
+    final destDriveway = gm.buildingDriveways['${targetDest.x},${targetDest.y}'];
+    final homeDriveway = gm.buildingDriveways['${spawnHousePos.x},${spawnHousePos.y}'];
+    if (destDriveway == null || homeDriveway == null) {
+      arrived = true;
+      return;
+    }
+
+    final returnRoadPath = Pathfinder.findPath(gm, destDriveway, homeDriveway);
+    if (returnRoadPath == null || returnRoadPath.isEmpty) {
+      arrived = true;
+      return;
+    }
+
+    final destEntry = gm.getCell(targetDest.x, targetDest.y).entrySide;
+    final houseEntry = gm.getCell(spawnHousePos.x, spawnHousePos.y).entrySide;
+    final returnPath = <GridPosition>[
+      if (destEntry != null)
+        GridPosition(targetDest.x, targetDest.y, destEntry)
+      else
+        GridPosition(targetDest.x, targetDest.y),
+      ...returnRoadPath,
+      if (houseEntry != null)
+        GridPosition(spawnHousePos.x, spawnHousePos.y, houseEntry)
+      else
+        GridPosition(spawnHousePos.x, spawnHousePos.y),
+    ];
+
+    if (returnPath.length >= 2) {
+      startReturnTrip(returnPath);
+    } else {
+      arrived = true;
+    }
+  }
+
   Map<String, dynamic> toJson() => {
     'colorIndex': colorIndex,
     'path': path.map((p) => {'x': p.x, 'y': p.y}).toList(),
@@ -325,20 +527,14 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
   @override
   void update(double dt) {
     super.update(dt);
-    if (game.paused) { return; }
+    if (game.paused) return;
 
     if (arrived || path.length < 2) {
       arrived = true;
       return;
     }
 
-    // Track delivery time
     travelTime += dt * game.timeScale;
-
-    // Emergency siren logic
-    if (vehicleType == VehicleType.emergency) {
-      _sirenTimer += dt * 10;
-    }
 
     // Bus stop logic
     if (vehicleType == VehicleType.bus && !isWaiting && !arrived) {
@@ -352,17 +548,31 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
 
     if (isWaiting) {
       _waitTimer += dt * game.timeScale;
-      // Buses wait longer at stops, others (waiting for return trip) wait maxWaitTime
-      double waitLimit = (vehicleType == VehicleType.bus) ? 1.5 : maxWaitTime;
+      double waitLimit;
+      if (vehicleType == VehicleType.bus) {
+        waitLimit = 1.5;
+      } else if (isReturning) {
+        waitLimit = 0.5;
+      } else {
+        waitLimit = maxWaitTime;
+      }
       if (_waitTimer >= waitLimit) {
         isWaiting = false;
-        if (!isReturning && vehicleType != VehicleType.bus) arrived = true;
+        // Bus: keep cruising along its route. Returning: this was the home stop, done.
+        // Outbound non-bus: deliver, then try to head back home before disappearing.
+        if (vehicleType != VehicleType.bus) {
+          if (isReturning) {
+            arrived = true;
+          } else {
+            _onArrivedAtDestination();
+          }
+        }
       }
       return;
     }
 
     if (_distanceTraveled >= _totalLength) {
-      if (!isReturning && !isWaiting) {
+      if (!isWaiting) {
         isWaiting = true;
         _waitTimer = 0;
         return;
@@ -376,7 +586,6 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
     if (_simCheckTimer >= 1 / 15) {
       _simCheckTimer = 0;
       
-      // 1. Traffic Signal Check
       _waitingAtSignal = false;
       if (_currentPathIndex + 1 < path.length && game.gridManager != null) {
         final nextPos = path[_currentPathIndex + 1];
@@ -404,7 +613,6 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
         }
       }
 
-      // 2. Congestion Slowdown
       _congestionMultiplier = 1.0;
       if (game.gridManager != null && _currentPathIndex < path.length) {
         final curPos = path[_currentPathIndex];
@@ -413,7 +621,6 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
         }
       }
       
-      // 3. Express Lane Check
       onExpressLane = false;
       _terrainSpeed = 1.0;
       if (_currentPathIndex < path.length && game.gridManager != null) {
@@ -424,7 +631,7 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       }
     }
 
-    // --- Follow-the-leader target calculation ---
+    // --- Follow-the-leader ---
     double targetMultiplier = 1.0;
     _collisionCheckTimer += dt;
     if (_collisionCheckTimer >= 0.1) {
@@ -432,9 +639,8 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       if (!onExpressLane && !_waitingAtSignal) {
         final myPos = position;
         final forward = Vector2(cos(angle), sin(angle));
-        final minGap = cellSize * 0.7; // Increased gap slightly for smoother flow
+        final minGap = cellSize * 0.7;
         double closestAheadDist = double.infinity;
-
         final myGridPos = path[_currentPathIndex.clamp(0, path.length - 1)];
         final gWidth = game.gridWidth;
 
@@ -443,16 +649,13 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
             final key = (myGridPos.x + dx) + (myGridPos.y + dy) * gWidth;
             final others = game.carGrid[key];
             if (others == null) continue;
-
             for (final other in others) {
               if (identical(other, this) || other.onExpressLane || other.arrived) continue;
               final distSq = myPos.distanceToSquared(other.position);
-              if (distSq > (cellSize * 1.8) * (cellSize * 1.8)) continue; 
-              
+              if (distSq > (cellSize * 1.8) * (cellSize * 1.8)) continue;
               final toOther = other.position - myPos;
               final dotProduct = toOther.x * forward.x + toOther.y * forward.y;
               if (dotProduct <= 0) continue;
-
               final dist = sqrt(distSq);
               if (dist < closestAheadDist) closestAheadDist = dist;
             }
@@ -472,48 +675,44 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       targetMultiplier = 0.0;
     } else {
       targetMultiplier = _lastTargetMultiplier;
-      
-      // [NEW] Anti-Gridlock: Don't enter intersection if exit is congested
       if (_currentPathIndex + 1 < path.length) {
         final nextPos = path[_currentPathIndex + 1];
         if (game.gridManager!.isValid(nextPos.x, nextPos.y) && 
             game.gridManager!.isRoadCongested(nextPos.x, nextPos.y)) {
-           // Slow down significantly if heading into a jam
            targetMultiplier = min(targetMultiplier, 0.15);
         }
       }
     }
 
-    // --- Apply Acceleration/Deceleration ---
+    // --- Lane swap when another car is parked at our destination ---
+    _updateLaneTarget();
+    final laneRate = dt * 2.5; // sign units per second; 0.8s for a full swap
+    final laneDiff = _targetLaneSign - _currentLaneSign;
+    if (laneDiff.abs() <= laneRate) {
+      _currentLaneSign = _targetLaneSign;
+    } else {
+      _currentLaneSign += laneDiff > 0 ? laneRate : -laneRate;
+    }
+
+    // --- Acceleration/Deceleration ---
     final baseTarget = targetMultiplier * _vehicleSpeedMultiplier * _terrainSpeed * _congestionMultiplier;
-    
     if (_currentSpeedMultiplier < baseTarget) {
-      // Accelerate
       double rate = accelerationRate;
       if (_currentSpeedMultiplier < 0.1) rate *= startupAccelerationBonus;
       _currentSpeedMultiplier = min(baseTarget, _currentSpeedMultiplier + rate * dt);
     } else if (_currentSpeedMultiplier > baseTarget) {
-      // Decelerate
       _currentSpeedMultiplier = max(baseTarget, _currentSpeedMultiplier - decelerationRate * dt);
     }
 
-    // RULE: Creep Speed
     double finalMultiplier = _currentSpeedMultiplier;
     if (!_waitingAtSignal && !arrived && !isWaiting) {
-      finalMultiplier = max(0.08, _currentSpeedMultiplier); // Soft creep in traffic
+      finalMultiplier = max(0.08, _currentSpeedMultiplier);
     }
 
     _updatePosition(dt * finalMultiplier);
-    
-    // Update current path index
+
     if (_totalLength > 0) {
       _currentPathIndex = ((_distanceTraveled / _totalLength) * (path.length - 1)).floor().clamp(0, path.length - 1);
-    }
-    
-    // Position update based on smooth path
-    final tangentObj = _metric?.getTangentForOffset(_distanceTraveled);
-    if (tangentObj != null) {
-      position = Vector2(tangentObj.position.dx, tangentObj.position.dy);
     }
   }
 
@@ -524,5 +723,35 @@ class CarComponent extends SpriteComponent with HasGameReference<FlowGridGame> {
       x.clamp(0, game.gridManager?.cols ?? 1 - 1), 
       y.clamp(0, game.gridManager?.rows ?? 1 - 1)
     );
+  }
+
+  // ============================================================
+  // RENDERING — single sprite from the shared 1x6 vehicle atlas.
+  // One drawImageRect call per car; all 6 colors share one GPU texture.
+  // ============================================================
+
+  @override
+  void render(Canvas canvas) {
+    final sprites = game.vehicleSprites;
+    if (sprites.isEmpty) return;
+    final sprite = sprites[colorIndex % sprites.length];
+
+    // Flame's render() canvas has (0,0) at the component's top-left, not at
+    // the anchor — so we have to translate to size/2 to land on the world
+    // `position` (= the road centerline) before rotating + drawing.
+    canvas.save();
+    canvas.translate(size.x / 2, size.y / 2);
+    canvas.rotate(pi / 2);
+
+    // Source art faces "up" (north); after the pi/2 rotation that maps to +x
+    // (east), which is the component's forward direction.
+    final length = size.x;
+    final width = length / game.vehicleSpriteAspect;
+    sprite.render(
+      canvas,
+      position: Vector2(-width / 2, -length / 2),
+      size: Vector2(width, length),
+    );
+    canvas.restore();
   }
 }

@@ -79,7 +79,7 @@ class SpawnScoringService {
     score += spawnController.districtPlanner.calculateRegionScore(pos, colorIndex) * 0.5;
 
     // 4. ROADABILITY (Issue 2)
-    final entry = spawnController.findValidEntrySide(pos);
+    final entry = spawnController.findValidEntrySide(pos, profile: BuildingProfile.commercial, stage: stage);
     if (entry != null) {
       score += calculateRoadabilityScore(pos, entry);
     } else {
@@ -162,7 +162,7 @@ class SpawnScoringService {
     score -= nearbyRoads * 10.0;
 
     // 4. ACCESSIBILITY & ROADABILITY (Issue 2)
-    final entry = spawnController.findValidEntrySide(pos);
+    final entry = spawnController.findValidEntrySide(pos, profile: BuildingProfile.residential, stage: stage);
     if (entry != null) {
       score += calculateRoadabilityScore(pos, entry);
       score += spawnController.calculateOpennessScore(pos, entry) * 10; // Increased weight

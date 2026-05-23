@@ -70,6 +70,10 @@ class ProgressionDirector {
     _colorUnlockWeek[0] = 1;
   }
 
+  void registerUnlockedColor(int colorIndex, int week) {
+    _colorUnlockWeek[colorIndex] = week;
+  }
+
   // ============================================================
   // UPDATE (called every frame from FlowGridGame)
   // ============================================================

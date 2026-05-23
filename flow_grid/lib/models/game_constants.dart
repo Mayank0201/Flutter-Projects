@@ -92,8 +92,8 @@ class GameConstants {
   static const Color tunnelColor = Color(0xFF8A7D6B);
   static const Color waterColor = Color(0xFF2C5E8A); // Deep River Blue
   static const Color bridgeColor = Color(0xFF7A8A99); // Slate Steel
-  static const Color expressLaneColor = Color(0xFF4A9062); // Subtle Green
-  static const Color expressLaneBorderColor = Color(0xFF346344);
+  static const Color expressLaneColor = Color(0xFF9FE0B4); // Light Green
+  static const Color expressLaneBorderColor = Color(0xFF6FB088);
 
   // Congestion
   static const Color congestionLowColor = Color(0xFFE6B800); // Yellow

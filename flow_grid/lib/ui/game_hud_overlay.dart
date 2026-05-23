@@ -171,7 +171,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 6,
             crossAxisSpacing: 6,
-            childAspectRatio: 1.1,
+            childAspectRatio: 0.92,
             children: [
               if (_shouldShowTool(BuildTool.road))
                 _toolButton(
