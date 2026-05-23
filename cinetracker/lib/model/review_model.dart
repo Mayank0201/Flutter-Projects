@@ -11,6 +11,12 @@ class Review {
   final String createdAt;
   final String updatedAt;
 
+  // ── NEW Movie Metadata Fields ──
+  final String? movieTitle;
+  final String? moviePosterUrl;
+  final int? movieReleaseYear;
+  final String? movieGenre;
+
   const Review({
     required this.id,
     required this.movieId,
@@ -22,6 +28,11 @@ class Review {
     this.isHelpful = false,
     this.createdAt = '',
     this.updatedAt = '',
+    // ── New Initializers ──
+    this.movieTitle,
+    this.moviePosterUrl,
+    this.movieReleaseYear,
+    this.movieGenre,
   });
 
   factory Review.fromJson(Map<String, dynamic> json) {
@@ -36,6 +47,11 @@ class Review {
       isHelpful: json['isHelpful'] == true,
       createdAt: (json['createdAt'] ?? '').toString(),
       updatedAt: (json['updatedAt'] ?? '').toString(),
+      // ── New Parsing ──
+      movieTitle: json['movieTitle']?.toString(),
+      moviePosterUrl: json['moviePosterUrl']?.toString(),
+      movieReleaseYear: (json['movieReleaseYear'] as num?)?.toInt(),
+      movieGenre: json['movieGenre']?.toString(),
     );
   }
 }

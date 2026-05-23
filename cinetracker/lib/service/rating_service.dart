@@ -113,4 +113,31 @@ class RatingService {
     await _dio.post("/movie/review/$ratingId/helpful");
     debugPrint("TOGGLE HELPFUL: ratingId=$ratingId");
   }
+
+  /// GET /movie/my-reviews — paginated list of reviews for the logged-in user
+  Future<List<Review>> getMyReviews({int page = 1, int size = 10}) async {
+    final response = await _dio.get(
+      "/movie/my-reviews",
+      queryParameters: {"page": page, "size": size},
+    );
+    debugPrint("MY REVIEWS RESPONSE: ${response.data}");
+
+    final dynamic raw = response.data;
+    if (raw is Map<String, dynamic>) {
+      final dynamic data = raw['data'] ?? raw;
+      List items;
+      if (data is Map<String, dynamic>) {
+        items = (data['content'] as List?) ?? [];
+      } else if (data is List) {
+        items = data;
+      } else {
+        items = [];
+      }
+      return items
+          .whereType<Map<String, dynamic>>()
+          .map(Review.fromJson)
+          .toList();
+    }
+    return <Review>[];
+  }
 }

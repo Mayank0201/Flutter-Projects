@@ -3,6 +3,8 @@ import '../../../model/user_profile_model.dart';
 import '../../../model/review_model.dart';
 import '../../../model/badge_model.dart';
 import '../../../service/social_service.dart';
+import '../../../model/movie_model.dart';
+import 'movie_details_page.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int userId;
@@ -454,55 +456,131 @@ class _ReviewItem extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    final subtitle = [
+      if (review.movieReleaseYear != null) review.movieReleaseYear.toString(),
+      if (review.movieGenre != null && review.movieGenre!.isNotEmpty) review.movieGenre,
+    ].join(' • ');
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
+      child: Material(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: colorScheme.outline.withValues(alpha: 0.12)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MovieDetailsPage(
+                  movie: Movie(
+                    id: review.movieId,
+                    title: review.movieTitle ?? 'Unknown Movie',
+                    poster: review.moviePosterUrl ?? '',
+                    releaseYear: review.movieReleaseYear,
+                    genre: review.movieGenre ?? 'N/A',
+                  ),
+                ),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: colorScheme.outline.withValues(alpha: 0.12)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ...List.generate(5, (i) {
-                  final filled = review.rating >= i + 1;
-                  return Icon(
-                    filled ? Icons.star_rounded : Icons.star_outline_rounded,
-                    size: 14,
-                    color: filled
-                        ? const Color(0xFFFFB800)
-                        : colorScheme.onSurface.withValues(alpha: 0.2),
-                  );
-                }),
-                const SizedBox(width: 6),
-                Text(
-                  review.rating.toStringAsFixed(1),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.bold,
+                // Poster
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: review.moviePosterUrl != null && review.moviePosterUrl!.isNotEmpty
+                      ? Image.network(
+                          review.moviePosterUrl!,
+                          width: 50,
+                          height: 75,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => _posterPlaceholder(colorScheme),
+                        )
+                      : _posterPlaceholder(colorScheme),
+                ),
+                const SizedBox(width: 12),
+                // Details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        review.movieTitle ?? 'Unknown Movie',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          ...List.generate(5, (i) {
+                            final filled = review.rating >= i + 1;
+                            return Icon(
+                              filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                              size: 14,
+                              color: filled
+                                  ? const Color(0xFFFFB800)
+                                  : colorScheme.onSurface.withValues(alpha: 0.2),
+                            );
+                          }),
+                          const SizedBox(width: 6),
+                          Text(
+                            review.rating.toStringAsFixed(1),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (review.comment != null && review.comment!.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          review.comment!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(height: 1.3),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
             ),
-            if (review.comment != null && review.comment!.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                review.comment!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _posterPlaceholder(ColorScheme cs) => Container(
+        width: 50,
+        height: 75,
+        color: cs.surfaceContainerHighest,
+        child: Icon(Icons.movie_rounded, color: cs.onSurfaceVariant, size: 20),
+      );
 }
 
 // ── Section header ─────────────────────────────────────────────────────────
