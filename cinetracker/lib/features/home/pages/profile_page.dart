@@ -13,6 +13,7 @@ import 'credits_page.dart';
 import 'package:cinetracker/core/utils/content_moderator.dart';
 import 'wishlist_page.dart';
 import 'challenges_page.dart';
+import 'my_reviews_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -400,6 +401,15 @@ class _ProfilePageState extends State<ProfilePage> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const WishlistPage()),
+                    ),
+                  ),
+                  _buildListTile(
+                    context,
+                    icon: Icons.rate_review_rounded,
+                    title: 'My Reviews',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MyReviewsPage()),
                     ),
                   ),
                   _buildListTile(

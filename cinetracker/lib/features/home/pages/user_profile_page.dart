@@ -3,6 +3,8 @@ import '../../../model/user_profile_model.dart';
 import '../../../model/review_model.dart';
 import '../../../model/badge_model.dart';
 import '../../../service/social_service.dart';
+import '../../../service/tmdb_service.dart';
+import 'movie_details_page.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int userId;
@@ -454,53 +456,160 @@ class _ReviewItem extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    final hasMovieInfo = review.movieTitle != null && review.movieTitle!.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: colorScheme.outline.withValues(alpha: 0.12)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                ...List.generate(5, (i) {
-                  final filled = review.rating >= i + 1;
-                  return Icon(
-                    filled ? Icons.star_rounded : Icons.star_outline_rounded,
-                    size: 14,
-                    color: filled
-                        ? const Color(0xFFFFB800)
-                        : colorScheme.onSurface.withValues(alpha: 0.2),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () async {
+              try {
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(child: CircularProgressIndicator()),
+                );
+                final movie = await TMDBService().getMovieDetails(review.movieId);
+                if (!context.mounted) return;
+                Navigator.pop(context); // pop loading dialog
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => MovieDetailsPage(movie: movie)),
+                );
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context); // pop loading dialog
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Could not load movie details')),
                   );
-                }),
-                const SizedBox(width: 6),
-                Text(
-                  review.rating.toStringAsFixed(1),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.bold,
+                }
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                border: Border.all(
+                    color: colorScheme.outline.withValues(alpha: 0.12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.02),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
                   ),
-                ),
-              ],
-            ),
-            if (review.comment != null && review.comment!.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                review.comment!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                ],
               ),
-            ],
-          ],
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (hasMovieInfo) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: review.moviePosterUrl != null && review.moviePosterUrl!.isNotEmpty
+                          ? Image.network(
+                              review.moviePosterUrl!,
+                              width: 60,
+                              height: 90,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _buildPosterPlaceholder(colorScheme),
+                            )
+                          : _buildPosterPlaceholder(colorScheme),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (hasMovieInfo) ...[
+                          Text(
+                            review.movieTitle!,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              if (review.movieReleaseYear != null) ...[
+                                Text(
+                                  '${review.movieReleaseYear}',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              if (review.movieGenre != null && review.movieGenre!.isNotEmpty)
+                                Expanded(
+                                  child: Text(
+                                    review.movieGenre!,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        Row(
+                          children: [
+                            ...List.generate(5, (i) {
+                              final filled = review.rating >= i + 1;
+                              return Icon(
+                                filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                                size: 14,
+                                color: filled
+                                    ? const Color(0xFFFFB800)
+                                    : colorScheme.onSurface.withValues(alpha: 0.2),
+                              );
+                            }),
+                            const SizedBox(width: 6),
+                            Text(
+                              review.rating.toStringAsFixed(1),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (review.comment != null && review.comment!.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            review.comment!,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPosterPlaceholder(ColorScheme cs) {
+    return Container(
+      width: 60,
+      height: 90,
+      color: cs.surfaceContainerHighest,
+      child: const Icon(Icons.movie_rounded, size: 24),
     );
   }
 }
