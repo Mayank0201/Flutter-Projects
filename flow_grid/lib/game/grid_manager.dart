@@ -1031,6 +1031,7 @@ class GridManager {
   /// Handles shared logic for Tunnels and Bridges: endpoints, orientation, validation.
   bool _placeTransitCorridor(int x, int y, CellType type, {bool isExtension = false, bool consumeRoad = false, GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
     if (!isValid(x, y)) return false;
+    if (from == null) return false;
     
     // [HARD RULE] No grid modification during preview
     assert(interactionState != InteractionState.preview, 'CRITICAL: GridManager._placeTransitCorridor called during PREVIEW phase at ($x,$y)');
@@ -1065,24 +1066,22 @@ class GridManager {
       if (type == CellType.bridge && bridges <= 0) return false;
     }
 
-    if (from != null) {
-      final dist = (from.x - x).abs() + (from.y - y).abs();
-      if (dist != 1) return false;
+    final dist = (from.x - x).abs() + (from.y - y).abs();
+    if (dist != 1) return false;
 
-      // Portal Preservation
-      final fromCell = getCell(from.x, from.y);
-      if (fromCell.type == type) {
-        final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
-        bool isPortal = _countExternalConnections(from.x, from.y) > 0;
-        grid[from.y][from.x] = fromCell.copyWith(
-          isInfrastructureInternal: !isPortal,
-          isConnectableEndpoint: isPortal,
-          infrastructureAxis: fromCell.infrastructureAxis ?? axis,
-        );
-      }
+    // Portal Preservation
+    final fromCell = getCell(from.x, from.y);
+    if (fromCell.type == type) {
+      final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
+      bool isPortal = _countExternalConnections(from.x, from.y) > 0;
+      grid[from.y][from.x] = fromCell.copyWith(
+        isInfrastructureInternal: !isPortal,
+        isConnectableEndpoint: isPortal,
+        infrastructureAxis: fromCell.infrastructureAxis ?? axis,
+      );
     }
 
-    final axis = (from != null) ? ((from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal) : null;
+    final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
     
     // Inventory Transaction
     int roadDeducted = 0;
@@ -1125,19 +1124,15 @@ class GridManager {
       infrastructure.add(pos);
     }
 
-    if (from != null) {
-      addEdge(from.x, from.y, x, y);
-      updateNodeConnections(from.x, from.y);
-    }
+    addEdge(from.x, from.y, x, y);
+    updateNodeConnections(from.x, from.y);
 
-    // Auto-wire to any adjacent road. A single-tap tunnel/bridge places with
-    // from=null, so without this it would have zero edges, count as 0-conn in
-    // the renderer, and disappear despite the inventory deduction.
+    // Auto-wire to any adjacent road.
     for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
       final nx = x + d[0];
       final ny = y + d[1];
       if (!isValid(nx, ny)) continue;
-      if (from != null && from.x == nx && from.y == ny) continue;
+      if (from.x == nx && from.y == ny) continue;
       if (grid[ny][nx].type == CellType.road && !hasEdge(x, y, nx, ny)) {
         addEdge(x, y, nx, ny);
         updateNodeConnections(nx, ny);

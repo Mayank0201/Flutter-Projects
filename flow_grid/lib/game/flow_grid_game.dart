@@ -1019,8 +1019,10 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
         }
       }
     } else if (_isDragging && _isDeferredTool) {
-      gridManager!.commitPlacement(() => _commitDragBuild());
-      if (activeTool == BuildTool.erase) _applyEraseRefunds();
+      if (_dragPath.length > 1) {
+        gridManager!.commitPlacement(() => _commitDragBuild());
+        if (activeTool == BuildTool.erase) _applyEraseRefunds();
+      }
     } else if (!_isDragging && _panStartPixel != null) {
       // Single click action
       final worldPos = camera.viewfinder.globalToLocal(_panStartPixel!);

@@ -401,11 +401,6 @@ class GridRenderer extends PositionComponent
     final tunnelPath = Path();
     final bridgePath = Path();
 
-    // Lists to collect coordinates for circular end-caps (to prevent outline bleeding at cell boundaries)
-    final roadRoundCaps = <Offset>[];
-    final tunnelRoundCaps = <Offset>[];
-    final bridgeRoundCaps = <Offset>[];
-
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
@@ -492,23 +487,16 @@ class GridRenderer extends PositionComponent
               final endY = midY + cellSize * 0.25;
               targetPath.moveTo(midX, startY);
               targetPath.lineTo(midX, endY);
-
-              final caps = cell.isTunnel ? tunnelRoundCaps : bridgeRoundCaps;
-              caps.add(Offset(midX, startY));
-              caps.add(Offset(midX, endY));
             } else {
               final startX = midX - cellSize * 0.25;
               final endX = midX + cellSize * 0.25;
               targetPath.moveTo(startX, midY);
               targetPath.lineTo(endX, midY);
-
-              final caps = cell.isTunnel ? tunnelRoundCaps : bridgeRoundCaps;
-              caps.add(Offset(startX, midY));
-              caps.add(Offset(endX, midY));
             }
           } else {
-            // Isolated road: draw a clean starting circular node at the center
-            roadRoundCaps.add(Offset(midX, midY));
+            // Isolated road: draw a very short horizontal line segment so it renders as a small pill/circle cap
+            targetPath.moveTo(midX - 1, midY);
+            targetPath.lineTo(midX + 1, midY);
           }
         } else if (connCount == 1) {
           targetPath.moveTo(midX, midY);
@@ -516,16 +504,6 @@ class GridRenderer extends PositionComponent
           if (e) targetPath.lineTo(cx + cellSize, midY);
           if (s) targetPath.lineTo(midX, cy + cellSize);
           if (w) targetPath.lineTo(cx, midY);
-
-          // Add round cap at cell center (the actual dead-end point)
-          final capPos = Offset(midX, midY);
-          if (cell.isTunnel) {
-            tunnelRoundCaps.add(capPos);
-          } else if (cell.isBridge) {
-            bridgeRoundCaps.add(capPos);
-          } else {
-            roadRoundCaps.add(capPos);
-          }
         } else if (connCount == 2) {
           if (n && s) {
             targetPath.moveTo(midX, cy);
@@ -558,66 +536,20 @@ class GridRenderer extends PositionComponent
     }
 
     // --- Draw Paths ---
-    _roadOutlinePaint.strokeCap = StrokeCap.butt;
-    _roadPaint.strokeCap = StrokeCap.butt;
+    _roadOutlinePaint.strokeCap = StrokeCap.round;
+    _roadPaint.strokeCap = StrokeCap.round;
     canvas.drawPath(roadPath, _roadOutlinePaint);
     canvas.drawPath(roadPath, _roadPaint);
 
-    _tunnelOutlinePaint.strokeCap = StrokeCap.butt;
-    _tunnelPaint.strokeCap = StrokeCap.butt;
+    _tunnelOutlinePaint.strokeCap = StrokeCap.round;
+    _tunnelPaint.strokeCap = StrokeCap.round;
     canvas.drawPath(tunnelPath, _tunnelOutlinePaint);
     canvas.drawPath(tunnelPath, _tunnelPaint);
 
-    _bridgeOutlinePaint.strokeCap = StrokeCap.butt;
-    _bridgePaint.strokeCap = StrokeCap.butt;
+    _bridgeOutlinePaint.strokeCap = StrokeCap.round;
+    _bridgePaint.strokeCap = StrokeCap.round;
     canvas.drawPath(bridgePath, _bridgeOutlinePaint);
     canvas.drawPath(bridgePath, _bridgePaint);
-
-    // --- Draw Round Caps (Double-Pass Outline/Fill Style to prevent boundary bleeding) ---
-    final capOutlinePaint = Paint()..style = PaintingStyle.fill;
-    final capFillPaint = Paint()..style = PaintingStyle.fill;
-
-    // Road Caps: Outline Pass
-    capOutlinePaint.color = _roadOutlinePaint.color;
-    final roadCapOutlineRadius = _roadOutlinePaint.strokeWidth / 2;
-    for (final cap in roadRoundCaps) {
-      canvas.drawCircle(cap, roadCapOutlineRadius, capOutlinePaint);
-    }
-
-    // Tunnel Caps: Outline Pass
-    capOutlinePaint.color = _tunnelOutlinePaint.color;
-    final tunnelCapOutlineRadius = _tunnelOutlinePaint.strokeWidth / 2;
-    for (final cap in tunnelRoundCaps) {
-      canvas.drawCircle(cap, tunnelCapOutlineRadius, capOutlinePaint);
-    }
-
-    // Bridge Caps: Outline Pass
-    capOutlinePaint.color = _bridgeOutlinePaint.color;
-    final bridgeCapOutlineRadius = _bridgeOutlinePaint.strokeWidth / 2;
-    for (final cap in bridgeRoundCaps) {
-      canvas.drawCircle(cap, bridgeCapOutlineRadius, capOutlinePaint);
-    }
-
-    // Road Caps: Fill Pass
-    capFillPaint.color = _roadPaint.color;
-    final roadCapFillRadius = _roadPaint.strokeWidth / 2;
-    for (final cap in roadRoundCaps) {
-      canvas.drawCircle(cap, roadCapFillRadius, capFillPaint);
-    }
-
-    // Tunnel Caps: Fill Pass
-    capFillPaint.color = _tunnelPaint.color;
-    final tunnelCapFillRadius = _tunnelPaint.strokeWidth / 2;
-    for (final cap in tunnelRoundCaps) {
-      canvas.drawCircle(cap, tunnelCapFillRadius, capFillPaint);
-    }
-
-    // Bridge Caps: Fill Pass
-    capFillPaint.color = _bridgePaint.color;
-    final bridgeCapFillRadius = _bridgePaint.strokeWidth / 2;
-    for (final cap in bridgeRoundCaps) {
-      canvas.drawCircle(cap, bridgeCapFillRadius, capFillPaint);
-    }
 
     _drawExpressLanesGlobal(canvas);
   }
@@ -1420,13 +1352,27 @@ class GridRenderer extends PositionComponent
 
   void _drawRoadPreview(Canvas canvas) {
     if (game.activeTool != BuildTool.road &&
-        game.activeTool != BuildTool.tunnel) {
+        game.activeTool != BuildTool.tunnel &&
+        game.activeTool != BuildTool.bridge &&
+        game.activeTool != BuildTool.erase) {
       return;
     }
     if (game.previewPath.isEmpty) return;
 
     final isTunnel = game.activeTool == BuildTool.tunnel;
-    final blueprintColor = isTunnel ? const Color(0xFF2D9CDB) : const Color(0xFF00E5FF);
+    final isBridge = game.activeTool == BuildTool.bridge;
+    final isErase = game.activeTool == BuildTool.erase;
+
+    final Color blueprintColor;
+    if (isTunnel) {
+      blueprintColor = const Color(0xFF2D9CDB);
+    } else if (isBridge) {
+      blueprintColor = const Color(0xFF27AE60);
+    } else if (isErase) {
+      blueprintColor = Colors.redAccent;
+    } else {
+      blueprintColor = const Color(0xFF00E5FF);
+    }
 
     final fillPaint = Paint()
       ..color = blueprintColor.withValues(alpha: 0.12)
@@ -1448,12 +1394,19 @@ class GridRenderer extends PositionComponent
       canvas.drawRRect(rrect, fillPaint);
       canvas.drawRRect(rrect, borderPaint);
 
-      // Draw subtle drafting grid marking (crosshair) in the center of blueprint tile
       final cx = rect.center.dx;
       final cy = rect.center.dy;
-      final crossSize = cellSize * 0.15;
-      canvas.drawLine(Offset(cx - crossSize, cy), Offset(cx + crossSize, cy), borderPaint);
-      canvas.drawLine(Offset(cx, cy - crossSize), Offset(cx, cy + crossSize), borderPaint);
+      if (isErase) {
+        // Draw diagonal X for erase preview
+        final crossSize = cellSize * 0.15;
+        canvas.drawLine(Offset(cx - crossSize, cy - crossSize), Offset(cx + crossSize, cy + crossSize), borderPaint);
+        canvas.drawLine(Offset(cx - crossSize, cy + crossSize), Offset(cx + crossSize, cy - crossSize), borderPaint);
+      } else {
+        // Draw subtle drafting grid marking (crosshair) in the center of blueprint tile
+        final crossSize = cellSize * 0.15;
+        canvas.drawLine(Offset(cx - crossSize, cy), Offset(cx + crossSize, cy), borderPaint);
+        canvas.drawLine(Offset(cx, cy - crossSize), Offset(cx, cy + crossSize), borderPaint);
+      }
     }
   }
 
