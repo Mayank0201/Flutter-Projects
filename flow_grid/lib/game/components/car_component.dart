@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
 import 'package:flame/components.dart';
 import 'package:flame/extensions.dart';
 import '../../models/game_constants.dart';
@@ -33,6 +34,9 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   bool _waitingAtSignal = false;
   static const double maxWaitTime = 1.5;
   String? routeId;
+  final List<Vector2> _trailPositions = [];
+  static const int _maxTrailPoints = 6;
+  double _trailDecayTimer = 0.0;
 
   // Follow-the-leader
   double _collisionCheckTimer = 0;
@@ -79,6 +83,8 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   }
 
   void _init({int? initialPathIndex, double? initialProgress, bool? initialReturning}) {
+    _trailPositions.clear();
+    _trailDecayTimer = 0.0;
     _currentPathIndex = initialPathIndex ?? 0;
     isReturning = initialReturning ?? false;
     arrived = false;
@@ -120,7 +126,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   }
 
   void _updateVehicleSize() {
-    final baseSize = cellSize * 0.55;
+    final baseSize = cellSize * 0.65;
     switch (vehicleType) {
       case VehicleType.car:
         size = Vector2(baseSize, baseSize);
@@ -173,7 +179,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       final tangent = _metric?.getTangentForOffset(0);
       if (tangent != null) {
         final fwd = tangent.vector;
-        final lane = cellSize * 0.18 * _currentLaneSign;
+        final lane = cellSize * 0.13 * _currentLaneSign;
         position = Vector2(
           tangent.position.dx - fwd.dy * lane,
           tangent.position.dy + fwd.dx * lane,
@@ -378,7 +384,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       // _currentLaneSign flips the offset (+1 right, -1 left) so a car can
       // pull alongside a parked one in the other lane.
       final fwd = tangent.vector;
-      final lane = cellSize * 0.18 * _currentLaneSign;
+      final lane = cellSize * 0.13 * _currentLaneSign;
       position = Vector2(
         tangent.position.dx - fwd.dy * lane,
         tangent.position.dy + fwd.dx * lane,
@@ -528,6 +534,37 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   void update(double dt) {
     super.update(dt);
     if (game.paused) return;
+
+    final isStopped = _currentSpeedMultiplier < 0.05 || _waitingAtSignal || isWaiting || arrived;
+    
+    // Dynamically limit max trail length as speed decreases
+    final speedFactor = arrived ? 0.0 : (_currentSpeedMultiplier / 1.0).clamp(0.0, 1.0);
+    final int activeMaxPoints = (isStopped || arrived) ? 0 : (_maxTrailPoints * speedFactor).round();
+
+    if (!arrived && !isWaiting && !isStopped) {
+      if (_trailPositions.isEmpty || _trailPositions.first.distanceToSquared(position) > 0.05) {
+        _trailPositions.insert(0, position.clone());
+      }
+    }
+
+    if (arrived || isWaiting) {
+      _trailPositions.clear();
+      _trailDecayTimer = 0.0;
+    } else if (isStopped) {
+      // Decay the trail rapidly when stopped (e.g. at traffic lights)
+      _trailDecayTimer += dt;
+      if (_trailDecayTimer >= 0.02) {
+        _trailDecayTimer = 0.0;
+        if (_trailPositions.isNotEmpty) {
+          _trailPositions.removeLast();
+        }
+      }
+    } else {
+      _trailDecayTimer = 0.0;
+      while (_trailPositions.length > activeMaxPoints) {
+        _trailPositions.removeLast();
+      }
+    }
 
     if (arrived || path.length < 2) {
       arrived = true;
@@ -714,6 +751,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     if (_totalLength > 0) {
       _currentPathIndex = ((_distanceTraveled / _totalLength) * (path.length - 1)).floor().clamp(0, path.length - 1);
     }
+
   }
 
   GridPosition _getCurrentGridPos() {
@@ -736,6 +774,46 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     if (sprites.isEmpty) return;
     final sprite = sprites[colorIndex % sprites.length];
 
+    // 1. Draw trailing paths in local space (before saving/translating/rotating canvas)
+    final baseColor = GameConstants.getBuildingColor(colorIndex);
+    if (_trailPositions.length >= 2) {
+      final trailPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      final cosA = cos(-angle);
+      final sinA = sin(-angle);
+      final halfSizeX = size.x / 2;
+      final halfSizeY = size.y / 2;
+
+      for (int i = 0; i < _trailPositions.length - 1; i++) {
+        final p1 = _trailPositions[i];
+        final p2 = _trailPositions[i + 1];
+
+        final dx1 = p1.x - position.x;
+        final dy1 = p1.y - position.y;
+        final rx1 = dx1 * cosA - dy1 * sinA;
+        final ry1 = dx1 * sinA + dy1 * cosA;
+        final o1 = Offset(rx1 + halfSizeX, ry1 + halfSizeY);
+
+        final dx2 = p2.x - position.x;
+        final dy2 = p2.y - position.y;
+        final rx2 = dx2 * cosA - dy2 * sinA;
+        final ry2 = dx2 * sinA + dy2 * cosA;
+        final o2 = Offset(rx2 + halfSizeX, ry2 + halfSizeY);
+
+        final ratio = i / _trailPositions.length;
+        final opacity = (1.0 - ratio) * 0.45;
+        final width = size.x * 0.45 * (1.0 - ratio * 0.7);
+
+        trailPaint.color = baseColor.withValues(alpha: opacity);
+        trailPaint.strokeWidth = width;
+
+        canvas.drawLine(o1, o2, trailPaint);
+      }
+    }
+
     // Flame's render() canvas has (0,0) at the component's top-left, not at
     // the anchor — so we have to translate to size/2 to land on the world
     // `position` (= the road centerline) before rotating + drawing.
@@ -747,11 +825,16 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     // (east), which is the component's forward direction.
     final length = size.x;
     final width = length / game.vehicleSpriteAspect;
+
+    // 2. [Removed shadow to avoid black highlight]
+
+    // 3. Draw vehicle sprite
     sprite.render(
       canvas,
       position: Vector2(-width / 2, -length / 2),
       size: Vector2(width, length),
     );
+
     canvas.restore();
   }
 }

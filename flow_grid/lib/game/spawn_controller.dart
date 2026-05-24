@@ -31,7 +31,7 @@ class BuildingProfile {
 
   static const residential = BuildingProfile(
     influenceRadius: 6.0,
-    renderScale: 0.45,
+    renderScale: 0.60,
     sameColorSpacing: 4,
     interColorSpacing: 2,
     corridorLength: 2,

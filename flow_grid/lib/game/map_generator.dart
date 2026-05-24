@@ -24,9 +24,9 @@ class MapConfig {
     // Testing defaults: hand the player a couple of traffic lights, a smart
     // junction, and an express lane out of the gate so those tools can be
     // exercised on a fresh save without grinding weekly upgrades.
-    this.startingTrafficLights = 2,
-    this.startingSmartJunctions = 1,
-    this.startingExpressLanes = 1,
+    this.startingTrafficLights = 0,
+    this.startingSmartJunctions = 0,
+    this.startingExpressLanes = 0,
   });
 }
 

@@ -43,6 +43,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   final ValueNotifier<int> weekNotifier = ValueNotifier<int>(1);
   final ValueNotifier<double> weekProgressNotifier = ValueNotifier<double>(0.0);
   final ValueNotifier<double> satisfactionNotifier = ValueNotifier<double>(1.0);
+  final ValueNotifier<TrafficPhase> trafficPhaseNotifier = ValueNotifier<TrafficPhase>(TrafficPhase.calm);
+  
   
   final ValueNotifier<int> roadInventoryNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> tunnelInventoryNotifier = ValueNotifier<int>(0);
@@ -431,6 +433,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     weekProgressNotifier.value = weekProgress;
     scoreNotifier.value = score;
     satisfactionNotifier.value = gridManager!.regionalSatisfaction;
+    trafficPhaseNotifier.value = trafficClock.currentPhase;
   }
 
   @override
@@ -487,7 +490,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       final logicDt = _logicTickTimer * timeScale;
       _logicTickTimer = 0;
       _rebuildSpatialGrid();
-      trafficClock.update(logicDt);
+      trafficClock.update(weekProgress);
       _updateTrafficSimulation(logicDt);
       gridManager?.updateTrafficSignals(logicDt, carGrid, gridWidth);
     }
@@ -835,7 +838,10 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     
     phase = GamePhase.weeklyUpgrade;
     overlays.add('weeklyUpgrade');
-    paused = true;
+    // Keep paused = false so Flame's update(dt) loop continues ticking,
+    // allowing the camera to smoothly zoom out to the new week's bounds.
+    // Inputs and simulation are still blocked via the phase check in update().
+    paused = false;
     onStateChanged?.call();
   }
 
@@ -890,7 +896,23 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
            pos.y >= spawnController!.minSpawnY &&
            pos.y <= spawnController!.maxSpawnY;
   }
+  List<GridPosition> _interpolateAdjacentCells(GridPosition start, GridPosition end) {
+    final result = <GridPosition>[];
+    int cx = start.x;
+    int cy = start.y;
+    final tx = end.x;
+    final ty = end.y;
 
+    while (cx != tx || cy != ty) {
+      if (cx != tx) {
+        cx += (tx - cx).sign;
+      } else if (cy != ty) {
+        cy += (ty - cy).sign;
+      }
+      result.add(GridPosition(cx, cy));
+    }
+    return result;
+  }
 
   @override
   void onPanStart(DragStartInfo info) {
@@ -915,34 +937,76 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     final pos = GridPosition(x, y);
 
     if (gridManager!.isValid(pos.x, pos.y)) {
-      // Don't preview/queue placements outside the active region — but always
-      // allow terrain cells (mountain/water) and existing tunnels/bridges so a
-      // road drag can route through them via auto-tunnel / auto-bridge.
-      final dragCell = gridManager!.getCell(pos.x, pos.y);
-      final isTerrainOrCorridor =
-          dragCell.type == CellType.mountain ||
-          dragCell.type == CellType.water ||
-          dragCell.isTunnel ||
-          dragCell.isBridge;
-      if (activeTool != BuildTool.erase &&
-          !isTerrainOrCorridor &&
-          !_isInActiveArea(pos)) {
-        return;
-      }
-
       if (activeTool == BuildTool.expressLane) {
+        final dragCell = gridManager!.getCell(pos.x, pos.y);
+        final isTerrainOrCorridor =
+            dragCell.type == CellType.mountain ||
+            dragCell.type == CellType.water ||
+            dragCell.isTunnel ||
+            dragCell.isBridge;
+        if (activeTool != BuildTool.erase &&
+            !isTerrainOrCorridor &&
+            !_isInActiveArea(pos)) {
+          return;
+        }
         expressLanePendingStart ??= pos;
         expressLaneDraggingEnd = pos;
         gridRenderer?.markDirty();
-      } else if (!_dragPath.contains(pos)) {
-        _dragPath.add(pos);
-        if (!_isDeferredTool) _handleBuild(pos);
-        previewPath = List.from(_dragPath);
-        gridRenderer?.markDirty(pos.x, pos.y);
+      } else {
+        if (_dragPath.isEmpty) {
+          final dragCell = gridManager!.getCell(pos.x, pos.y);
+          final isTerrainOrCorridor =
+              dragCell.type == CellType.mountain ||
+              dragCell.type == CellType.water ||
+              dragCell.isTunnel ||
+              dragCell.isBridge;
+          if (activeTool != BuildTool.erase &&
+              !isTerrainOrCorridor &&
+              !_isInActiveArea(pos)) {
+            return;
+          }
+          _dragPath.add(pos);
+          if (!_isDeferredTool) _handleBuild(pos);
+          previewPath = List.from(_dragPath);
+          gridRenderer?.markDirty(pos.x, pos.y);
+        } else {
+          final last = _dragPath.last;
+          final idx = _dragPath.indexOf(pos);
+          if (idx != -1 && idx < _dragPath.length - 1) {
+            // Revert/Backtrack: Remove all cells in the path after this cell
+            for (int i = _dragPath.length - 1; i > idx; i--) {
+              final removedPos = _dragPath[i];
+              gridRenderer?.markDirty(removedPos.x, removedPos.y);
+            }
+            _dragPath.removeRange(idx + 1, _dragPath.length);
+            previewPath = List.from(_dragPath);
+            gridRenderer?.markDirty(pos.x, pos.y);
+          } else if (last != pos) {
+            final steps = _interpolateAdjacentCells(last, pos);
+            for (final step in steps) {
+              if (gridManager!.isValid(step.x, step.y) && !_dragPath.contains(step)) {
+                final stepCell = gridManager!.getCell(step.x, step.y);
+                final isTerrainOrCorridor =
+                    stepCell.type == CellType.mountain ||
+                    stepCell.type == CellType.water ||
+                    stepCell.isTunnel ||
+                    stepCell.isBridge;
+                if (activeTool != BuildTool.erase &&
+                    !isTerrainOrCorridor &&
+                    !_isInActiveArea(step)) {
+                  continue;
+                }
+                _dragPath.add(step);
+                if (!_isDeferredTool) _handleBuild(step);
+                gridRenderer?.markDirty(step.x, step.y);
+              }
+            }
+            previewPath = List.from(_dragPath);
+          }
+        }
       }
     }
   }
-
   @override
   void onPanEnd(DragEndInfo info) {
     if (activeTool == BuildTool.expressLane) {

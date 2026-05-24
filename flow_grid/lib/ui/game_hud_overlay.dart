@@ -52,9 +52,9 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                         child: Container(
                           margin: const EdgeInsets.symmetric(vertical: 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E24).withValues(alpha: 0.7),
+                            color: const Color(0xFF14161B).withValues(alpha: 0.85),
                             borderRadius: const BorderRadius.horizontal(left: Radius.circular(24)),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                           ),
                           child: SingleChildScrollView(
                             child: Column(
@@ -262,52 +262,57 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
   }
 
   Widget _trafficPhaseIndicator() {
-    IconData icon;
-    Color color;
-    String label;
-    switch (g.trafficClock.currentPhase) {
-      case TrafficPhase.morningRush:
-        icon = Icons.wb_sunny_outlined;
-        color = Colors.orangeAccent;
-        label = 'MORNING RUSH';
-        break;
-      case TrafficPhase.midday:
-        icon = Icons.light_mode;
-        color = Colors.yellowAccent;
-        label = 'MIDDAY';
-        break;
-      case TrafficPhase.eveningRush:
-        icon = Icons.nights_stay_outlined;
-        color = Colors.deepOrangeAccent;
-        label = 'EVENING RUSH';
-        break;
-      case TrafficPhase.calm:
-        icon = Icons.bedtime;
-        color = Colors.blueGrey;
-        label = 'CALM HOURS';
-        break;
-    }
+    return ValueListenableBuilder<TrafficPhase>(
+      valueListenable: g.trafficPhaseNotifier,
+      builder: (context, currentPhase, _) {
+        IconData icon;
+        Color color;
+        String label;
+        switch (currentPhase) {
+          case TrafficPhase.morningRush:
+            icon = Icons.wb_sunny_outlined;
+            color = Colors.orangeAccent;
+            label = 'MORNING RUSH';
+            break;
+          case TrafficPhase.midday:
+            icon = Icons.light_mode;
+            color = Colors.yellowAccent;
+            label = 'MIDDAY';
+            break;
+          case TrafficPhase.eveningRush:
+            icon = Icons.nights_stay_outlined;
+            color = Colors.deepOrangeAccent;
+            label = 'EVENING RUSH';
+            break;
+          case TrafficPhase.calm:
+            icon = Icons.bedtime;
+            color = Colors.blueGrey;
+            label = 'CALM HOURS';
+            break;
+        }
 
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 500),
-      transitionBuilder: (child, animation) {
-        return FadeTransition(
-          opacity: animation,
-          child: ScaleTransition(scale: animation, child: child),
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 500),
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            );
+          },
+          child: Row(
+            key: ValueKey(currentPhase),
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 12),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: GoogleFonts.outfit(color: color, fontSize: 10, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
+              ),
+            ],
+          ),
         );
       },
-      child: Row(
-        key: ValueKey(g.trafficClock.currentPhase),
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 12),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.outfit(color: color, fontSize: 10, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
-          ),
-        ],
-      ),
     );
   }
 
@@ -388,23 +393,25 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          margin: const EdgeInsets.symmetric(horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(8),
+            color: Colors.white.withValues(alpha: 0.03),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: col, size: 14),
-              const SizedBox(height: 2),
+              Icon(icon, color: col, size: 16),
+              const SizedBox(height: 4),
               Text(
                 label,
                 style: GoogleFonts.outfit(
                   color: col,
-                  fontSize: 7,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1,
                   decoration: TextDecoration.none,
                 ),
               ),
@@ -435,20 +442,30 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     );
   }
 
-
   Widget _speedDot(double val, IconData icon, Color col) {
     final active = g.timeScale == val;
     return GestureDetector(
       onTap: () => setState(() => g.timeScale = val),
-      child: Container(
-        width: 28,
-        height: 28,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: active ? col.withValues(alpha: 0.2) : Colors.transparent,
-          border: Border.all(color: active ? col : Colors.white12, width: 1.5),
+          color: active ? col.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.03),
+          border: Border.all(
+            color: active ? col : Colors.white.withValues(alpha: 0.08), 
+            width: active ? 1.5 : 1,
+          ),
+          boxShadow: active ? [
+            BoxShadow(
+              color: col.withValues(alpha: 0.2),
+              blurRadius: 6,
+              spreadRadius: 0.5,
+            )
+          ] : null,
         ),
-        child: Icon(icon, color: active ? col : Colors.white24, size: 14),
+        child: Icon(icon, color: active ? col : Colors.white.withValues(alpha: 0.4), size: 16),
       ),
     );
   }
@@ -501,6 +518,24 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     );
   }
 
+  Widget _badge(int val) {
+    final hasStock = val > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: hasStock ? const Color(0xFF27AE60) : const Color(0xFFEB5757),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$val',
+        style: GoogleFonts.outfit(
+          color: Colors.white,
+          fontSize: 8,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
 
   Widget _toolButton({
     required BuildTool tool,
@@ -517,56 +552,58 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blueAccent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(12),
+          color: isSelected ? const Color(0xFF2F80ED).withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? Colors.blueAccent : Colors.white10,
+            color: isSelected ? const Color(0xFF2F80ED) : Colors.white.withValues(alpha: 0.08),
             width: isSelected ? 1.5 : 1,
           ),
           boxShadow: isSelected ? [
             BoxShadow(
-              color: Colors.blueAccent.withValues(alpha: 0.3),
-              blurRadius: 8,
-              spreadRadius: 1,
+              color: const Color(0xFF2F80ED).withValues(alpha: 0.25),
+              blurRadius: 10,
+              spreadRadius: 0.5,
             )
           ] : null,
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            Icon(icon, color: isSelected ? Colors.white : Colors.white38, size: 18),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: GoogleFonts.outfit(
-                color: isSelected ? Colors.white : Colors.white38,
-                fontSize: 7,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-            if (notifier != null || count != null) ...[
-              if (notifier != null)
-                ValueListenableBuilder<int>(
-                  valueListenable: notifier,
-                  builder: (context, val, _) => Text(
-                    '$val',
+            Align(
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon, 
+                    color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5), 
+                    size: 20,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
                     style: GoogleFonts.outfit(
-                      color: val > 0 ? Colors.white70 : Colors.redAccent.withValues(alpha: 0.7),
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
+                      color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5),
+                      fontSize: 8.5,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                )
-              else
-                Text(
-                  '${count ?? 0}',
-                  style: GoogleFonts.outfit(
-                    color: (count ?? 0) > 0 ? Colors.white70 : Colors.redAccent.withValues(alpha: 0.7),
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-            ],
+                ],
+              ),
+            ),
+            if (notifier != null || count != null)
+              Positioned(
+                top: -2,
+                right: -2,
+                child: notifier != null
+                  ? ValueListenableBuilder<int>(
+                      valueListenable: notifier,
+                      builder: (context, val, _) => _badge(val),
+                    )
+                  : _badge(count ?? 0),
+              ),
           ],
         ),
       ),

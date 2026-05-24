@@ -91,17 +91,6 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                     widget.game.overlays.add('tutorial');
                   },
                 ),
-                
-                const SizedBox(height: 40), // Reduced from 60
-                Text(
-                  'V1.2.0 • STABLE RELEASE',
-                  style: GoogleFonts.outfit(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 2,
-                    color: Colors.white.withValues(alpha: 0.2),
-                  ),
-                ),
               ],
             ),
           ),

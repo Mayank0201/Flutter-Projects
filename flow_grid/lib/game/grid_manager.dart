@@ -74,6 +74,8 @@ class GridManager {
   // Traffic signal state
   final Map<String, int> signalPhases = {}; // 0=NS green, 1=EW green
   final Map<String, double> signalTimers = {};
+  final Map<String, int> signalNsCounts = {};
+  final Map<String, int> signalEwCounts = {};
 
   final List<MountainCluster> mountainClusters = [];
   
@@ -509,6 +511,10 @@ class GridManager {
         if (nsCount > ewCount + 3) dynamicInterval *= 0.5;
       }
 
+      // Store traffic counts for low-traffic override checks
+      signalNsCounts[key] = nsCount;
+      signalEwCounts[key] = ewCount;
+
       if (timer >= dynamicInterval) {
         timer = 0;
         currentPhase = currentPhase == 0 ? 1 : 0;
@@ -524,6 +530,25 @@ class GridManager {
       signalPhases[_key(GridPosition(x, y))] ?? 0;
 
   bool isGreenForDirection(int x, int y, Direction movingDir) {
+    if (!isValid(x, y)) return true;
+    final cell = grid[y][x];
+    
+    // Straight roads (only vertical connections or only horizontal connections) do not block traffic.
+    final hasVertical = cell.connUp || cell.connDown;
+    final hasHorizontal = cell.connLeft || cell.connRight;
+    if (!hasVertical || !hasHorizontal) {
+      return true;
+    }
+
+    final key = _key(GridPosition(x, y));
+    final nsCount = signalNsCounts[key] ?? 0;
+    final ewCount = signalEwCounts[key] ?? 0;
+
+    // When traffic is low (total nearby cars <= 1), both directions get green access.
+    if (nsCount + ewCount <= 1) {
+      return true;
+    }
+
     final phase = getSignalPhase(x, y);
     // Phase 0 = N/S green, Phase 1 = E/W green
     if (phase == 0) {
@@ -664,6 +689,8 @@ class GridManager {
     roadLoad.clear();
     signalPhases.clear();
     signalTimers.clear();
+    signalNsCounts.clear();
+    signalEwCounts.clear();
     
     // Reset inventory based on starting constants
     roads = GameConstants.startingRoadBudget;

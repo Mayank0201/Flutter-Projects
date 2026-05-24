@@ -28,7 +28,7 @@ class GameConstants {
   static const int startingRoadBudget = 25;
   static const int startingTunnels = 1; // was: startingBridges
   static const int startingBridges = 1;
-  static const int startingTrafficLights = 1;
+  static const int startingTrafficLights = 0;
   static const int startingSmartJunctions = 0; // was: startingRoundabouts
   static const int startingExpressLanes = 0; // was 1 (removed for cleanup)
 
