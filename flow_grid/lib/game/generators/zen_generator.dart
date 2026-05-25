@@ -10,7 +10,7 @@ class ZenMapGenerator extends MapGenerator {
 
   @override
   MapConfig get config => const MapConfig(
-    startingRoads: 20,
+    startingRoads: 25,
     startingTunnels: 1,
     startingBridges: 0,
   );

@@ -9,7 +9,7 @@ import '../grid_manager.dart';
 import '../flow_grid_game.dart';
 import '../spawn_controller.dart';
 import '../../models/district_profile.dart';
-import '../../models/traffic_phase.dart';
+import '../map_generator.dart';
 
 class GridRenderer extends PositionComponent
     with HasGameReference<FlowGridGame> {
@@ -61,6 +61,34 @@ class GridRenderer extends PositionComponent
 
   final Paint _bridgePaint = Paint()
     ..color = GameConstants.bridgeColor
+    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt
+    ..strokeJoin = StrokeJoin.round;
+
+  final Paint _iceRoadOutlinePaint = Paint()
+    ..color = const Color(0xFF14161B)
+    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt
+    ..strokeJoin = StrokeJoin.round;
+
+  final Paint _iceRoadPaint = Paint()
+    ..color = const Color(0xFFA5DFEE)
+    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt
+    ..strokeJoin = StrokeJoin.round;
+
+  final Paint _dirtRoadOutlinePaint = Paint()
+    ..color = const Color(0xFF2C2417)
+    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt
+    ..strokeJoin = StrokeJoin.round;
+
+  final Paint _dirtRoadPaint = Paint()
+    ..color = const Color(0xFFC0A477)
     ..strokeWidth = GameConstants.cellSize * 0.48
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
@@ -148,6 +176,9 @@ class GridRenderer extends PositionComponent
     _drawRoadPreview(canvas);
     _drawCongestion(canvas);
 
+    // Map Specific Events
+    _drawMapSpecificEventVisuals(canvas);
+
     // [PREMIUM] City Reveal Vignette
     _drawCityVignette(canvas);
 
@@ -198,49 +229,123 @@ class GridRenderer extends PositionComponent
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
-    // Background
+    Color bg;
+    switch (game.selectedMapType) {
+      case MapType.zen:
+        bg = const Color(0xFF13171F);
+        break;
+      case MapType.andes:
+        bg = const Color(0xFF1E1612);
+        break;
+      case MapType.nile:
+        bg = const Color(0xFF0F1A1B);
+        break;
+      case MapType.arctic:
+        bg = const Color(0xFF12232D);
+        break;
+      case MapType.savanna:
+        bg = const Color(0xFF241C13);
+        break;
+      case MapType.delta:
+        bg = const Color(0xFF0E221C);
+        break;
+    }
+
+    final double width = gridManager.cols * cellSize;
+    final double height = gridManager.rows * cellSize;
+
+    // Draw solid color
     canvas.drawRect(
-      Rect.fromLTWH(
-        offsetX,
-        offsetY,
-        gridManager.cols * cellSize,
-        gridManager.rows * cellSize,
-      ),
-      Paint()..color = GameConstants.backgroundColor,
+      Rect.fromLTWH(offsetX, offsetY, width, height),
+      Paint()..color = bg,
     );
 
-    // Subtle Board Game Tile Grid (rounded rectangles for each cell)
-    final cellPaint = Paint()
-      ..color = const Color(0xFF222630) // Slightly lighter than background
-      ..style = PaintingStyle.fill;
-
-    for (int x = 0; x < gridManager.cols; x++) {
-      for (int y = 0; y < gridManager.rows; y++) {
-        final rect = Rect.fromLTWH(
-          offsetX + x * cellSize + 1.5,
-          offsetY + y * cellSize + 1.5,
-          cellSize - 3.0,
-          cellSize - 3.0,
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, const Radius.circular(5.0)),
-          cellPaint,
-        );
+    // Map-specific background patterns to make them look premium and fun!
+    if (game.selectedMapType == MapType.arctic) {
+      final patternPaint = Paint()
+        ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.02)
+        ..style = PaintingStyle.fill;
+      final r = math.Random(101);
+      for (int i = 0; i < 15; i++) {
+        final cx = offsetX + r.nextDouble() * width;
+        final cy = offsetY + r.nextDouble() * height;
+        final radius = 30.0 + r.nextDouble() * 50.0;
+        canvas.drawCircle(Offset(cx, cy), radius, patternPaint);
+      }
+    } else if (game.selectedMapType == MapType.savanna) {
+      final patternPaint = Paint()
+        ..color = const Color(0xFFD4AF37).withValues(alpha: 0.015)
+        ..style = PaintingStyle.fill;
+      final r = math.Random(202);
+      for (int i = 0; i < 20; i++) {
+        final cx = offsetX + r.nextDouble() * width;
+        final cy = offsetY + r.nextDouble() * height;
+        final radius = 20.0 + r.nextDouble() * 40.0;
+        canvas.drawCircle(Offset(cx, cy), radius, patternPaint);
+      }
+    } else if (game.selectedMapType == MapType.delta) {
+      final patternPaint = Paint()
+        ..color = const Color(0xFF1DE9B6).withValues(alpha: 0.01)
+        ..style = PaintingStyle.fill;
+      final r = math.Random(303);
+      for (int i = 0; i < 15; i++) {
+        final cx = offsetX + r.nextDouble() * width;
+        final cy = offsetY + r.nextDouble() * height;
+        final radius = 35.0 + r.nextDouble() * 45.0;
+        canvas.drawCircle(Offset(cx, cy), radius, patternPaint);
+      }
+    } else if (game.selectedMapType == MapType.andes) {
+      final patternPaint = Paint()
+        ..color = const Color(0xFFFF7043).withValues(alpha: 0.012)
+        ..style = PaintingStyle.fill;
+      final r = math.Random(404);
+      for (int i = 0; i < 15; i++) {
+        final cx = offsetX + r.nextDouble() * width;
+        final cy = offsetY + r.nextDouble() * height;
+        final radius = 25.0 + r.nextDouble() * 55.0;
+        canvas.drawCircle(Offset(cx, cy), radius, patternPaint);
+      }
+    } else if (game.selectedMapType == MapType.nile) {
+      final patternPaint = Paint()
+        ..color = const Color(0xFF00E5FF).withValues(alpha: 0.012)
+        ..style = PaintingStyle.fill;
+      final r = math.Random(505);
+      for (int i = 0; i < 15; i++) {
+        final cx = offsetX + r.nextDouble() * width;
+        final cy = offsetY + r.nextDouble() * height;
+        final radius = 30.0 + r.nextDouble() * 40.0;
+        canvas.drawCircle(Offset(cx, cy), radius, patternPaint);
       }
     }
 
-    // Grid lines (Subtle dotted corners)
-    final dotPaint = Paint()
-      ..color = GameConstants.gridLineColor.withValues(alpha: 0.35)
-      ..style = PaintingStyle.fill;
+    final crossPaint = Paint()
+      ..color = () {
+        switch (game.selectedMapType) {
+          case MapType.arctic:
+            return const Color(0x30E0F7FC);
+          case MapType.savanna:
+            return const Color(0x30FFE082);
+          case MapType.delta:
+            return const Color(0x30B2DFDB);
+          case MapType.andes:
+            return const Color(0x30FFCC80);
+          case MapType.nile:
+            return const Color(0x3080DEEA);
+          default:
+            return GameConstants.gridLineColor.withValues(alpha: 0.25);
+        }
+      }()
+      ..strokeWidth = 0.8
+      ..style = PaintingStyle.stroke;
+
+    const crossArm = 3.0; // half-length of each crosshair arm
 
     for (int x = 0; x <= gridManager.cols; x++) {
       for (int y = 0; y <= gridManager.rows; y++) {
-        canvas.drawCircle(
-          Offset(offsetX + x * cellSize, offsetY + y * cellSize),
-          1.2,
-          dotPaint,
-        );
+        final cx = offsetX + x * cellSize;
+        final cy = offsetY + y * cellSize;
+        canvas.drawLine(Offset(cx - crossArm, cy), Offset(cx + crossArm, cy), crossPaint);
+        canvas.drawLine(Offset(cx, cy - crossArm), Offset(cx, cy + crossArm), crossPaint);
       }
     }
 
@@ -398,8 +503,10 @@ class GridRenderer extends PositionComponent
 
   void _drawRoadsAndExpressLanes(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     final roadPath = Path();
+    final dirtRoadPath = Path();
     final tunnelPath = Path();
     final bridgePath = Path();
+    final iceRoadPath = Path();
 
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
@@ -470,10 +577,14 @@ class GridRenderer extends PositionComponent
         int connCount = (n ? 1 : 0) + (e ? 1 : 0) + (s ? 1 : 0) + (w ? 1 : 0);
 
         final Path targetPath;
-        if (cell.isTunnel) {
+        if (cell.isIceRoad) {
+          targetPath = iceRoadPath;
+        } else if (cell.isTunnel) {
           targetPath = tunnelPath;
         } else if (cell.isBridge) {
           targetPath = bridgePath;
+        } else if (game.selectedMapType == MapType.savanna && cell.owner == InfrastructureOwner.player) {
+          targetPath = dirtRoadPath;
         } else {
           targetPath = roadPath;
         }
@@ -550,6 +661,61 @@ class GridRenderer extends PositionComponent
     _bridgePaint.strokeCap = StrokeCap.round;
     canvas.drawPath(bridgePath, _bridgeOutlinePaint);
     canvas.drawPath(bridgePath, _bridgePaint);
+
+    _iceRoadOutlinePaint.strokeCap = StrokeCap.round;
+    _iceRoadPaint.strokeCap = StrokeCap.round;
+    canvas.drawPath(iceRoadPath, _iceRoadOutlinePaint);
+    canvas.drawPath(iceRoadPath, _iceRoadPaint);
+
+    _dirtRoadOutlinePaint.strokeCap = StrokeCap.round;
+    _dirtRoadPaint.strokeCap = StrokeCap.round;
+    canvas.drawPath(dirtRoadPath, _dirtRoadOutlinePaint);
+    canvas.drawPath(dirtRoadPath, _dirtRoadPaint);
+
+    // --- Draw Ice Cracks and Dirt Road Tracks ---
+    for (int x = minX; x < maxX; x++) {
+      for (int y = minY; y < maxY; y++) {
+        if (!gridManager.isValid(x, y)) continue;
+        final cell = gridManager.grid[y][x];
+        if (cell.isPendingDeletion) continue;
+
+        final cx = offsetX + x * cellSize;
+        final cy = offsetY + y * cellSize;
+        final midX = cx + cellSize / 2;
+        final midY = cy + cellSize / 2;
+
+        if (cell.isIceRoad) {
+          final crackPaint = Paint()
+            ..color = Colors.white.withValues(alpha: 0.6)
+            ..strokeWidth = 1.2
+            ..style = PaintingStyle.stroke;
+          canvas.drawLine(
+            Offset(midX - cellSize * 0.15, midY - cellSize * 0.15),
+            Offset(midX + cellSize * 0.15, midY + cellSize * 0.15),
+            crackPaint,
+          );
+          canvas.drawLine(
+            Offset(midX + cellSize * 0.15, midY - cellSize * 0.05),
+            Offset(midX + cellSize * 0.05, midY + cellSize * 0.15),
+            crackPaint,
+          );
+        } else if (game.selectedMapType == MapType.savanna && cell.owner == InfrastructureOwner.player && cell.isRoad) {
+          final trackPaint = Paint()
+            ..color = const Color(0x355C4033)
+            ..strokeWidth = 1.0
+            ..style = PaintingStyle.stroke;
+
+          if (cell.connUp || cell.connDown) {
+            canvas.drawLine(Offset(midX - 3, cy), Offset(midX - 3, cy + cellSize), trackPaint);
+            canvas.drawLine(Offset(midX + 3, cy), Offset(midX + 3, cy + cellSize), trackPaint);
+          }
+          if (cell.connLeft || cell.connRight) {
+            canvas.drawLine(Offset(cx, midY - 3), Offset(cx + cellSize, midY - 3), trackPaint);
+            canvas.drawLine(Offset(cx, midY + 3), Offset(cx + cellSize, midY + 3), trackPaint);
+          }
+        }
+      }
+    }
 
     _drawExpressLanesGlobal(canvas);
   }
@@ -736,6 +902,59 @@ class GridRenderer extends PositionComponent
     }
   }
 
+  void _drawMapSpecificBuildingDetails(Canvas canvas, Rect bRect, double size) {
+    switch (game.selectedMapType) {
+      case MapType.arctic:
+        // Snowy roof cap
+        final snowCapPaint = Paint()..color = const Color(0xFFF0F8FF);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(bRect.left + 1, bRect.top + 1, bRect.width - 2, bRect.height * 0.4),
+            Radius.circular(size * 0.08),
+          ),
+          snowCapPaint,
+        );
+        break;
+      case MapType.savanna:
+        // Thatch roof diagonal straws
+        final thatchPaint = Paint()
+          ..color = const Color(0xFFC0A477).withValues(alpha: 0.85)
+          ..strokeWidth = 1.0
+          ..style = PaintingStyle.stroke;
+        canvas.drawLine(Offset(bRect.left + 3, bRect.top + 2), Offset(bRect.left + 6, bRect.top + 6), thatchPaint);
+        canvas.drawLine(Offset(bRect.left + bRect.width / 2, bRect.top + 2), Offset(bRect.left + bRect.width / 2 + 3, bRect.top + 6), thatchPaint);
+        canvas.drawLine(Offset(bRect.right - 6, bRect.top + 2), Offset(bRect.right - 3, bRect.top + 6), thatchPaint);
+        break;
+      case MapType.delta:
+        // Ivy/mossy details on corners
+        final mossPaint = Paint()..color = const Color(0xAA4CAF50);
+        canvas.drawCircle(Offset(bRect.left + 2, bRect.bottom - 2), 2.0, mossPaint);
+        canvas.drawCircle(Offset(bRect.right - 2, bRect.bottom - 2), 1.5, mossPaint);
+        canvas.drawCircle(Offset(bRect.left + 2, bRect.top + 2), 1.0, mossPaint);
+        break;
+      case MapType.andes:
+        // Stone details/slate texture
+        final stonePaint = Paint()
+          ..color = const Color(0xFF8D6E63).withValues(alpha: 0.5)
+          ..strokeWidth = 1.0;
+        canvas.drawRect(Rect.fromLTWH(bRect.right - 3, bRect.top - 2, 2, 4), stonePaint);
+        break;
+      case MapType.nile:
+        // Clay dome roof accent
+        final domePaint = Paint()..color = const Color(0xFFD7CCC8);
+        canvas.drawArc(
+          Rect.fromLTWH(bRect.left + bRect.width / 2 - 3, bRect.top - 2, 6, 4),
+          0,
+          math.pi,
+          true,
+          domePaint,
+        );
+        break;
+      default:
+        break;
+    }
+  }
+
   void _drawHouse(
     Canvas canvas,
     double cx,
@@ -774,6 +993,9 @@ class GridRenderer extends PositionComponent
       ),
       Paint()..color = Colors.white24,
     );
+
+    // [NEW] Map-specific building details
+    _drawMapSpecificBuildingDetails(canvas, rect, size);
 
     // [NEW] District Markers (Requested: Dots/Trucks)
     _drawBuildingMarkers(canvas, cx, cy, size, districtType);
@@ -855,6 +1077,9 @@ class GridRenderer extends PositionComponent
       RRect.fromRectAndRadius(roofRect, Radius.circular(size * 0.04)),
       Paint()..color = Colors.white24,
     );
+
+    // [NEW] Map-specific building details
+    _drawMapSpecificBuildingDetails(canvas, bRect, size);
 
     // Simple glass double doors at the center bottom
     final doorRect = Rect.fromCenter(
@@ -1282,72 +1507,62 @@ class GridRenderer extends PositionComponent
   void _drawAmbientTimeOfDay(Canvas canvas) {
     final weekProgress = game.weekProgress.clamp(0.0, 1.0);
     
-    final TrafficPhase currentPhase;
-    final double phaseStart;
-    final double phaseEnd;
+    // Derive warm/cool tint from progress
+    // Morning (0.0-0.15): warm orange sunrise
+    // Midday (0.15-0.45): clear/neutral
+    // Evening (0.45-0.65): warm amber sunset
+    // Night (0.65-1.0): cool indigo
 
-    if (weekProgress < 0.2) {
-      currentPhase = TrafficPhase.morningRush;
-      phaseStart = 0.0;
-      phaseEnd = 0.2;
-    } else if (weekProgress < 0.5) {
-      currentPhase = TrafficPhase.midday;
-      phaseStart = 0.2;
-      phaseEnd = 0.5;
-    } else if (weekProgress < 0.7) {
-      currentPhase = TrafficPhase.eveningRush;
-      phaseStart = 0.5;
-      phaseEnd = 0.7;
+    Color tintColor;
+    double tintStrength;
+
+    if (weekProgress < 0.15) {
+      // Dawn → sunrise golden
+      final t = weekProgress / 0.15;
+      tintColor = const Color(0xFFFFB347);
+      tintStrength = (1.0 - t) * 0.06; // fades as morning progresses
+    } else if (weekProgress < 0.45) {
+      // Midday → nearly transparent
+      tintColor = const Color(0xFFFFF8E1);
+      tintStrength = 0.0;
+    } else if (weekProgress < 0.65) {
+      // Evening → warm amber/red sunset
+      final t = (weekProgress - 0.45) / 0.20;
+      tintColor = Color.lerp(const Color(0xFFE26D5C), const Color(0xFF1A1040), t)!;
+      tintStrength = t * 0.15;
     } else {
-      currentPhase = TrafficPhase.calm;
-      phaseStart = 0.7;
-      phaseEnd = 1.0;
+      // Night → deep indigo, peaks at 0.85, then fades back to dawn
+      final nightProgress = (weekProgress - 0.65) / 0.35;
+      final nightIntensity = math.sin(nightProgress * math.pi); // peaks at center of night
+      tintColor = const Color(0xFF0A0E1A);
+      tintStrength = nightIntensity * 0.25;
     }
 
-    final phaseDuration = phaseEnd - phaseStart;
-    final phaseProgress = (weekProgress - phaseStart) / phaseDuration;
+    if (tintStrength < 0.005) return;
 
-    final Color colorA;
-    final Color colorB;
+    final boardRect = Rect.fromLTWH(
+      offsetX,
+      offsetY,
+      gridManager.cols * cellSize,
+      gridManager.rows * cellSize,
+    );
 
-    switch (currentPhase) {
-      case TrafficPhase.morningRush:
-        colorA = const Color(0xFFFFB347).withValues(alpha: 0.05); // Soft sunrise orange
-        // Fade sunrise orange to transparent orange (instead of transparent black)
-        colorB = const Color(0xFFFFB347).withValues(alpha: 0.0);
-        break;
-      case TrafficPhase.midday:
-        // Fade from transparent eveningRush red to eveningRush red
-        colorA = const Color(0xFFE26D5C).withValues(alpha: 0.0);
-        colorB = const Color(0xFFE26D5C).withValues(alpha: 0.10); // Warm sunset amber/red
-        break;
-      case TrafficPhase.eveningRush:
-        colorA = const Color(0xFFE26D5C).withValues(alpha: 0.10);
-        // Fade eveningRush red directly to calm hours deep night color
-        colorB = const Color(0xFF0F172A).withValues(alpha: 0.22); // Deep indigo night
-        break;
-      case TrafficPhase.calm:
-        colorA = const Color(0xFF0F172A).withValues(alpha: 0.22);
-        // Fade deep indigo night directly to sunrise orange
-        colorB = const Color(0xFFFFB347).withValues(alpha: 0.05);
-        break;
-    }
+    // Radial gradient: lighter center (city glow) → darker edges (vignette)
+    final centerColor = tintColor.withValues(alpha: tintStrength * 0.3);
+    final edgeColor = tintColor.withValues(alpha: tintStrength);
 
-    final ambientColor = Color.lerp(colorA, colorB, phaseProgress) ?? colorA;
+    final gradient = RadialGradient(
+      center: Alignment.center,
+      radius: 0.9,
+      colors: [centerColor, edgeColor],
+      stops: const [0.3, 1.0],
+    );
 
-    if (ambientColor.a > 0.0) {
-      final paint = Paint()
-        ..color = ambientColor
-        ..style = PaintingStyle.fill;
-      
-      final rect = Rect.fromLTWH(
-        offsetX,
-        offsetY,
-        (gridManager.cols) * cellSize,
-        (gridManager.rows) * cellSize,
-      );
-      canvas.drawRect(rect, paint);
-    }
+    final paint = Paint()
+      ..shader = gradient.createShader(boardRect)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawRect(boardRect, paint);
   }
 
   void _drawRoadPreview(Canvas canvas) {
@@ -1558,6 +1773,198 @@ class GridRenderer extends PositionComponent
       );
     }
     _floatingMessages.removeWhere((m) => toRemove.contains(m));
+  }
+
+  void _drawWarningTriangle(Canvas canvas, double cx, double cy, double size) {
+    final path = Path();
+    path.moveTo(cx, cy - size * 0.5);
+    path.lineTo(cx + size * 0.5, cy + size * 0.4);
+    path.lineTo(cx - size * 0.5, cy + size * 0.4);
+    path.close();
+
+    canvas.drawPath(path, Paint()..color = Colors.amber);
+    canvas.drawPath(path, Paint()..color = Colors.black..style = PaintingStyle.stroke..strokeWidth = 1.0);
+    
+    final textPainter = TextPainter(
+      text: const TextSpan(
+        text: '!',
+        style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    textPainter.paint(canvas, Offset(cx - textPainter.width / 2, cy - textPainter.height / 2 + 1));
+  }
+
+  void _drawMapSpecificEventVisuals(Canvas canvas) {
+    final double time = game.elapsedTime;
+    final int rows = gridManager.rows;
+    final int cols = gridManager.cols;
+    final double width = cols * cellSize;
+    final double height = rows * cellSize;
+
+    // 1. Map-wide weather overlays
+    if (game.activeEvent == 'blizzard') {
+      // Map-wide cold white-blue tint
+      canvas.drawRect(
+        Rect.fromLTWH(offsetX, offsetY, width, height),
+        Paint()..color = const Color(0x35E0F7FC),
+      );
+
+      // Draw drifting snowflakes
+      final snowPaint = Paint()..color = Colors.white.withValues(alpha: 0.85);
+      final r = math.Random(42); // deterministic seed per frame
+      for (int i = 0; i < 60; i++) {
+        // Position drifts down-right over time
+        final rx = (r.nextDouble() * width + time * 60.0) % width;
+        final ry = (r.nextDouble() * height + time * 80.0) % height;
+        canvas.drawCircle(Offset(offsetX + rx, offsetY + ry), 1.5 + r.nextDouble() * 2.0, snowPaint);
+      }
+    } else if (game.activeEvent == 'dustStorm') {
+      // Map-wide orange-brown sandstorm tint
+      canvas.drawRect(
+        Rect.fromLTWH(offsetX, offsetY, width, height),
+        Paint()..color = const Color(0x45E5A65D),
+      );
+
+      // Draw drifting dust particles (horizontal streaks)
+      final dustPaint = Paint()..color = const Color(0xFFC69C6D).withValues(alpha: 0.6);
+      final r = math.Random(1337);
+      for (int i = 0; i < 40; i++) {
+        final rx = (r.nextDouble() * width + time * 120.0) % width;
+        final ry = (r.nextDouble() * height + time * 30.0) % height;
+        final length = 15.0 + r.nextDouble() * 25.0;
+        canvas.drawLine(
+          Offset(offsetX + rx, offsetY + ry),
+          Offset(offsetX + rx + length, offsetY + ry + 2.0),
+          dustPaint..strokeWidth = 1.0 + r.nextDouble() * 1.5,
+        );
+      }
+    }
+
+    // 2. Animal crossing crossing animation
+    if (game.activeEvent == 'animalCrossing' && game.activeEventPos != null) {
+      final pos = game.activeEventPos!;
+      final cx = offsetX + pos.x * cellSize + cellSize / 2;
+      final cy = offsetY + pos.y * cellSize + cellSize / 2;
+
+      // Draw warning triangle
+      _drawWarningTriangle(canvas, cx, cy - cellSize * 0.15, cellSize * 0.35);
+
+      // Draw 3 tiny gazelles crossing (little brown circles with legs/ears)
+      for (int i = 0; i < 3; i++) {
+        final offsetPhase = (time * 0.4 + i * 0.3) % 1.0;
+        // Move from left edge to right edge of cell
+        final ax = cx - cellSize * 0.4 + offsetPhase * cellSize * 0.8;
+        final ay = cy + math.sin(offsetPhase * math.pi * 4.0) * 2.0; // slight hop
+        
+        // Gazelle body
+        canvas.drawCircle(Offset(ax, ay), 3.0, Paint()..color = const Color(0xFF8B5A2B));
+        // Head
+        canvas.drawCircle(Offset(ax + 3.0, ay - 2.0), 1.8, Paint()..color = const Color(0xFF8B5A2B));
+        // Horns
+        canvas.drawLine(Offset(ax + 3.0, ay - 2.0), Offset(ax + 4.0, ay - 5.0), Paint()..color = Colors.black..strokeWidth = 0.8);
+      }
+    }
+
+    // 3. Drawbridge Open animation
+    if (game.activeEvent == 'drawbridgeOpen' && game.activeEventPos != null) {
+      final pos = game.activeEventPos!;
+      final cx = offsetX + pos.x * cellSize + cellSize / 2;
+      final cy = offsetY + pos.y * cellSize + cellSize / 2;
+      final cell = gridManager.grid[pos.y][pos.x];
+
+      // Draw flashing red warning light
+      final flash = (time * 5.0).floor() % 2 == 0;
+      canvas.drawCircle(
+        Offset(cx, cy),
+        cellSize * 0.5,
+        Paint()
+          ..color = (flash ? Colors.red : Colors.black).withValues(alpha: 0.3)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+
+      // Draw bridge flaps open (two dark rects separated in the center)
+      final bool isVertical = cell.infrastructureAxis == InfrastructureAxis.vertical;
+      final bridgePaint = Paint()..color = const Color(0xFF5E6573);
+
+      if (isVertical) {
+        // Top flap
+        canvas.drawRect(
+          Rect.fromLTWH(cx - cellSize * 0.2, cy - cellSize * 0.45, cellSize * 0.4, cellSize * 0.25),
+          bridgePaint,
+        );
+        // Bottom flap
+        canvas.drawRect(
+          Rect.fromLTWH(cx - cellSize * 0.2, cy + cellSize * 0.2, cellSize * 0.4, cellSize * 0.25),
+          bridgePaint,
+        );
+      } else {
+        // Left flap
+        canvas.drawRect(
+          Rect.fromLTWH(cx - cellSize * 0.45, cy - cellSize * 0.2, cellSize * 0.25, cellSize * 0.4),
+          bridgePaint,
+        );
+        // Right flap
+        canvas.drawRect(
+          Rect.fromLTWH(cx + cellSize * 0.2, cy - cellSize * 0.2, cellSize * 0.25, cellSize * 0.4),
+          bridgePaint,
+        );
+      }
+
+      // Draw red stop barrier arms blocking lanes
+      final barrierPaint = Paint()
+        ..color = Colors.red
+        ..strokeWidth = 3.0
+        ..strokeCap = StrokeCap.round;
+      final barrierSupportPaint = Paint()
+        ..color = const Color(0xFF333333)
+        ..style = PaintingStyle.fill;
+
+      if (isVertical) {
+        canvas.drawCircle(Offset(cx - cellSize * 0.3, cy - cellSize * 0.38), 2.5, barrierSupportPaint);
+        canvas.drawLine(Offset(cx - cellSize * 0.3, cy - cellSize * 0.38), Offset(cx + cellSize * 0.3, cy - cellSize * 0.38), barrierPaint);
+
+        canvas.drawCircle(Offset(cx + cellSize * 0.3, cy + cellSize * 0.38), 2.5, barrierSupportPaint);
+        canvas.drawLine(Offset(cx - cellSize * 0.3, cy + cellSize * 0.38), Offset(cx + cellSize * 0.3, cy + cellSize * 0.38), barrierPaint);
+      } else {
+        canvas.drawCircle(Offset(cx - cellSize * 0.38, cy - cellSize * 0.3), 2.5, barrierSupportPaint);
+        canvas.drawLine(Offset(cx - cellSize * 0.38, cy - cellSize * 0.3), Offset(cx - cellSize * 0.38, cy + cellSize * 0.3), barrierPaint);
+
+        canvas.drawCircle(Offset(cx + cellSize * 0.38, cy + cellSize * 0.3), 2.5, barrierSupportPaint);
+        canvas.drawLine(Offset(cx + cellSize * 0.38, cy - cellSize * 0.3), Offset(cx + cellSize * 0.38, cy + cellSize * 0.3), barrierPaint);
+      }
+    }
+
+    // 4. Flash Flood submerged indicators
+    if (game.activeEvent == 'flashFlood' && game.floodedRoads.isNotEmpty) {
+      final floodPaint = Paint()
+        ..color = const Color(0x952196F3)
+        ..style = PaintingStyle.fill;
+
+      for (final pos in game.floodedRoads) {
+        final cx = offsetX + pos.x * cellSize + cellSize / 2;
+        final cy = offsetY + pos.y * cellSize + cellSize / 2;
+
+        // Draw blue water wavy ripple over the flooded tile
+        canvas.drawCircle(
+          Offset(cx, cy),
+          cellSize * 0.42,
+          floodPaint,
+        );
+
+        // Draw a tiny wave pattern
+        final wavePaint = Paint()
+          ..color = Colors.white.withValues(alpha: 0.6)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0;
+        final double waveY = cy + math.sin(time * 5.0) * 1.5;
+        canvas.drawLine(Offset(cx - cellSize * 0.25, waveY), Offset(cx + cellSize * 0.25, waveY), wavePaint);
+
+        // Draw warning triangle over the flooded tile
+        _drawWarningTriangle(canvas, cx, cy, cellSize * 0.25);
+      }
+    }
   }
 }
 

@@ -109,6 +109,8 @@ class GridCell {
   final bool isElevatedRail;
   final InfrastructureOwner owner;
   final InfrastructureOwner upgradeOwner;
+  final bool isIceRoad;
+
   GridCell({
     this.type = CellType.empty,
     this.colorIndex,
@@ -144,6 +146,7 @@ class GridCell {
     this.isElevatedRail = false,
     this.owner = InfrastructureOwner.none,
     this.upgradeOwner = InfrastructureOwner.none,
+    this.isIceRoad = false,
   });
 
   bool get hasSmartJunction => type == CellType.smartJunction;
@@ -183,6 +186,7 @@ class GridCell {
     bool? isElevatedRail,
     InfrastructureOwner? owner,
     InfrastructureOwner? upgradeOwner,
+    bool? isIceRoad,
   }) {
     return GridCell(
       type: type ?? this.type,
@@ -219,6 +223,7 @@ class GridCell {
       isElevatedRail: isElevatedRail ?? this.isElevatedRail,
       owner: owner ?? this.owner,
       upgradeOwner: upgradeOwner ?? this.upgradeOwner,
+      isIceRoad: isIceRoad ?? this.isIceRoad,
     );
   }
 

@@ -1,4 +1,5 @@
-import 'dart:math';
+import 'dart:math' as math;
+import 'dart:math' show Random, min, max, pow;
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
@@ -52,6 +53,9 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   final ValueNotifier<int> trafficLightInventoryNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> smartJunctionInventoryNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> expressLaneInventoryNotifier = ValueNotifier<int>(0);
+  final ValueNotifier<bool> canUndoNotifier = ValueNotifier<bool>(false);
+
+  final List<Map<String, dynamic>> _undoStack = [];
 
   int get score => scoreNotifier.value;
   set score(int v) => scoreNotifier.value = v;
@@ -77,6 +81,16 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   late ProgressionDirector progressionDirector;
   late DistrictPlanner districtPlanner;
   late EventManager eventManager;
+  
+  // Weather & Event simulation variables
+  String? activeEvent; // 'blizzard', 'dustStorm', 'animalCrossing', 'drawbridgeOpen', 'flashFlood'
+  double eventTimer = 0.0;
+  double nextEventCooldown = 25.0; // Trigger the first event after 25s
+  double eventDuration = 0.0;
+  GridPosition? activeEventPos;
+  final List<GridPosition> floodedRoads = [];
+  final List<GridPosition> activeEventTiles = [];
+
   late TransitManager transitManager;
   late EmergencyManager emergencyManager;
   late EconomyManager economyManager;
@@ -241,6 +255,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     selectedMapType = mapType;
     
     // Reset core state
+    _undoStack.clear();
+    canUndoNotifier.value = false;
     score = 0;
     week = 1;
     totalDeliveries = 0;
@@ -413,6 +429,15 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       gridManager!.roads += 30;
     }
 
+    // Increment week and expand active grid bounds
+    week++;
+    for (final dest in gridManager!.destinations) {
+      final key = "${dest.x},${dest.y}";
+      gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
+    }
+    _syncSpawnBounds();
+    MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
+
     phase = GamePhase.playing;
     paused = false;
     overlays.remove('weeklyUpgrade');
@@ -481,6 +506,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     final scaledDt = safeDt * timeScale;
     _elapsedTime += scaledDt;
     weekTimer += scaledDt;
+    _updateMapSpecificEvents(scaledDt);
 
     // Tier 2: 15Hz - Physics & Traffic AI
     // Pass the accumulated tick interval (scaled), not just the last frame's dt,
@@ -587,7 +613,9 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     if ((camera.viewfinder.zoom - _targetZoom).abs() > 0.001) {
       final zoomLerp = 1.0 - pow(0.05, dt).toDouble();
       final delta = (_targetZoom - camera.viewfinder.zoom) * zoomLerp;
-      camera.viewfinder.zoom += delta.clamp(-0.06, 0.06);
+      // Clamp rate of zoom change to be smooth and frame-rate independent (max 0.3 units per second)
+      final maxChange = 0.3 * dt;
+      camera.viewfinder.zoom += delta.clamp(-maxChange, maxChange);
       _syncCameraCenter(dt: dt);
       _syncSpawnBounds();
     }
@@ -815,18 +843,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   void _checkWeekTransition() {
     if (weekTimer >= GameConstants.weekDuration) {
       weekTimer = 0;
-      week++;
-      if (gridManager != null) {
-        for (final dest in gridManager!.destinations) {
-          final key = "${dest.x},${dest.y}";
-          gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
-        }
-      }
-      // Active region grows with the week — refresh spawn bounds so new
-      // buildings can land in the newly opened ring of cells, and the camera
-      // zoom (derived from the region size) widens to match.
-      _syncSpawnBounds();
-      MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
       _triggerWeeklyUpgrade();
     }
   }
@@ -838,10 +854,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     
     phase = GamePhase.weeklyUpgrade;
     overlays.add('weeklyUpgrade');
-    // Keep paused = false so Flame's update(dt) loop continues ticking,
-    // allowing the camera to smoothly zoom out to the new week's bounds.
-    // Inputs and simulation are still blocked via the phase check in update().
-    paused = false;
+    // Pause game loop processing during upgrade selection to freeze camera and spawns
+    paused = true;
     onStateChanged?.call();
   }
 
@@ -1011,25 +1025,31 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   void onPanEnd(DragEndInfo info) {
     if (activeTool == BuildTool.expressLane) {
       if (expressLanePendingStart != null && expressLaneDraggingEnd != null) {
-        final placed = gridManager!.placeExpressLane(
-            expressLanePendingStart!, expressLaneDraggingEnd!);
-        if (placed) {
-          _updateInventoryNotifiers();
-          onStateChanged?.call();
-        }
+        executeUndoableAction(() {
+          final placed = gridManager!.placeExpressLane(
+              expressLanePendingStart!, expressLaneDraggingEnd!);
+          if (placed) {
+            _updateInventoryNotifiers();
+            onStateChanged?.call();
+          }
+        });
       }
     } else if (_isDragging && _isDeferredTool) {
       if (_dragPath.length > 1) {
-        gridManager!.commitPlacement(() => _commitDragBuild());
-        if (activeTool == BuildTool.erase) _applyEraseRefunds();
+        executeUndoableAction(() {
+          gridManager!.commitPlacement(() => _commitDragBuild());
+          if (activeTool == BuildTool.erase) _applyEraseRefunds();
+        });
       }
     } else if (!_isDragging && _panStartPixel != null) {
       // Single click action
       final worldPos = camera.viewfinder.globalToLocal(_panStartPixel!);
       final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
       final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
-      _handleSingleClick(GridPosition(x, y));
-      if (activeTool == BuildTool.erase) _applyEraseRefunds();
+      executeUndoableAction(() {
+        _handleSingleClick(GridPosition(x, y));
+        if (activeTool == BuildTool.erase) _applyEraseRefunds();
+      });
     }
     _cleanupInput();
   }
@@ -1071,6 +1091,53 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       _handleBuild(pos);
     }
     _autoExtendTunnelExit();
+    _cleanupOrphanedTunnels();
+  }
+
+  /// After a drag commit, remove any tunnel/bridge tile that has fewer than 2
+  /// edge connections (i.e. it has an entry but no exit — a dead-end corridor).
+  /// This prevents single orphaned tunnel tiles from appearing when the drag
+  /// briefly clips one mountain/water cell without crossing through it.
+  void _cleanupOrphanedTunnels() {
+    if (gridManager == null) return;
+    final gm = gridManager!;
+
+    for (final pos in List<GridPosition>.from(_dragPath)) {
+      if (!gm.isValid(pos.x, pos.y)) continue;
+      final cell = gm.getCell(pos.x, pos.y);
+      if (!cell.isTunnel && !cell.isBridge) continue;
+
+      // Count active edges touching this tile
+      int edgeCount = 0;
+      for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        final nx = pos.x + d[0];
+        final ny = pos.y + d[1];
+        if (gm.isValid(nx, ny) && gm.hasEdge(pos.x, pos.y, nx, ny)) {
+          edgeCount++;
+        }
+      }
+
+      // A corridor tile with fewer than 2 edges is orphaned — remove it.
+      if (edgeCount < 2) {
+        final isTunnel = cell.isTunnel;
+        gm.grid[pos.y][pos.x] = GridCell(); // erase
+        gm.activeEdges.removeWhere((e) {
+          final parts = e.split('|');
+          if (parts.length != 2) return false;
+          return parts[0] == '${pos.x},${pos.y}' || parts[1] == '${pos.x},${pos.y}';
+        });
+        gm.infrastructure.remove(pos);
+        // Refund the inventory cost for this tile
+        if (isTunnel) {
+          gm.tunnels += 1;
+        } else {
+          gm.bridges += 1;
+        }
+        gm.rebuildRoadGraph();
+        gridRenderer?.markDirty(pos.x, pos.y);
+      }
+    }
+    _updateInventoryNotifiers();
   }
 
   /// If the drag ended inside terrain (mountain/water) without exiting onto land,
@@ -1204,7 +1271,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
         // having to switch tools mid-gesture.
         if (cell.type == CellType.mountain || cell.isTunnel) {
           _placeTunnelOrExit(pos);
-        } else if (cell.type == CellType.water || cell.isBridge) {
+        } else if ((cell.type == CellType.water || cell.isBridge) && selectedMapType != MapType.arctic) {
           _placeBridgeOrExit(pos);
         } else {
           gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
@@ -1250,5 +1317,201 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
         break;
     }
     gridRenderer?.markDirty(pos.x, pos.y);
+  }
+
+  bool _areSnapshotsIdentical(Map<String, dynamic> a, Map<String, dynamic> b) {
+    if (a['roads'] != b['roads'] ||
+        a['tunnels'] != b['tunnels'] ||
+        a['bridges'] != b['bridges'] ||
+        a['trafficLights'] != b['trafficLights'] ||
+        a['smartJunctions'] != b['smartJunctions'] ||
+        a['expressLanes'] != b['expressLanes']) {
+      return false;
+    }
+
+    final List<List<GridCell>> aGrid = a['grid'];
+    final List<List<GridCell>> bGrid = b['grid'];
+    for (int y = 0; y < gridManager!.rows; y++) {
+      for (int x = 0; x < gridManager!.cols; x++) {
+        final ca = aGrid[y][x];
+        final cb = bGrid[y][x];
+        if (ca.type != cb.type ||
+            ca.hasTrafficLight != cb.hasTrafficLight ||
+            ca.isTunnelExtension != cb.isTunnelExtension ||
+            ca.connUp != cb.connUp ||
+            ca.connRight != cb.connRight ||
+            ca.connDown != cb.connDown ||
+            ca.connLeft != cb.connLeft ||
+            ca.isExpressLane != cb.isExpressLane) {
+          return false;
+        }
+      }
+    }
+
+    final Set<String> aEdges = a['activeEdges'];
+    final Set<String> bEdges = b['activeEdges'];
+    if (aEdges.length != bEdges.length) return false;
+    for (final e in aEdges) {
+      if (!bEdges.contains(e)) return false;
+    }
+
+    return true;
+  }
+
+  void executeUndoableAction(VoidCallback action) {
+    if (gridManager == null) return;
+    final oldSnapshot = gridManager!.takeUndoSnapshot();
+    action();
+    final newSnapshot = gridManager!.takeUndoSnapshot();
+    if (!_areSnapshotsIdentical(oldSnapshot, newSnapshot)) {
+      _undoStack.add(oldSnapshot);
+      if (_undoStack.length > 20) {
+        _undoStack.removeAt(0);
+      }
+      canUndoNotifier.value = true;
+    }
+  }
+
+  void undo() {
+    if (_undoStack.isEmpty || gridManager == null) return;
+    final snapshot = _undoStack.removeLast();
+    gridManager!.restoreUndoSnapshot(snapshot);
+    _updateInventoryNotifiers();
+    gridRenderer?.markDirty();
+    _pathCache.clear();
+    onStateChanged?.call();
+    canUndoNotifier.value = _undoStack.isNotEmpty;
+  }
+
+  void _updateMapSpecificEvents(double dt) {
+    if (gridManager == null) return;
+    final random = math.Random();
+
+    if (activeEvent != null) {
+      eventTimer += dt;
+      if (eventTimer >= eventDuration) {
+        // Event ended!
+        activeEvent = null;
+        activeEventTiles.clear();
+        gridManager!.blockedTiles.clear();
+        if (floodedRoads.isNotEmpty) {
+          floodedRoads.clear();
+          gridManager!.rebuildRoadGraph();
+          _pathCache.clear();
+        }
+        nextEventCooldown = 35.0 + random.nextDouble() * 35.0; // 35-70 seconds
+        gridRenderer?.markAllDirty();
+      }
+    } else {
+      nextEventCooldown -= dt;
+      if (nextEventCooldown <= 0) {
+        if (selectedMapType == MapType.arctic) {
+          activeEvent = 'blizzard';
+          eventDuration = 15.0 + random.nextDouble() * 5.0;
+          eventTimer = 0.0;
+          gridRenderer?.markAllDirty();
+        } else if (selectedMapType == MapType.savanna) {
+          if (random.nextBool()) {
+            activeEvent = 'dustStorm';
+            eventDuration = 12.0 + random.nextDouble() * 6.0;
+            eventTimer = 0.0;
+            gridRenderer?.markAllDirty();
+          } else {
+            // Animal stampede
+            final validRoads = <GridPosition>[];
+            for (int y = 0; y < gridManager!.rows; y++) {
+              for (int x = 0; x < gridManager!.cols; x++) {
+                final cell = gridManager!.grid[y][x];
+                if (cell.isRoad && !cell.isTunnel && !cell.isBridge && cell.owner == InfrastructureOwner.player) {
+                  validRoads.add(GridPosition(x, y));
+                }
+              }
+            }
+            if (validRoads.isNotEmpty) {
+              final pos = validRoads[random.nextInt(validRoads.length)];
+              activeEvent = 'animalCrossing';
+              activeEventPos = pos;
+              activeEventTiles.clear();
+              activeEventTiles.add(pos);
+              gridManager!.blockedTiles.clear();
+              gridManager!.blockedTiles.add(pos);
+              eventDuration = 8.0;
+              eventTimer = 0.0;
+              _pathCache.clear(); // Recalculate routes to bypass stampede
+              gridRenderer?.markAllDirty();
+            } else {
+              nextEventCooldown = 15.0; // Try again soon
+            }
+          }
+        } else if (selectedMapType == MapType.delta) {
+          if (random.nextBool()) {
+            // Drawbridge open
+            final validBridges = <GridPosition>[];
+            for (int y = 0; y < gridManager!.rows; y++) {
+              for (int x = 0; x < gridManager!.cols; x++) {
+                final cell = gridManager!.grid[y][x];
+                if (cell.isBridge && cell.owner == InfrastructureOwner.player) {
+                  validBridges.add(GridPosition(x, y));
+                }
+              }
+            }
+            if (validBridges.isNotEmpty) {
+              final pos = validBridges[random.nextInt(validBridges.length)];
+              activeEvent = 'drawbridgeOpen';
+              activeEventPos = pos;
+              activeEventTiles.clear();
+              activeEventTiles.add(pos);
+              gridManager!.blockedTiles.clear();
+              gridManager!.blockedTiles.add(pos);
+              eventDuration = 8.0;
+              eventTimer = 0.0;
+              _pathCache.clear(); // Recalculate routes to bypass drawbridge
+              gridRenderer?.markAllDirty();
+            } else {
+              nextEventCooldown = 15.0; // Try again soon
+            }
+          } else {
+            // Flash Flood: Find player roads adjacent to water
+            final choiceFloods = <GridPosition>[];
+            for (int y = 0; y < gridManager!.rows; y++) {
+              for (int x = 0; x < gridManager!.cols; x++) {
+                final cell = gridManager!.grid[y][x];
+                if (cell.isRoad && !cell.isTunnel && !cell.isBridge && cell.owner == InfrastructureOwner.player) {
+                  // Check neighbors for water
+                  bool adjacentToWater = false;
+                  for (final dir in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+                    final nx = x + dir[0];
+                    final ny = y + dir[1];
+                    if (gridManager!.isValid(nx, ny) && gridManager!.grid[ny][nx].type == CellType.water) {
+                      adjacentToWater = true;
+                      break;
+                    }
+                  }
+                  if (adjacentToWater) {
+                    choiceFloods.add(GridPosition(x, y));
+                  }
+                }
+              }
+            }
+            if (choiceFloods.isNotEmpty) {
+              choiceFloods.shuffle(random);
+              activeEvent = 'flashFlood';
+              final chosen = choiceFloods.take(4).toList();
+              floodedRoads.clear();
+              floodedRoads.addAll(chosen);
+              gridManager!.blockedTiles.clear();
+              gridManager!.blockedTiles.addAll(chosen);
+              eventDuration = 15.0;
+              eventTimer = 0.0;
+              gridManager!.rebuildRoadGraph();
+              _pathCache.clear();
+              gridRenderer?.markAllDirty();
+            } else {
+              nextEventCooldown = 15.0;
+            }
+          }
+        }
+      }
+    }
   }
 }

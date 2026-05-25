@@ -91,22 +91,96 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
   }
 
   bool _shouldShowTool(BuildTool tool) {
+    final map = g.selectedMapType;
     switch (tool) {
       case BuildTool.bridge:
-        return g.selectedMapType == MapType.nile;
+        // Show bridge for water-crossing maps
+        return map == MapType.nile ||
+               map == MapType.delta ||
+               map == MapType.arctic;
       case BuildTool.tunnel:
-        return g.selectedMapType != MapType.nile;
+        // Show tunnel for mountain-crossing maps
+        return map == MapType.zen ||
+               map == MapType.andes ||
+               map == MapType.arctic ||
+               map == MapType.savanna;
       default:
         return true;
     }
   }
 
   Widget _topSection() {
+    final map = g.selectedMapType;
+    String mapLabel = map.name.toUpperCase();
+    String mapDesc = '';
+    Color themeColor = Colors.blueAccent;
+    IconData mapIcon = Icons.map;
+
+    switch (map) {
+      case MapType.zen:
+        mapDesc = 'BALANCED CLIMATE';
+        themeColor = Colors.lightGreenAccent;
+        mapIcon = Icons.eco;
+        break;
+      case MapType.andes:
+        mapDesc = 'TERRACOTTA CANYONS';
+        themeColor = Colors.orangeAccent;
+        mapIcon = Icons.terrain;
+        break;
+      case MapType.nile:
+        mapDesc = 'RIVER BASIN & DOMES';
+        themeColor = Colors.amberAccent;
+        mapIcon = Icons.water;
+        break;
+      case MapType.arctic:
+        mapDesc = 'ICE ROADS & BLIZZARDS';
+        themeColor = Colors.cyanAccent;
+        mapIcon = Icons.ac_unit;
+        break;
+      case MapType.savanna:
+        mapDesc = 'GAZELLES & DUST STORMS';
+        themeColor = Colors.yellowAccent;
+        mapIcon = Icons.wb_sunny;
+        break;
+      case MapType.delta:
+        mapDesc = 'FLOODS & DRAWBRIDGES';
+        themeColor = Colors.tealAccent;
+        mapIcon = Icons.waves;
+        break;
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       child: Column(
         children: [
-          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(mapIcon, size: 14, color: themeColor),
+              const SizedBox(width: 6),
+              Text(
+                mapLabel,
+                style: GoogleFonts.outfit(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            mapDesc,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.outfit(
+              color: themeColor.withValues(alpha: 0.8),
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
           _divider(),
           const SizedBox(height: 12),
           ValueListenableBuilder<int>(
@@ -146,12 +220,13 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
               ],
             ),
           ),
-          if (g.eventManager.activeEvents.isNotEmpty || g.emergencyManager.activeEvents.isNotEmpty) ...[
+          if (g.eventManager.activeEvents.isNotEmpty || g.emergencyManager.activeEvents.isNotEmpty || g.activeEvent != null) ...[
             const SizedBox(height: 8),
             _divider(),
             const SizedBox(height: 4),
             ...g.eventManager.activeEvents.map((e) => _eventNotification(e)),
             ...g.emergencyManager.activeEvents.map((e) => _emergencyNotification(e)),
+            if (g.activeEvent != null) _mapEventNotification(g),
           ]
         ],
       ),
@@ -224,6 +299,21 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                   g.paused = true;
                   showInfoPanel = true;
                 }),
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: g.canUndoNotifier,
+                builder: (context, canUndo, _) {
+                  return _toolButton(
+                    tool: BuildTool.inspect,
+                    icon: Icons.undo,
+                    label: 'UNDO',
+                    isSelectedOverride: false,
+                    isDisabled: !canUndo,
+                    onTapOverride: () {
+                      g.undo();
+                    },
+                  );
+                },
               ),
             ],
           ),
@@ -313,6 +403,76 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
           ),
         );
       },
+    );
+  }
+
+  Widget _mapEventNotification(FlowGridGame g) {
+    final String title;
+    final IconData icon;
+    final Color color;
+    switch (g.activeEvent) {
+      case 'blizzard':
+        title = "BLIZZARD";
+        icon = Icons.ac_unit;
+        color = Colors.lightBlueAccent;
+        break;
+      case 'dustStorm':
+        title = "DUST STORM";
+        icon = Icons.cloud;
+        color = Colors.orange;
+        break;
+      case 'animalCrossing':
+        title = "ANIMAL CROSSING";
+        icon = Icons.pets;
+        color = Colors.amber;
+        break;
+      case 'drawbridgeOpen':
+        title = "DRAWBRIDGE OPEN";
+        icon = Icons.warning;
+        color = Colors.redAccent;
+        break;
+      case 'flashFlood':
+        title = "FLASH FLOOD";
+        icon = Icons.water;
+        color = Colors.blue;
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.outfit(color: color, fontSize: 9, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                LinearProgressIndicator(
+                  value: (1.0 - (g.eventTimer / g.eventDuration)).clamp(0.0, 1.0),
+                  backgroundColor: Colors.transparent,
+                  color: color.withValues(alpha: 0.5),
+                  minHeight: 2,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -544,67 +704,75 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     ValueNotifier<int>? notifier,
     int? count,
     VoidCallback? onTapOverride,
+    bool? isSelectedOverride,
+    bool isDisabled = false,
   }) {
-    final isSelected = g.activeTool == tool;
-    return GestureDetector(
-      onTap: onTapOverride ?? () => setState(() => g.activeTool = tool),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF2F80ED).withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF2F80ED) : Colors.white.withValues(alpha: 0.08),
-            width: isSelected ? 1.5 : 1,
-          ),
-          boxShadow: isSelected ? [
-            BoxShadow(
-              color: const Color(0xFF2F80ED).withValues(alpha: 0.25),
-              blurRadius: 10,
-              spreadRadius: 0.5,
-            )
-          ] : null,
-        ),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Align(
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    icon, 
-                    color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5), 
-                    size: 20,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    label,
-                    style: GoogleFonts.outfit(
-                      color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5),
-                      fontSize: 8.5,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+    final isSelected = isSelectedOverride ?? (g.activeTool == tool);
+    return IgnorePointer(
+      ignoring: isDisabled,
+      child: Opacity(
+        opacity: isDisabled ? 0.35 : 1.0,
+        child: GestureDetector(
+          onTap: onTapOverride ?? () => setState(() => g.activeTool = tool),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFF2F80ED).withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isSelected ? const Color(0xFF2F80ED) : Colors.white.withValues(alpha: 0.08),
+                width: isSelected ? 1.5 : 1,
               ),
+              boxShadow: isSelected ? [
+                BoxShadow(
+                  color: const Color(0xFF2F80ED).withValues(alpha: 0.25),
+                  blurRadius: 10,
+                  spreadRadius: 0.5,
+                )
+              ] : null,
             ),
-            if (notifier != null || count != null)
-              Positioned(
-                top: -2,
-                right: -2,
-                child: notifier != null
-                  ? ValueListenableBuilder<int>(
-                      valueListenable: notifier,
-                      builder: (context, val, _) => _badge(val),
-                    )
-                  : _badge(count ?? 0),
-              ),
-          ],
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Align(
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon, 
+                        color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5), 
+                        size: 20,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        label,
+                        style: GoogleFonts.outfit(
+                          color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5),
+                          fontSize: 8.5,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (notifier != null || count != null)
+                  Positioned(
+                    top: -2,
+                    right: -2,
+                    child: notifier != null
+                      ? ValueListenableBuilder<int>(
+                          valueListenable: notifier,
+                          builder: (context, val, _) => _badge(val),
+                        )
+                      : _badge(count ?? 0),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -685,6 +853,9 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                                 _resourceChip(Icons.water, 'BRIDGES: ${g.gridManager!.bridges}'),
                               ],
                             ),
+                            const SizedBox(height: 24),
+                            _infoSectionTitle('TERRAIN INTEL'),
+                            _mapIntelSection(),
                             const SizedBox(height: 24),
                             _infoSectionTitle('GAMEPLAY HANDBOOK'),
                             _helpItem('TRAFFIC SIGNALS', 'Place on intersections to cycle priority. Essential for 4-way junctions.'),
@@ -772,6 +943,56 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
           Text(desc, style: GoogleFonts.outfit(color: Colors.white38, fontSize: 12, height: 1.4)),
         ],
       ),
+    );
+  }
+
+  Widget _mapIntelSection() {
+    final map = g.selectedMapType;
+    List<Widget> items = [];
+    switch (map) {
+      case MapType.zen:
+        items = [
+          _helpItem('BALANCED CLIMATE', 'Standard traction and physics. A peaceful sandbox environment without harsh environmental hazards.'),
+        ];
+        break;
+      case MapType.andes:
+        items = [
+          _helpItem('TERRACOTTA CANYONS', 'Sparse connection corridors. Valley routes are critical.'),
+          _helpItem('MOUNTAIN ARCHITECTURE', 'Buildings are decorated with clay slate chimneys.'),
+        ];
+        break;
+      case MapType.nile:
+        items = [
+          _helpItem('RIVER BASIN', 'Bridges are highly critical to cross the wide central river splitting the map.'),
+          _helpItem('OASIS MUD-BRICK', 'Buildings feature flat clay domes representing desert oasis architecture.'),
+        ];
+        break;
+      case MapType.arctic:
+        items = [
+          _helpItem('SLIPPERY ICE ROADS', 'Build directly over ice lakes without bridges. Note: Vehicles slide and move 40% slower on ice.'),
+          _helpItem('BLIZZARD HAZARD', 'Periodic snowy storms reduce all vehicle speeds to 60%.'),
+          _helpItem('SNOWY ROOFS', 'Buildings feature thick white snow caps on their roofs.'),
+        ];
+        break;
+      case MapType.savanna:
+        items = [
+          _helpItem('DIRT ROADS', 'All built roads are unpaved dirt tracks, making vehicles travel 20% slower.'),
+          _helpItem('GAZELLE CROSSINGS', 'Wild gazelle herds periodically cross and block road traffic.'),
+          _helpItem('DUST STORMS', 'Desert dust storms periodically reduce visibility and slow all traffic.'),
+          _helpItem('THATCHED ROOFS', 'Buildings feature gold straw thatch overlays.'),
+        ];
+        break;
+      case MapType.delta:
+        items = [
+          _helpItem('FLASH FLOODS', 'Periodic wetlands flooding submerges low-elevation roads, temporarily closing them.'),
+          _helpItem('DRAWBRIDGES', 'Massive river structures that periodically open to let ships pass, blocking road lanes.'),
+          _helpItem('WETLANDS IVY', 'Ivy/moss grows on lower building corners and roof edges.'),
+        ];
+        break;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: items,
     );
   }
 

@@ -77,8 +77,8 @@ class GameConstants {
   static const double serviceVanSpeedMultiplier = 1.3;
 
   // Colors - Soft Dark Mode
-  static const Color backgroundColor = Color(0xFF1C1F26);
-  static const Color gridLineColor = Color(0xFF2A2F3A);
+  static const Color backgroundColor = Color(0xFF161A22);
+  static const Color gridLineColor = Color(0xFF232830);
   static const Color roadColor = Color(0xFF5F6572);
   static const Color roadFillColor = Color(0xFF6C7280);
 

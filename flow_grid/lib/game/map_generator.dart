@@ -2,11 +2,17 @@ import 'grid_manager.dart';
 import 'generators/zen_generator.dart';
 import 'generators/andes_generator.dart';
 import 'generators/nile_generator.dart';
+import 'generators/arctic_generator.dart';
+import 'generators/savanna_generator.dart';
+import 'generators/delta_generator.dart';
 
 enum MapType {
   zen,
   andes,
   nile,
+  arctic,
+  savanna,
+  delta,
 }
 
 class MapConfig {
@@ -21,9 +27,6 @@ class MapConfig {
     this.startingRoads = 20,
     this.startingTunnels = 0,
     this.startingBridges = 0,
-    // Testing defaults: hand the player a couple of traffic lights, a smart
-    // junction, and an express lane out of the gate so those tools can be
-    // exercised on a fresh save without grinding weekly upgrades.
     this.startingTrafficLights = 0,
     this.startingSmartJunctions = 0,
     this.startingExpressLanes = 0,
@@ -55,6 +58,13 @@ class MapGeneratorFactory {
         return AndesMapGenerator();
       case MapType.nile:
         return NileMapGenerator();
+      case MapType.arctic:
+        return ArcticMapGenerator();
+      case MapType.savanna:
+        return SavannaMapGenerator();
+      case MapType.delta:
+        return DeltaMapGenerator();
     }
   }
 }
+

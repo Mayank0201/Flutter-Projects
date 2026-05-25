@@ -62,24 +62,45 @@ class MapSelectionOverlay extends StatelessWidget {
                       children: [
                         _MapCard(
                           title: 'ZEN',
-                          description: 'Balanced layout with a central mountain divide.',
+                          description: 'Balanced baseline terrain. Ideal for training. Standard mechanics and layouts.',
                           icon: Icons.unfold_more,
                           color: Colors.blueAccent,
                           onTap: () => _startGame(context, MapType.zen),
                         ),
                         _MapCard(
                           title: 'ANDES',
-                          description: 'Unpredictable terrain with scattered clusters.',
+                          description: 'Terracotta canyons and mountain pockets. Restricts expansions, requiring strategic valley connections.',
                           icon: Icons.landscape,
                           color: Colors.orangeAccent,
                           onTap: () => _startGame(context, MapType.andes),
                         ),
                         _MapCard(
                           title: 'NILE',
-                          description: 'River city shaped by water crossings and bridges.',
+                          description: 'Wide central river dividing fertile banks. Heavy reliance on water crossings and bridge management.',
                           icon: Icons.waves,
                           color: Colors.cyanAccent,
                           onTap: () => _startGame(context, MapType.nile),
+                        ),
+                        _MapCard(
+                          title: 'ARCTIC',
+                          description: 'Frozen Tundra. Features: Ice Roads over lakes (40% slower, 0 bridge cost), and periodic Blizzards that drop vehicle speed to 60%.',
+                          icon: Icons.ac_unit,
+                          color: Colors.lightBlueAccent,
+                          onTap: () => _startGame(context, MapType.arctic),
+                        ),
+                        _MapCard(
+                          title: 'SAVANNA',
+                          description: 'Dusty grasslands. Features: Unpaved Dirt Roads (20% slower), wild Gazelle Crossings blocking lanes, and blinding Dust Storms.',
+                          icon: Icons.terrain,
+                          color: Colors.amberAccent,
+                          onTap: () => _startGame(context, MapType.savanna),
+                        ),
+                        _MapCard(
+                          title: 'DELTA',
+                          description: 'River wetlands. Features: Periodic Drawbridges blocking lanes, and Flash Floods that temporarily submerge and close roads.',
+                          icon: Icons.water,
+                          color: Colors.tealAccent,
+                          onTap: () => _startGame(context, MapType.delta),
                         ),
                       ],
                     ),
@@ -148,7 +169,7 @@ class _MapCardState extends State<_MapCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width: 220,
-          height: 320,
+          height: 360,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: _isHovered ? widget.color.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),

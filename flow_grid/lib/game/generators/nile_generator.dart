@@ -14,7 +14,7 @@ class NileMapGenerator extends MapGenerator {
 
   @override
   MapConfig get config => const MapConfig(
-    startingRoads: 20,
+    startingRoads: 25,
     startingTunnels: 0,
     startingBridges: 1,
   );
@@ -76,7 +76,7 @@ class NileMapGenerator extends MapGenerator {
         final width = 1 + _random.nextInt(2);
         for (int dx = -width; dx <= width; dx++) {
           final tx = wx + dx;
-          if (grid.isValid(tx, y)) {
+          if (grid.isValid(tx, y) && grid.grid[y][tx].isEmpty) {
             grid.grid[y][tx] = GridCell(type: CellType.water);
           }
         }
@@ -90,7 +90,7 @@ class NileMapGenerator extends MapGenerator {
         final width = 1 + _random.nextInt(2);
         for (int dy = -width; dy <= width; dy++) {
           final ty = wy + dy;
-          if (grid.isValid(x, ty)) {
+          if (grid.isValid(x, ty) && grid.grid[ty][x].isEmpty) {
             grid.grid[ty][x] = GridCell(type: CellType.water);
           }
         }

@@ -452,7 +452,8 @@ class SpawnController {
 
       bool tooClose = false;
       for (final r in result) {
-        if (pos.manhattanDistance(r.pos) < 2) {
+        final chebyshev = max((pos.x - r.pos.x).abs(), (pos.y - r.pos.y).abs());
+        if (chebyshev < 2) {
           tooClose = true;
           break;
         }
@@ -786,7 +787,7 @@ class SpawnController {
   /// [SpawnConfig.earlyHouseCap]. Two means the destination has survived two
   /// weekly transitions — i.e. it is "more than 1 week old" — matching the
   /// player-facing rule that 1-week-old destinations stay capped at 2 houses.
-  static const int _minDestAgeForExtraHouse = 2;
+  static const int _minDestAgeForExtraHouse = 3;
 
   /// Get current queue depth (for debugging)
   int get queueDepth => _queue.length;
@@ -1303,9 +1304,19 @@ class SpawnController {
     const int buildingClearance = 2;
     for (int dy = -buildingClearance; dy <= buildingClearance; dy++) {
       for (int dx = -buildingClearance; dx <= buildingClearance; dx++) {
-        if (dx == 0 && dy == 0) continue;
         final nx = pos.x + dx;
         final ny = pos.y + dy;
+
+        // Check against staged initial district spots to prevent overlap or tight adjacency during delayed committing
+        if (_stagedInitialPlan != null) {
+          for (final spot in _stagedInitialPlan!.allSpots) {
+            if (spot.x == nx && spot.y == ny) {
+              return false;
+            }
+          }
+        }
+
+        if (dx == 0 && dy == 0) continue;
         if (!gridManager.isValid(nx, ny)) continue;
         final cell = gridManager.grid[ny][nx];
         
@@ -1550,6 +1561,21 @@ class SpawnController {
       // Rule: Must be breathable (not a dead end or tight shaft)
       if (!_isDrivewayBreathable(neighbor, dir)) continue;
 
+      // Hard rejection: driveway forward path must not run into a building
+      // within 2 tiles. A -20 score penalty is not enough — we need a
+      // hard block to prevent houses spawning behind destinations.
+      bool facesBuilding = false;
+      for (int fwdStep = 1; fwdStep <= 2; fwdStep++) {
+        final fwd = neighbor.getNeighbor(dir, count: fwdStep);
+        if (!gridManager.isValid(fwd.x, fwd.y)) break;
+        final fwdCell = gridManager.grid[fwd.y][fwd.x];
+        if (fwdCell.isHouse || fwdCell.isDestination) {
+          facesBuilding = true;
+          break;
+        }
+      }
+      if (facesBuilding) continue;
+
       int score = calculateOpennessScore(pos, dir);
       
       // Preference: Face map center (usually (min+max)/2)
@@ -1727,7 +1753,14 @@ class SpawnController {
       }
 
       if (totalUnmet > 0) {
-        _demandPressure[c] = min(SpawnConfig.maxPressure, (_demandPressure[c] ?? 0) + 1);
+        // Scale pressure buildup based on severity of unmet demand
+        int inc = 1;
+        if (totalUnmet >= 8) {
+          inc = 3;
+        } else if (totalUnmet >= 4) {
+          inc = 2;
+        }
+        _demandPressure[c] = min(SpawnConfig.maxPressure, (_demandPressure[c] ?? 0) + inc);
       } else {
         // Decay more aggressively when demand is met
         _demandPressure[c] = max(0, (_demandPressure[c] ?? 0) - 2);
@@ -1745,6 +1778,14 @@ class SpawnController {
     int bestPressure = 0;
     SpawnNodeType nodeToSpawn = SpawnNodeType.house;
 
+    // Calculate maximum age of any destination to determine game progression
+    int gameMaxAge = 0;
+    for (final age in gridManager.destinationAges.values) {
+      if (age > gameMaxAge) gameMaxAge = age;
+    }
+    // Dynamic age gate: 2 transitions required early game, 1 in the late game (max age >= 4)
+    final requiredAge = (gameMaxAge >= 4) ? 1 : 2;
+
     for (int c = 0; c < activeColorCount; c++) {
       final pressure = _demandPressure[c] ?? 0;
       final houseCount = getHouseCount(c);
@@ -1756,10 +1797,13 @@ class SpawnController {
 
       // Priority 1: Colors with only 1 house (incomplete cluster)
       if (houseCount == 1 && pressure > 0) {
+        if (_stagedInitialPlan != null && _stagedInitialColor == c) {
+          continue; // Skip because initial staging is in progress
+        }
         bestColor = c;
         bestPressure = pressure;
         nodeToSpawn = SpawnNodeType.house;
-        break; // Highest priority â€” do this immediately
+        break; // Highest priority — do this immediately
       }
 
       // Non-linear threshold scaling for expansion (values in samples, e.g. 5 samples = 15s)
@@ -1768,21 +1812,23 @@ class SpawnController {
       if (houseCount >= 4) requiredPressure = 10; // 5th+ house (30s)
 
       // Priority 2: Colors needing demand-driven expansion.
-      // Per-destination age gate: the initial pair of houses stays as the
-      // firm cap until at least one destination for this color has aged
-      // [_minDestAgeForExtraHouse] weekly transitions. A brand-new
-      // destination — even one spawned mid-game in week 5 — starts capped
-      // at the initial pair regardless of demand pressure, because demand
-      // pressure on a fresh destination usually reflects an unconnected
-      // road network rather than genuine over-capacity.
       final destAge = _maxDestinationAgeForColor(c);
       if (houseCount >= SpawnConfig.earlyHouseCap &&
           pressure >= requiredPressure &&
           pressure > bestPressure &&
-          destAge >= _minDestAgeForExtraHouse) {
+          destAge >= requiredAge) {
 
-        // Enforce same-color spawn cooldown to prevent panic-flooding
-        if (timeSinceLastSpawn >= SpawnConfig.sameColorSpawnCooldown) {
+        // Enforce adaptive same-color spawn cooldown based on demand pressure to resolve late-game choking
+        double dynamicCooldown = SpawnConfig.sameColorSpawnCooldown;
+        if (pressure >= 10) {
+          dynamicCooldown = 15.0; // Urgent need
+        } else if (pressure >= 8) {
+          dynamicCooldown = 20.0;
+        } else if (pressure >= 5) {
+          dynamicCooldown = 30.0;
+        }
+
+        if (timeSinceLastSpawn >= dynamicCooldown) {
           bestColor = c;
           bestPressure = pressure;
 

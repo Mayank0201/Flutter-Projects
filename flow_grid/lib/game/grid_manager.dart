@@ -54,6 +54,9 @@ class GridManager {
   final Map<String, bool> spawnedBonusHouse = {};
   final Set<GridPosition> infrastructure = {};
   
+  // Map-specific temporary blockages (Floods, Stampedes, Drawbridges)
+  final Set<GridPosition> blockedTiles = {};
+  
   // Satisfaction System
   final Map<String, double> sectorSatisfaction = {}; // sectorId -> avg satisfaction
   double regionalSatisfaction = 1.0;
@@ -858,6 +861,93 @@ class GridManager {
     reconstructTerrainState();
   }
 
+  Map<String, dynamic> takeUndoSnapshot() {
+    final gridCopy = List.generate(
+      rows,
+      (y) => List<GridCell>.from(grid[y]),
+    );
+
+    final expressLanesCopy = placedExpressLanes.map((pair) => List<GridPosition>.from(pair)).toList();
+
+    return {
+      'grid': gridCopy,
+      'placedExpressLanes': expressLanesCopy,
+      'roads': roads,
+      'tunnels': tunnels,
+      'bridges': bridges,
+      'trafficLights': trafficLights,
+      'smartJunctions': smartJunctions,
+      'expressLanes': expressLanes,
+      'activeEdges': Set<String>.from(activeEdges),
+    };
+  }
+
+  void restoreUndoSnapshot(Map<String, dynamic> snapshot) {
+    // Collect current connections/edges that belong to houses, destinations, or system-generated roads,
+    // so they are not broken by the undo action.
+    final systemEdges = <String>{};
+    for (final edge in activeEdges) {
+      final parts = edge.split('|');
+      if (parts.length == 2) {
+        final p1 = parts[0].split(',');
+        final p2 = parts[1].split(',');
+        if (p1.length == 2 && p2.length == 2) {
+          final x1 = int.parse(p1[0]);
+          final y1 = int.parse(p1[1]);
+          final x2 = int.parse(p2[0]);
+          final y2 = int.parse(p2[1]);
+          if (isValid(x1, y1) && isValid(x2, y2)) {
+            final c1 = grid[y1][x1];
+            final c2 = grid[y2][x2];
+            if (c1.isHouse || c1.isDestination || c1.owner == InfrastructureOwner.systemGenerated ||
+                c2.isHouse || c2.isDestination || c2.owner == InfrastructureOwner.systemGenerated) {
+              systemEdges.add(edge);
+            }
+          }
+        }
+      }
+    }
+
+    // Restore grid, avoiding overwriting houses, destinations, or system-generated roads
+    final gridSource = snapshot['grid'] as List<List<GridCell>>;
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        final currentCell = grid[y][x];
+        if (currentCell.isHouse || 
+            currentCell.isDestination || 
+            currentCell.owner == InfrastructureOwner.systemGenerated) {
+          continue;
+        }
+        grid[y][x] = gridSource[y][x];
+      }
+    }
+
+    // Restore express lanes
+    placedExpressLanes.clear();
+    final expressLanesSource = snapshot['placedExpressLanes'] as List<List<GridPosition>>;
+    for (final pair in expressLanesSource) {
+      placedExpressLanes.add(List<GridPosition>.from(pair));
+    }
+
+    // Restore inventories
+    roads = snapshot['roads'] as int;
+    tunnels = snapshot['tunnels'] as int;
+    bridges = snapshot['bridges'] as int;
+    trafficLights = snapshot['trafficLights'] as int;
+    smartJunctions = snapshot['smartJunctions'] as int;
+    expressLanes = snapshot['expressLanes'] as int;
+
+    // Restore edges
+    activeEdges.clear();
+    activeEdges.addAll(snapshot['activeEdges'] as Set<String>);
+    // Merge back system/building edges
+    activeEdges.addAll(systemEdges);
+
+    // Reconstruct road graph and terrain state
+    rebuildRoadGraph();
+    reconstructTerrainState();
+  }
+
   /// Rebuilds mountain clusters and terrain data from the current grid state
   void reconstructTerrainState() {
     mountainClusters.clear();
@@ -932,11 +1022,19 @@ class GridManager {
 
     // PART 4: Convert water to bridge
     if (cell.type == CellType.water) {
-      return placeBridge(x, y, from: from, owner: owner);
+      if (selectedMapType == MapType.arctic) {
+        // Let it fall through to place as an Ice Road
+      } else {
+        return placeBridge(x, y, from: from, owner: owner);
+      }
     }
     
     bool isInfraEndpoint = (cell.isTunnel || cell.isBridge) && cell.isConnectableEndpoint;
-    if (cell.type != CellType.empty && cell.type != CellType.road && cell.type != CellType.bridge && !isInfraEndpoint) return false;
+    if (cell.type != CellType.empty && cell.type != CellType.road && cell.type != CellType.bridge && !isInfraEndpoint) {
+      if (!(selectedMapType == MapType.arctic && cell.type == CellType.water)) {
+        return false;
+      }
+    }
 
     // [STRICT] ROAD ACCOUNTING (Issue 1, 3 & 4)
     // Rule: Deduct 1 road if this action creates NEW connectivity, merges, or takes over system roads.
@@ -953,7 +1051,7 @@ class GridManager {
     if (owner == InfrastructureOwner.player) {
       // [STRICT RULE] Only deduct 1 road if the tile is currently empty.
       // Merges and infra-exits do NOT cost extra if they land on an existing road.
-      if (cell.isEmpty) {
+      if (cell.isEmpty || (selectedMapType == MapType.arctic && cell.type == CellType.water)) {
         if (roads <= 0) return false;
         deducted = 1;
         spendRoads(1);
@@ -995,14 +1093,18 @@ class GridManager {
 
     // Create or update the road cell (Non-destructive for existing infra)
     CellType finalType = cell.type;
-    if (cell.isEmpty || cell.owner == InfrastructureOwner.systemGenerated) {
+    bool finalIsIceRoad = cell.isIceRoad;
+    if (cell.isEmpty || cell.owner == InfrastructureOwner.systemGenerated || (selectedMapType == MapType.arctic && cell.type == CellType.water)) {
       finalType = CellType.road;
+      if (selectedMapType == MapType.arctic && cell.type == CellType.water) {
+        finalIsIceRoad = true;
+      }
     } else if (cell.isTunnel || cell.isBridge) {
       // [STRICT] Never overwrite tunnel or bridge core with a road
       finalType = cell.type;
     }
 
-    grid[y][x] = cell.copyWith(type: finalType, owner: finalOwner);
+    grid[y][x] = cell.copyWith(type: finalType, owner: finalOwner, isIceRoad: finalIsIceRoad);
     final pos = GridPosition(x, y);
     if (!infrastructure.contains(pos)) {
       infrastructure.add(pos);
@@ -1036,6 +1138,10 @@ class GridManager {
     // [HARD RULE] No grid modification during preview
     assert(interactionState != InteractionState.preview, 'CRITICAL: GridManager._placeTransitCorridor called during PREVIEW phase at ($x,$y)');
 
+    if (type == CellType.bridge && selectedMapType == MapType.arctic) {
+      return false;
+    }
+
     final cell = grid[y][x];
     final validSurface = (type == CellType.tunnel) ? CellType.mountain : CellType.water;
     
@@ -1054,9 +1160,23 @@ class GridManager {
        return false;
     }
 
-    // Proximity Protection
-    if (!isExtension && countNearbyInfrastructure(x, y, 1, type) > 0) {
-       return false;
+    // Proximity Protection — only reject if a same-type tile exists at a
+    // neighbour that is NOT on the from→pos axis. Two tiles along the same
+    // axis are just extending the corridor; a cross-axis tile is a conflict.
+    if (!isExtension) {
+      final axisH = (from.x != x); // horizontal movement = horizontal axis
+      for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        final nx = x + d[0];
+        final ny = y + d[1];
+        if (nx == from.x && ny == from.y) continue; // skip the 'from' cell
+        if (!isValid(nx, ny)) continue;
+        if (grid[ny][nx].type != type) continue;
+        // Same-axis neighbour = continuation of same corridor, allow it.
+        final neighbourAxisH = (d[0] != 0);
+        if (neighbourAxisH == axisH) continue;
+        // Cross-axis tunnel/bridge tile found — reject.
+        return false;
+      }
     }
 
     // Inventory Guard (Player-owned, new tunnel/bridge only).
@@ -1069,10 +1189,42 @@ class GridManager {
     final dist = (from.x - x).abs() + (from.y - y).abs();
     if (dist != 1) return false;
 
-    // Portal Preservation
+    final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
+
+    // Enforce straight-line rule: no bending tunnels/bridges
     final fromCell = getCell(from.x, from.y);
     if (fromCell.type == type) {
-      final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
+      if (fromCell.infrastructureAxis != null && fromCell.infrastructureAxis != axis) {
+        return false;
+      }
+    }
+
+    // Enforce maximum length of 4 tiles
+    {
+      int len = 1;
+      final d1 = (axis == InfrastructureAxis.vertical) ? const [0, -1] : const [-1, 0];
+      int cx = x + d1[0];
+      int cy = y + d1[1];
+      while (isValid(cx, cy) && grid[cy][cx].type == type) {
+        len++;
+        cx += d1[0];
+        cy += d1[1];
+      }
+      final d2 = (axis == InfrastructureAxis.vertical) ? const [0, 1] : const [1, 0];
+      cx = x + d2[0];
+      cy = y + d2[1];
+      while (isValid(cx, cy) && grid[cy][cx].type == type) {
+        len++;
+        cx += d2[0];
+        cy += d2[1];
+      }
+      if (len > 4) {
+        return false;
+      }
+    }
+
+    // Portal Preservation
+    if (fromCell.type == type) {
       bool isPortal = _countExternalConnections(from.x, from.y) > 0;
       grid[from.y][from.x] = fromCell.copyWith(
         isInfrastructureInternal: !isPortal,
@@ -1080,8 +1232,6 @@ class GridManager {
         infrastructureAxis: fromCell.infrastructureAxis ?? axis,
       );
     }
-
-    final axis = (from.x == x) ? InfrastructureAxis.vertical : InfrastructureAxis.horizontal;
     
     // Inventory Transaction
     int roadDeducted = 0;
@@ -1503,7 +1653,7 @@ class GridManager {
     final cell = grid[y][x];
     if (cell.type == CellType.tunnel) {
       grid[y][x] = GridCell(type: CellType.mountain);
-    } else if (cell.type == CellType.bridge) {
+    } else if (cell.type == CellType.bridge || cell.isIceRoad) {
       grid[y][x] = GridCell(type: CellType.water);
     } else {
       grid[y][x] = GridCell();

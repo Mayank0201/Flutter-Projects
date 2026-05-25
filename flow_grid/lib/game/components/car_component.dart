@@ -7,6 +7,7 @@ import '../../models/game_constants.dart';
 import '../../models/grid_cell.dart';
 import '../../game/flow_grid_game.dart';
 import '../pathfinder.dart';
+import '../map_generator.dart';
 
 class CarComponent extends PositionComponent with HasGameReference<FlowGridGame> {
   int colorIndex;
@@ -663,7 +664,32 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       if (_currentPathIndex < path.length && game.gridManager != null) {
         final curPos = path[_currentPathIndex];
         final curCell = game.gridManager!.getCell(curPos.x, curPos.y);
-        _terrainSpeed = curCell.speedMultiplier;
+        double speedMult = curCell.speedMultiplier;
+
+        if (curCell.isIceRoad) {
+          speedMult *= 0.6;
+        }
+
+        if (game.selectedMapType == MapType.savanna && curCell.type == CellType.road && curCell.owner == InfrastructureOwner.player) {
+          speedMult *= 0.8;
+        }
+
+        if (game.activeEvent == 'blizzard') {
+          if (curCell.isIceRoad) {
+            speedMult *= 0.66; // 0.6 * 0.66 ~= 0.4
+          } else {
+            speedMult *= 0.6;
+          }
+        } else if (game.activeEvent == 'dustStorm') {
+          speedMult *= 0.7;
+        }
+
+        final isBlocked = game.floodedRoads.contains(curPos) || game.activeEventTiles.contains(curPos);
+        if (isBlocked) {
+          speedMult = 0.0;
+        }
+
+        _terrainSpeed = speedMult;
         onExpressLane = curCell.isExpressLaneNode || _terrainSpeed >= GameConstants.expressLaneSpeed;
       }
     }
@@ -736,6 +762,9 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     if (_currentSpeedMultiplier < baseTarget) {
       double rate = accelerationRate;
       if (_currentSpeedMultiplier < 0.1) rate *= startupAccelerationBonus;
+      if (game.activeEvent == 'dustStorm') {
+        rate *= 0.3; // Much slower acceleration in thick dust
+      }
       _currentSpeedMultiplier = min(baseTarget, _currentSpeedMultiplier + rate * dt);
     } else if (_currentSpeedMultiplier > baseTarget) {
       _currentSpeedMultiplier = max(baseTarget, _currentSpeedMultiplier - decelerationRate * dt);

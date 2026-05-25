@@ -111,6 +111,7 @@ class Pathfinder {
       for (final neighbor in nextNodes) {
         final neighborKey = neighbor.key;
         if (closedSet.contains(neighborKey)) continue;
+        if (grid.blockedTiles.contains(neighbor)) continue; // Event blockage
 
         double stepCost = 1.0;
         
@@ -222,6 +223,7 @@ class Pathfinder {
           if (otherEnd != null) {
             final neighborKey = otherEnd.key;
             if (closedSet.contains(neighborKey)) continue;
+            if (grid.blockedTiles.contains(otherEnd)) continue; // Event blockage
 
             final dist = current.pos.manhattanDistance(otherEnd);
             // Express lanes are fast (1.5x) so cost is distance / 1.5
