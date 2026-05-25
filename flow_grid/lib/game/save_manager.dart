@@ -62,6 +62,7 @@ class SaveManager {
     required double cameraZoom,
     required double cameraPosX,
     required double cameraPosY,
+    required double userZoomMultiplier,
     int slotIndex = 0,
     Map<String, dynamic> districtTypes = const {},
   }) async {
@@ -151,6 +152,7 @@ class SaveManager {
       'cameraZoom': cameraZoom,
       'cameraPosX': cameraPosX,
       'cameraPosY': cameraPosY,
+      'userZoomMultiplier': userZoomMultiplier,
       'inventory': {
         'roads': gridManager.roads,
         'tunnels': gridManager.tunnels,

@@ -64,6 +64,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                                 _toolGrid(),
                                 _actionSection(),
                                 _speedSection(),
+                                _zoomSection(),
                                 const SizedBox(height: 12),
                               ],
                             ),
@@ -598,6 +599,66 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _zoomSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+      child: Column(
+        children: [
+          _miniLabel('ZOOM'),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _zoomDot(Icons.remove, () {
+                setState(() {
+                  g.userZoomMultiplier = (g.userZoomMultiplier / 1.1).clamp(0.5, 3.0);
+                });
+              }),
+              Container(
+                width: 40,
+                alignment: Alignment.center,
+                child: Text(
+                  "${(g.userZoomMultiplier * 100).round()}%",
+                  style: GoogleFonts.outfit(
+                    color: Colors.white70,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
+              ),
+              _zoomDot(Icons.add, () {
+                setState(() {
+                  g.userZoomMultiplier = (g.userZoomMultiplier * 1.1).clamp(0.5, 3.0);
+                });
+              }),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _zoomDot(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withValues(alpha: 0.03),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.08), 
+            width: 1,
+          ),
+        ),
+        child: Icon(icon, color: Colors.white.withValues(alpha: 0.6), size: 16),
       ),
     );
   }

@@ -111,6 +111,7 @@ class EventManager extends Component with HasGameReference<FlowGridGame> {
         
         // Apply effect
         gridManager.grid[pos.y][pos.x] = gridManager.grid[pos.y][pos.x].copyWith(speedMultiplier: 0.01); // Effectively impassable
+        game.gridRenderer?.markDirty(pos.x, pos.y);
         
         activeEvents.add(CityEvent(
           type: type,
@@ -162,6 +163,7 @@ class EventManager extends Component with HasGameReference<FlowGridGame> {
         final pos = validInfra[_random.nextInt(validInfra.length)];
         // Apply effect
         gridManager.grid[pos.y][pos.x] = gridManager.grid[pos.y][pos.x].copyWith(speedMultiplier: 0.3); // Very slow
+        game.gridRenderer?.markDirty(pos.x, pos.y);
         
         activeEvents.add(CityEvent(
           type: type,
@@ -184,6 +186,7 @@ class EventManager extends Component with HasGameReference<FlowGridGame> {
       } else {
           gridManager.grid[pos.y][pos.x] = cell.copyWith(speedMultiplier: 1.0);
       }
+      game.gridRenderer?.markDirty(pos.x, pos.y);
     }
   }
 

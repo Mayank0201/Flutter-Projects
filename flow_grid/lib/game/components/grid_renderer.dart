@@ -176,6 +176,9 @@ class GridRenderer extends PositionComponent
     _drawRoadPreview(canvas);
     _drawCongestion(canvas);
 
+    // Dynamic roadblock & maintenance event overlays
+    _drawActiveEventOverlays(canvas);
+
     // Map Specific Events
     _drawMapSpecificEventVisuals(canvas);
 
@@ -1962,7 +1965,44 @@ class GridRenderer extends PositionComponent
         canvas.drawLine(Offset(cx - cellSize * 0.25, waveY), Offset(cx + cellSize * 0.25, waveY), wavePaint);
 
         // Draw warning triangle over the flooded tile
-        _drawWarningTriangle(canvas, cx, cy, cellSize * 0.25);
+      }
+    }
+  }
+
+  void _drawActiveEventOverlays(Canvas canvas) {
+    final int cols = gridManager.cols;
+    final int rows = gridManager.rows;
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        final cell = gridManager.grid[y][x];
+        if (cell.type == CellType.road || cell.type == CellType.bridge || cell.type == CellType.tunnel) {
+          final sm = cell.speedMultiplier;
+          if (sm == 0.01 || sm == 0.3) {
+            final cx = offsetX + x * cellSize;
+            final cy = offsetY + y * cellSize;
+            
+            // Subtle translucent overlay background
+            final color = (sm == 0.01) ? Colors.deepOrange : Colors.amber;
+            final bgPaint = Paint()..color = color.withValues(alpha: 0.15);
+            canvas.drawRect(Rect.fromLTWH(cx, cy, cellSize, cellSize), bgPaint);
+
+            // Draw diagonal caution hatch lines
+            final paint = Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.0
+              ..color = color.withValues(alpha: 0.7);
+            
+            // Draw 3 diagonal lines across the cell
+            canvas.drawLine(Offset(cx, cy + cellSize * 0.25), Offset(cx + cellSize * 0.75, cy + cellSize), paint);
+            canvas.drawLine(Offset(cx, cy + cellSize * 0.75), Offset(cx + cellSize * 0.25, cy), paint);
+            canvas.drawLine(Offset(cx + cellSize * 0.25, cy), Offset(cx + cellSize, cy + cellSize * 0.75), paint);
+            
+            // Draw warning triangle in the center
+            final cxCenter = cx + cellSize / 2;
+            final cyCenter = cy + cellSize / 2;
+            _drawWarningTriangle(canvas, cxCenter, cyCenter, cellSize * 0.35);
+          }
+        }
       }
     }
   }

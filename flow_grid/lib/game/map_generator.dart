@@ -1,4 +1,5 @@
 import 'grid_manager.dart';
+import '../models/game_constants.dart';
 import 'generators/zen_generator.dart';
 import 'generators/andes_generator.dart';
 import 'generators/nile_generator.dart';
@@ -24,7 +25,7 @@ class MapConfig {
   final int startingExpressLanes;
 
   const MapConfig({
-    this.startingRoads = 20,
+    this.startingRoads = GameConstants.startingRoadBudget,
     this.startingTunnels = 0,
     this.startingBridges = 0,
     this.startingTrafficLights = 0,

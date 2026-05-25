@@ -19,7 +19,6 @@ import 'event_manager.dart';
 import 'pathfinder.dart';
 import 'transit_manager.dart';
 import 'emergency_manager.dart';
-import 'economy_manager.dart';
 import 'utils/performance_logger.dart';
 import 'car_pool.dart';
 
@@ -29,7 +28,7 @@ enum GamePhase { menu, playing, paused, gameOver, weeklyUpgrade }
 
 enum BuildTool { road, bridge, tunnel, trafficLight, smartJunction, expressLane, erase, inspect, upgradeRoad, busStop, busLane, oneWay, metroTrack, elevatedRail, highway, metroStation, priorityIntersection }
 
-class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
+class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, ScrollDetector {
   GridManager? gridManager;
   GridRenderer? gridRenderer;
 
@@ -93,7 +92,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
   late TransitManager transitManager;
   late EmergencyManager emergencyManager;
-  late EconomyManager economyManager;
 
   double cellSize = 40;
   double boardOffsetX = 0;
@@ -155,8 +153,11 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     // padding above is the only breathing room. Any further multiplier here
     // (e.g. 0.85) leaves a visibly large empty band between the active region
     // and the HUD on a phone.
-    return min(zoomX, zoomY).clamp(0.1, 8.0);
+    final baseZoom = min(zoomX, zoomY).clamp(0.1, 8.0);
+    return (baseZoom * userZoomMultiplier).clamp(0.1, 8.0);
   }
+
+  double userZoomMultiplier = 1.0;
 
   MapType selectedMapType = MapType.zen;
   int currentSlotIndex = 0;
@@ -287,6 +288,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
         weekTimer = (save['weekTimer'] as num?)?.toDouble() ?? 0;
         _elapsedTime = (save['elapsedTime'] as num?)?.toDouble() ?? 0;
         activeColorCount = save['activeColorCount'] ?? 1;
+        userZoomMultiplier = (save['userZoomMultiplier'] as num?)?.toDouble() ?? 1.0;
 
         // Camera
         camera.viewfinder.zoom = (save['cameraZoom'] as num?)?.toDouble() ?? 1.0;
@@ -302,8 +304,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       // cells than the player can ever see. The extra cells were a major
       // mobile cost (chunk pictures, terrain scans, pathfinding) for no
       // gameplay benefit.
-      gridCols = 32;
-      gridRows = 24;
+      gridCols = 48;
+      gridRows = 36;
       gridManager = GridManager(gridCols, gridRows, selectedMapType: mapType);
       
       final generator = MapGeneratorFactory.getGenerator(mapType);
@@ -342,7 +344,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     eventManager = EventManager(gridManager: gridManager!, districtPlanner: districtPlanner);
     transitManager = TransitManager();
     emergencyManager = EmergencyManager();
-    economyManager = EconomyManager();
     progressionDirector = ProgressionDirector(spawnController!);
     progressionDirector.reset();
     if (resume) {
@@ -355,7 +356,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
     add(eventManager);
     add(transitManager);
     add(emergencyManager);
-    add(economyManager);
     debugPrint("[WORLD_INIT] Components added to game tree");
 
     // Connect callbacks
@@ -403,6 +403,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       cameraZoom: camera.viewfinder.zoom,
       cameraPosX: camera.viewfinder.position.x,
       cameraPosY: camera.viewfinder.position.y,
+      userZoomMultiplier: userZoomMultiplier,
       slotIndex: currentSlotIndex,
     );
   }
@@ -492,7 +493,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
 
     // Tier 1: Real-time (Camera, Animations) — runs after the snap above so
     // the first valid frame already lands at the target zoom.
-    _updateCameraSmoothing(dt);
+    _updateCameraSmoothing(dt.clamp(0.0, 0.05));
 
     _debugLogTimer += dt;
     if (_debugLogTimer > 5.0) {
@@ -848,7 +849,15 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
   }
 
   void _triggerWeeklyUpgrade() {
-    weeklyOptions = ['doubleRoads', 'tunnels', 'bridges', 'trafficLights', 'smartJunction', 'expressLane'];
+    final options = <String>['doubleRoads', 'trafficLights', 'smartJunction', 'expressLane'];
+    if (selectedMapType == MapType.nile || selectedMapType == MapType.delta) {
+      options.add('bridges');
+    }
+    if (selectedMapType == MapType.andes || selectedMapType == MapType.savanna || selectedMapType == MapType.arctic) {
+      options.add('tunnels');
+    }
+    
+    weeklyOptions = options;
     weeklyOptions.shuffle();
     weeklyOptions = weeklyOptions.take(2).toList();
     
@@ -926,6 +935,18 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector {
       result.add(GridPosition(cx, cy));
     }
     return result;
+  }
+
+  @override
+  void onScroll(PointerScrollInfo info) {
+    if (phase != GamePhase.playing) return;
+    final scrollDelta = info.scrollDelta.global.y;
+    if (scrollDelta < 0) {
+      userZoomMultiplier = (userZoomMultiplier * 1.08).clamp(0.5, 3.0);
+    } else if (scrollDelta > 0) {
+      userZoomMultiplier = (userZoomMultiplier / 1.08).clamp(0.5, 3.0);
+    }
+    onStateChanged?.call();
   }
 
   @override

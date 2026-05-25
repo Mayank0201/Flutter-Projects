@@ -23,7 +23,7 @@ class AnalyticsPanel extends StatelessWidget {
       final d = gm.getDemand(pos);
       if (d > maxDemand) {
         maxDemand = d;
-        busiestDistrict = gm.districtNames[pos.key] ?? "District ${pos.key}";
+        busiestDistrict = gm.districtNames["${pos.x},${pos.y}"] ?? "District ${pos.x},${pos.y}";
       }
     }
 
