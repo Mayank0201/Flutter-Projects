@@ -64,7 +64,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                                 _toolGrid(),
                                 _actionSection(),
                                 _speedSection(),
-                                _zoomSection(),
+                                _previewSection(),
                                 const SizedBox(height: 12),
                               ],
                             ),
@@ -603,62 +603,55 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     );
   }
 
-  Widget _zoomSection() {
+  Widget _previewSection() {
+    final active = g.previewMode;
+    final color = Colors.tealAccent;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
       child: Column(
         children: [
-          _miniLabel('ZOOM'),
+          _miniLabel('VIEWPORT'),
           const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _zoomDot(Icons.remove, () {
-                setState(() {
-                  g.userZoomMultiplier = (g.userZoomMultiplier / 1.1).clamp(0.5, 3.0);
-                });
-              }),
-              Container(
-                width: 40,
-                alignment: Alignment.center,
-                child: Text(
-                  "${(g.userZoomMultiplier * 100).round()}%",
-                  style: GoogleFonts.outfit(
-                    color: Colors.white70,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    decoration: TextDecoration.none,
-                  ),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                g.previewMode = !g.previewMode;
+              });
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 36,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: active ? color.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.03),
+                border: Border.all(
+                  color: active ? color : Colors.white.withValues(alpha: 0.08),
+                  width: active ? 1.5 : 1,
                 ),
               ),
-              _zoomDot(Icons.add, () {
-                setState(() {
-                  g.userZoomMultiplier = (g.userZoomMultiplier * 1.1).clamp(0.5, 3.0);
-                });
-              }),
-            ],
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    active ? Icons.pinch_sharp : Icons.pinch_outlined,
+                    color: active ? color : Colors.white70,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    active ? "PREVIEW ON" : "PREVIEW",
+                    style: GoogleFonts.outfit(
+                      color: active ? color : Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _zoomDot(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white.withValues(alpha: 0.03),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.08), 
-            width: 1,
-          ),
-        ),
-        child: Icon(icon, color: Colors.white.withValues(alpha: 0.6), size: 16),
       ),
     );
   }

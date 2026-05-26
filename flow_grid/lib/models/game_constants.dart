@@ -8,14 +8,14 @@ class GameConstants {
   static const double minSpawnDelay = 8.0; // Ignored by new scheduler
   static const double carSpawnInterval = 12.0;
   static const double demandTickInterval = 13.0;
-  static const int maxDemand = 6;
+  static const int maxDemand = 5;
   static const double criticalDuration = 42.0;
   static const double overflowRecoveryDuration = 50.0;
   static const double overflowDeliveryRecovery = 0.06;
 
   // Maturity (Mini Motorways style evolution)
   static const int maturityThresholdWeeks = 4;
-  static const int matureMaxDemand = 10;
+  static const int matureMaxDemand = 8;
   static const double matureRequestSpeedMultiplier = 1.5;
   static const double matureOverflowBuildupMultiplier = 1.35;
 

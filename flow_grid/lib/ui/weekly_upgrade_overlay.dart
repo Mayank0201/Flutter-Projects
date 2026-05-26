@@ -49,7 +49,7 @@ class WeeklyUpgradeOverlay extends StatelessWidget {
                     IconData icon = Icons.add_road;
                     if (opt == 'tunnels') { label = '20 ROADS + 1 TUNNEL'; icon = Icons.terrain; }
                     else if (opt == 'bridges') { label = '20 ROADS + 1 BRIDGE'; icon = Icons.waves; }
-                    else if (opt == 'trafficLights') { label = '20 ROADS + 2 TRAFFIC LIGHTS'; icon = Icons.traffic; }
+                    else if (opt == 'trafficLights') { label = '20 ROADS + 1 TRAFFIC LIGHT'; icon = Icons.traffic; }
                     else if (opt == 'smartJunction') { label = '20 ROADS + 1 SMART JUNCTION'; icon = Icons.hub; }
                     else if (opt == 'expressLane') { label = '10 ROADS + 1 EXPRESS LANE'; icon = Icons.bolt; }
                     else if (opt == 'doubleRoads') { label = '30 ROADS'; icon = Icons.add_road; }

@@ -28,7 +28,7 @@ enum GamePhase { menu, playing, paused, gameOver, weeklyUpgrade }
 
 enum BuildTool { road, bridge, tunnel, trafficLight, smartJunction, expressLane, erase, inspect, upgradeRoad, busStop, busLane, oneWay, metroTrack, elevatedRail, highway, metroStation, priorityIntersection }
 
-class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, ScrollDetector {
+class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, ScrollDetector {
   GridManager? gridManager;
   GridRenderer? gridRenderer;
 
@@ -107,13 +107,16 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
   //
   // On a landscape phone (~2.0 aspect) the height drives the size — the
   // aspect-fit in _syncSpawnBounds expands the half-width to hh*screenAspect.
-  // So Week 1 ends up ~20x10 cells, which is small enough that the spawn
-  // planner can't put a house and a destination 25+ tiles apart (which made
-  // the 20-road starting budget impossible to connect to anything).
   static const int _initialActiveHalfWidth = 7;    // Week 1: 14 cells wide (base, before aspect-fit)
   static const int _initialActiveHalfHeight = 5;   // Week 1: 10 cells tall
   static const int _weeklyActiveExpansionX = 2;    // +4 width per week
   static const int _weeklyActiveExpansionY = 1;    // +2 height per week
+
+  bool previewMode = false;
+  double smoothWeek = 1.0;
+  double _initialZoom = 1.0;
+  Vector2? _scaleStartPixel;
+  Vector2? _initialCameraPos;
 
   int get _activeHalfWidth {
     final maxHalf = (gridCols - 4) ~/ 2;
@@ -123,6 +126,37 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
   int get _activeHalfHeight {
     final maxHalf = (gridRows - 4) ~/ 2;
     return min(maxHalf, _initialActiveHalfHeight + (week - 1) * _weeklyActiveExpansionY);
+  }
+
+  double get smoothActiveHalfWidth {
+    final maxHalf = (gridCols - 4) / 2.0;
+    return min(maxHalf, _initialActiveHalfWidth.toDouble() + (smoothWeek - 1.0) * _weeklyActiveExpansionX);
+  }
+
+  double get smoothActiveHalfHeight {
+    final maxHalf = (gridRows - 4) / 2.0;
+    return min(maxHalf, _initialActiveHalfHeight.toDouble() + (smoothWeek - 1.0) * _weeklyActiveExpansionY);
+  }
+
+  double get _baseZoom {
+    if (size.x <= 100 || size.y <= 100) return 1.0;
+    const double padding = 16.0;
+    final screenW = size.x - hudPanelWidth - (2 * padding);
+    final screenH = size.y - (2 * padding);
+    if (screenW <= 0 || screenH <= 0) return 1.0;
+
+    double w;
+    double h;
+    if (spawnController != null) {
+      w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
+      h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+    } else {
+      w = (smoothActiveHalfWidth * 2) * cellSize;
+      h = (smoothActiveHalfHeight * 2) * cellSize;
+    }
+    final zoomX = screenW / w;
+    final zoomY = screenH / h;
+    return min(zoomX, zoomY).clamp(0.1, 8.0);
   }
 
   double get _targetZoom {
@@ -143,8 +177,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
       w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
       h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
     } else {
-      w = (_activeHalfWidth * 2) * cellSize;
-      h = (_activeHalfHeight * 2) * cellSize;
+      w = (smoothActiveHalfWidth * 2) * cellSize;
+      h = (smoothActiveHalfHeight * 2) * cellSize;
     }
 
     final zoomX = screenW / w;
@@ -260,6 +294,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
     canUndoNotifier.value = false;
     score = 0;
     week = 1;
+    smoothWeek = 1.0;
+    previewMode = false;
     totalDeliveries = 0;
     weekTimer = 0;
     _elapsedTime = 0;
@@ -283,6 +319,8 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
 
         // Restore Metadata
         week = save['week'] ?? 1;
+        smoothWeek = week.toDouble();
+        previewMode = false;
         score = save['score'] ?? 0;
         totalDeliveries = save['totalDeliveries'] ?? 0;
         weekTimer = (save['weekTimer'] as num?)?.toDouble() ?? 0;
@@ -419,7 +457,7 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
       gridManager!.bridges += 1;
     } else if (option == 'trafficLights') {
       gridManager!.roads += 20;
-      gridManager!.trafficLights += 2;
+      gridManager!.trafficLights += 1;
     } else if (option == 'smartJunction') {
       gridManager!.roads += 20;
       gridManager!.smartJunctions += 1;
@@ -429,15 +467,6 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
     } else if (option == 'doubleRoads') {
       gridManager!.roads += 30;
     }
-
-    // Increment week and expand active grid bounds
-    week++;
-    for (final dest in gridManager!.destinations) {
-      final key = "${dest.x},${dest.y}";
-      gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
-    }
-    _syncSpawnBounds();
-    MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
 
     phase = GamePhase.playing;
     paused = false;
@@ -478,6 +507,15 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
   @override
   void update(double dt) {
     super.update(dt);
+
+    if (smoothWeek < week) {
+      smoothWeek = min(week.toDouble(), smoothWeek + dt * 0.4);
+      _syncSpawnBounds();
+      _syncCameraCenter(dt: dt);
+    } else if (smoothWeek > week) {
+      smoothWeek = week.toDouble();
+      _syncSpawnBounds();
+    }
 
     // First valid frame: snap the camera (zoom + position) to its target so
     // the player doesn't watch a ~half-second zoom drift at start-up.
@@ -849,6 +887,18 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
   }
 
   void _triggerWeeklyUpgrade() {
+    if (gridManager == null) return;
+
+    // Increment week and expand active grid bounds
+    week++;
+    for (final dest in gridManager!.destinations) {
+      final key = "${dest.x},${dest.y}";
+      gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
+      gridRenderer?.markDirty(dest.x, dest.y);
+    }
+    _syncSpawnBounds();
+    MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
+
     final options = <String>['doubleRoads', 'trafficLights', 'smartJunction', 'expressLane'];
     if (selectedMapType == MapType.nile || selectedMapType == MapType.delta) {
       options.add('bridges');
@@ -950,45 +1000,46 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
   }
 
   @override
-  void onPanStart(DragStartInfo info) {
-    _panStartPixel = info.eventPosition.global;
-    _lastPlacedPos = null;
+  void onScaleStart(ScaleStartInfo info) {
+    if (previewMode) {
+      _initialZoom = camera.viewfinder.zoom;
+      _scaleStartPixel = info.eventPosition.global;
+      _initialCameraPos = camera.viewfinder.position.clone();
+    } else {
+      _panStartPixel = info.eventPosition.global;
+      _lastPlacedPos = null;
+    }
   }
 
   @override
-  void onPanUpdate(DragUpdateInfo info) {
-    if (phase != GamePhase.playing || paused || _panStartPixel == null) return;
-    
-    final currentPos = info.eventPosition.global;
-    if (!_isDragging) {
-      if (_panStartPixel!.distanceTo(currentPos) < dragThreshold) return;
-      _isDragging = true;
-      gridManager!.interactionState = InteractionState.preview;
-    }
+  void onScaleUpdate(ScaleUpdateInfo info) {
+    if (previewMode) {
+      if (_scaleStartPixel == null || _initialCameraPos == null) return;
+      
+      // Handle Zoom
+      camera.viewfinder.zoom = (_initialZoom * info.raw.scale).clamp(0.2, 5.0);
+      userZoomMultiplier = (camera.viewfinder.zoom / _baseZoom).clamp(0.2, 5.0);
+      
+      // Handle Pan
+      final deltaPixel = info.eventPosition.global - _scaleStartPixel!;
+      camera.viewfinder.position = _initialCameraPos! - deltaPixel / camera.viewfinder.zoom;
+    } else {
+      if (phase != GamePhase.playing || paused || _panStartPixel == null) return;
+      
+      final currentPos = info.eventPosition.global;
+      if (!_isDragging) {
+        if (_panStartPixel!.distanceTo(currentPos) < dragThreshold) return;
+        _isDragging = true;
+        gridManager!.interactionState = InteractionState.preview;
+      }
 
-    final worldPos = camera.viewfinder.globalToLocal(currentPos);
-    final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
-    final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
-    final pos = GridPosition(x, y);
+      final worldPos = camera.viewfinder.globalToLocal(currentPos);
+      final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
+      final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
+      final pos = GridPosition(x, y);
 
-    if (gridManager!.isValid(pos.x, pos.y)) {
-      if (activeTool == BuildTool.expressLane) {
-        final dragCell = gridManager!.getCell(pos.x, pos.y);
-        final isTerrainOrCorridor =
-            dragCell.type == CellType.mountain ||
-            dragCell.type == CellType.water ||
-            dragCell.isTunnel ||
-            dragCell.isBridge;
-        if (activeTool != BuildTool.erase &&
-            !isTerrainOrCorridor &&
-            !_isInActiveArea(pos)) {
-          return;
-        }
-        expressLanePendingStart ??= pos;
-        expressLaneDraggingEnd = pos;
-        gridRenderer?.markDirty();
-      } else {
-        if (_dragPath.isEmpty) {
+      if (gridManager!.isValid(pos.x, pos.y)) {
+        if (activeTool == BuildTool.expressLane) {
           final dragCell = gridManager!.getCell(pos.x, pos.y);
           final isTerrainOrCorridor =
               dragCell.type == CellType.mountain ||
@@ -1000,79 +1051,102 @@ class FlowGridGame extends FlameGame with PanDetector, MouseMovementDetector, Sc
               !_isInActiveArea(pos)) {
             return;
           }
-          _dragPath.add(pos);
-          if (!_isDeferredTool) _handleBuild(pos);
-          previewPath = List.from(_dragPath);
-          gridRenderer?.markDirty(pos.x, pos.y);
+          expressLanePendingStart ??= pos;
+          expressLaneDraggingEnd = pos;
+          gridRenderer?.markDirty();
         } else {
-          final last = _dragPath.last;
-          final idx = _dragPath.indexOf(pos);
-          if (idx != -1 && idx < _dragPath.length - 1) {
-            // Revert/Backtrack: Remove all cells in the path after this cell
-            for (int i = _dragPath.length - 1; i > idx; i--) {
-              final removedPos = _dragPath[i];
-              gridRenderer?.markDirty(removedPos.x, removedPos.y);
+          if (_dragPath.isEmpty) {
+            final dragCell = gridManager!.getCell(pos.x, pos.y);
+            final isTerrainOrCorridor =
+                dragCell.type == CellType.mountain ||
+                dragCell.type == CellType.water ||
+                dragCell.isTunnel ||
+                dragCell.isBridge;
+            if (activeTool != BuildTool.erase &&
+                !isTerrainOrCorridor &&
+                !_isInActiveArea(pos)) {
+              return;
             }
-            _dragPath.removeRange(idx + 1, _dragPath.length);
+            _dragPath.add(pos);
+            if (!_isDeferredTool) _handleBuild(pos);
             previewPath = List.from(_dragPath);
             gridRenderer?.markDirty(pos.x, pos.y);
-          } else if (last != pos) {
-            final steps = _interpolateAdjacentCells(last, pos);
-            for (final step in steps) {
-              if (gridManager!.isValid(step.x, step.y) && !_dragPath.contains(step)) {
-                final stepCell = gridManager!.getCell(step.x, step.y);
-                final isTerrainOrCorridor =
-                    stepCell.type == CellType.mountain ||
-                    stepCell.type == CellType.water ||
-                    stepCell.isTunnel ||
-                    stepCell.isBridge;
-                if (activeTool != BuildTool.erase &&
-                    !isTerrainOrCorridor &&
-                    !_isInActiveArea(step)) {
-                  continue;
-                }
-                _dragPath.add(step);
-                if (!_isDeferredTool) _handleBuild(step);
-                gridRenderer?.markDirty(step.x, step.y);
+          } else {
+            final last = _dragPath.last;
+            final idx = _dragPath.indexOf(pos);
+            if (idx != -1 && idx < _dragPath.length - 1) {
+              // Revert/Backtrack: Remove all cells in the path after this cell
+              for (int i = _dragPath.length - 1; i > idx; i--) {
+                final removedPos = _dragPath[i];
+                gridRenderer?.markDirty(removedPos.x, removedPos.y);
               }
+              _dragPath.removeRange(idx + 1, _dragPath.length);
+              previewPath = List.from(_dragPath);
+              gridRenderer?.markDirty(pos.x, pos.y);
+            } else if (last != pos) {
+              final steps = _interpolateAdjacentCells(last, pos);
+              for (final step in steps) {
+                if (gridManager!.isValid(step.x, step.y) && !_dragPath.contains(step)) {
+                  final stepCell = gridManager!.getCell(step.x, step.y);
+                  final isTerrainOrCorridor =
+                      stepCell.type == CellType.mountain ||
+                      stepCell.type == CellType.water ||
+                      stepCell.isTunnel ||
+                      stepCell.isBridge;
+                  if (activeTool != BuildTool.erase &&
+                      !isTerrainOrCorridor &&
+                      !_isInActiveArea(step)) {
+                    continue;
+                  }
+                  _dragPath.add(step);
+                  if (!_isDeferredTool) _handleBuild(step);
+                  gridRenderer?.markDirty(step.x, step.y);
+                }
+              }
+              previewPath = List.from(_dragPath);
             }
-            previewPath = List.from(_dragPath);
           }
         }
       }
     }
   }
+
   @override
-  void onPanEnd(DragEndInfo info) {
-    if (activeTool == BuildTool.expressLane) {
-      if (expressLanePendingStart != null && expressLaneDraggingEnd != null) {
+  void onScaleEnd(ScaleEndInfo info) {
+    if (previewMode) {
+      _scaleStartPixel = null;
+      _initialCameraPos = null;
+    } else {
+      if (activeTool == BuildTool.expressLane) {
+        if (expressLanePendingStart != null && expressLaneDraggingEnd != null) {
+          executeUndoableAction(() {
+            final placed = gridManager!.placeExpressLane(
+                expressLanePendingStart!, expressLaneDraggingEnd!);
+            if (placed) {
+              _updateInventoryNotifiers();
+              onStateChanged?.call();
+            }
+          });
+        }
+      } else if (_isDragging && _isDeferredTool) {
+        if (_dragPath.length > 1) {
+          executeUndoableAction(() {
+            gridManager!.commitPlacement(() => _commitDragBuild());
+            if (activeTool == BuildTool.erase) _applyEraseRefunds();
+          });
+        }
+      } else if (!_isDragging && _panStartPixel != null) {
+        // Single click action
+        final worldPos = camera.viewfinder.globalToLocal(_panStartPixel!);
+        final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
+        final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
         executeUndoableAction(() {
-          final placed = gridManager!.placeExpressLane(
-              expressLanePendingStart!, expressLaneDraggingEnd!);
-          if (placed) {
-            _updateInventoryNotifiers();
-            onStateChanged?.call();
-          }
-        });
-      }
-    } else if (_isDragging && _isDeferredTool) {
-      if (_dragPath.length > 1) {
-        executeUndoableAction(() {
-          gridManager!.commitPlacement(() => _commitDragBuild());
+          _handleSingleClick(GridPosition(x, y));
           if (activeTool == BuildTool.erase) _applyEraseRefunds();
         });
       }
-    } else if (!_isDragging && _panStartPixel != null) {
-      // Single click action
-      final worldPos = camera.viewfinder.globalToLocal(_panStartPixel!);
-      final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
-      final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
-      executeUndoableAction(() {
-        _handleSingleClick(GridPosition(x, y));
-        if (activeTool == BuildTool.erase) _applyEraseRefunds();
-      });
+      _cleanupInput();
     }
-    _cleanupInput();
   }
 
   /// Finalize cells marked `isPendingDeletion` by the erase tool: actually
