@@ -74,6 +74,11 @@ class ProgressionDirector {
     _colorUnlockWeek[colorIndex] = week;
   }
 
+  void restoreState(int week, double elapsedTime) {
+    _lastWeek = week;
+    _elapsedTime = elapsedTime;
+  }
+
   // ============================================================
   // UPDATE (called every frame from FlowGridGame)
   // ============================================================

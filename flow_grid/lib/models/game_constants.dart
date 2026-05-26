@@ -106,21 +106,21 @@ class GameConstants {
 
   // Muted, desaturated building colors
   static const List<Color> buildingColors = [
-    Color(0xFFE05A5A), // Muted Red
-    Color(0xFF5A8DEE), // Muted Blue
-    Color(0xFF5AC47A), // Muted Green
-    Color(0xFFE6C15A), // Muted Yellow
-    Color(0xFF9B7DBF), // Muted Purple
-    Color(0xFFD98A4A), // Muted Orange
+    Color(0xFFE05A5A), // 0: Muted Red
+    Color(0xFF5AC0D0), // 1: Muted Cyan (was Blue)
+    Color(0xFF5AC47A), // 2: Muted Green
+    Color(0xFFD98A4A), // 3: Muted Orange (was Yellow)
+    Color(0xFF9B7DBF), // 4: Muted Purple
+    Color(0xFFE6C15A), // 5: Muted Yellow (was Orange)
   ];
 
   static const List<Color> buildingDarkColors = [
-    Color(0xFFB84848), // Dark Red
-    Color(0xFF4870C0), // Dark Blue
-    Color(0xFF489E60), // Dark Green
-    Color(0xFFC0A048), // Dark Yellow
-    Color(0xFF7E5FA0), // Dark Purple
-    Color(0xFFB06E38), // Dark Orange
+    Color(0xFFB84848), // 0: Dark Red
+    Color(0xFF388EA0), // 1: Dark Cyan (was Blue)
+    Color(0xFF489E60), // 2: Dark Green
+    Color(0xFFB06E38), // 3: Dark Orange (was Yellow)
+    Color(0xFF7E5FA0), // 4: Dark Purple
+    Color(0xFFC0A048), // 5: Dark Yellow (was Orange)
   ];
 
   static Color getBuildingColor(int index) =>

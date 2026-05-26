@@ -69,6 +69,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   final Map<String, List<GridPosition>> _pathCache = {};
 
   List<String> weeklyOptions = [];
+  /// Scaled road count awarded this week — increases every 3 weeks.
+  int weeklyBaseRoads = 20;
+
   final Map<int, List<CarComponent>> carGrid = {};
   int gridWidth = 0;
   final Map<String, int> houseCarCounts = {};
@@ -138,6 +141,31 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     return min(maxHalf, _initialActiveHalfHeight.toDouble() + (smoothWeek - 1.0) * _weeklyActiveExpansionY);
   }
 
+  math.Point<double> getSmoothActiveHalfDimensions() {
+    double hw = smoothActiveHalfWidth;
+    double hh = smoothActiveHalfHeight;
+    
+    if (size.x > 100 && size.y > 100) {
+      const double padding = 16.0;
+      final screenW = size.x - hudPanelWidth - (2 * padding);
+      final screenH = size.y - (2 * padding);
+      if (screenW > 0 && screenH > 0) {
+        final screenAspect = screenW / screenH;
+        final baseAspect = hw / hh;
+        if (screenAspect > baseAspect) {
+          hw = hh * screenAspect;
+          final maxHw = (gridCols - 4) / 2.0;
+          if (hw > maxHw) hw = maxHw;
+        } else {
+          hh = hw / screenAspect;
+          final maxHh = (gridRows - 4) / 2.0;
+          if (hh > maxHh) hh = maxHh;
+        }
+      }
+    }
+    return math.Point(hw, hh);
+  }
+
   double get _baseZoom {
     if (size.x <= 100 || size.y <= 100) return 1.0;
     const double padding = 16.0;
@@ -148,8 +176,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     double w;
     double h;
     if (spawnController != null) {
-      w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
-      h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+      final dims = getSmoothActiveHalfDimensions();
+      w = (dims.x * 2.0) * cellSize;
+      h = (dims.y * 2.0) * cellSize;
     } else {
       w = (smoothActiveHalfWidth * 2) * cellSize;
       h = (smoothActiveHalfHeight * 2) * cellSize;
@@ -174,8 +203,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     double w;
     double h;
     if (spawnController != null) {
-      w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
-      h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
+      final dims = getSmoothActiveHalfDimensions();
+      w = (dims.x * 2.0) * cellSize;
+      h = (dims.y * 2.0) * cellSize;
     } else {
       w = (smoothActiveHalfWidth * 2) * cellSize;
       h = (smoothActiveHalfHeight * 2) * cellSize;
@@ -188,7 +218,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // (e.g. 0.85) leaves a visibly large empty band between the active region
     // and the HUD on a phone.
     final baseZoom = min(zoomX, zoomY).clamp(0.1, 8.0);
-    return (baseZoom * userZoomMultiplier).clamp(0.1, 8.0);
+    return (baseZoom * userZoomMultiplier).clamp(0.2, 5.0);
   }
 
   double userZoomMultiplier = 1.0;
@@ -218,6 +248,18 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   bool _isDragging = false;
   bool _initialSyncDone = false;
   bool _pendingInitialSpawn = false;
+
+  // ── Camera Focus (event tap / game-over cinematic) ──────────────────────────
+  /// World-space position the camera is smoothly targeting.  When non-null,
+  /// _syncCameraCenter yields so the programmatic focus takes precedence.
+  Vector2? _cameraFocusTarget;
+
+  // ── Game-over cinematic transition ───────────────────────────────────────────
+  bool _gameOverTransitioning = false;
+  double _gameOverTransitionTimer = 0.0;
+  static const double _gameOverZoomInDuration = 1.8; // seconds before overlay shows
+  static const double _gameOverZoomMultiplier = 2.5;
+
   final PerformanceLogger perfLogger = PerformanceLogger();
   
 
@@ -301,6 +343,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     _elapsedTime = 0;
     activeColorCount = 1;
     _pathCache.clear();
+    // Reset cinematic transition state
+    _gameOverTransitioning = false;
+    _gameOverTransitionTimer = 0.0;
+    clearCameraFocus();
+    userZoomMultiplier = 1.0;
+
     _cars.clear();
     children.whereType<CarComponent>().forEach((c) => c.removeFromParent());
     world.children.whereType<CarComponent>().forEach((c) => c.removeFromParent());
@@ -312,7 +360,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       if (save != null) {
         gridCols = save['gridCols'] ?? 16;
         gridRows = save['gridRows'] ?? 10;
-        gridManager = GridManager(gridCols, gridRows, selectedMapType: MapType.values[save['mapType'] ?? 0], initTerrain: false);
+        selectedMapType = MapType.values[save['mapType'] ?? 0];
+        gridManager = GridManager(gridCols, gridRows, selectedMapType: selectedMapType, initTerrain: false);
         
         // Restore Grid, Inventories, Driveways, and Demand State Unifiedly
         gridManager!.loadFromSave(save);
@@ -372,6 +421,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     };
     spawnController!.onBuildingSpawned = (pos) {
       gridRenderer?.registerSpawnAnimation(pos);
+      if (GameConstants.debugInfrastructure) {
+        debugPrint('[BREADCRUMB] Building spawned at coordinate: (${pos.x}, ${pos.y})');
+      }
     };
     spawnController!.onLog = (msg) => debugPrint('[SPAWN] $msg');
     debugPrint("[SPAWN_MANAGER_INIT] SpawnController created and scoring initialized");
@@ -385,8 +437,17 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     progressionDirector = ProgressionDirector(spawnController!);
     progressionDirector.reset();
     if (resume) {
+      spawnController!.restoreStateFromGrid(activeColorCount, _elapsedTime);
+      progressionDirector.restoreState(week, _elapsedTime);
       for (int i = 0; i < activeColorCount; i++) {
         progressionDirector.registerUnlockedColor(i, 1);
+      }
+      if (GameConstants.debugInfrastructure) {
+        debugPrint('[BREADCRUMB] Game loaded from slot $slotIndex. Week: $week, Score: $score, Active Colors: $activeColorCount.');
+      }
+    } else {
+      if (GameConstants.debugInfrastructure) {
+        debugPrint('[BREADCRUMB] Starting new game on map: $selectedMapType');
       }
     }
 
@@ -398,6 +459,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     // Connect callbacks
     gridManager!.onTopologyChanged = () => _pathCache.clear();
+    gridManager!.isStagedBuilding = (x, y) => spawnController?.isStagedBuildingPosition(x, y) ?? false;
 
     phase = GamePhase.playing;
     paused = false;
@@ -448,24 +510,41 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
   void applyUpgrade(String option) {
     if (gridManager == null) return;
-    
+    final base = weeklyBaseRoads;
+
     if (option == 'tunnels') {
-      gridManager!.roads += 20;
+      gridManager!.roads += base;
       gridManager!.tunnels += 1;
     } else if (option == 'bridges') {
-      gridManager!.roads += 20;
+      gridManager!.roads += base;
       gridManager!.bridges += 1;
     } else if (option == 'trafficLights') {
-      gridManager!.roads += 20;
+      gridManager!.roads += base;
       gridManager!.trafficLights += 1;
     } else if (option == 'smartJunction') {
-      gridManager!.roads += 20;
+      gridManager!.roads += base;
       gridManager!.smartJunctions += 1;
     } else if (option == 'expressLane') {
-      gridManager!.roads += 10;
+      gridManager!.roads += (base * 0.6).round();
       gridManager!.expressLanes += 1;
     } else if (option == 'doubleRoads') {
-      gridManager!.roads += 30;
+      gridManager!.roads += base + 10;
+    // ── Gamble outcomes ──────────────────────────────────────────────────────
+    } else if (option == 'gamble_jackpot') {
+      gridManager!.roads += 50;
+      gridManager!.tunnels += 1;
+      gridManager!.expressLanes += 1;
+    } else if (option == 'gamble_bigwin') {
+      gridManager!.roads += base + 15;
+      gridManager!.smartJunctions += 1;
+    } else if (option == 'gamble_win') {
+      gridManager!.roads += base;
+      gridManager!.trafficLights += 1;
+    } else if (option == 'gamble_bust') {
+      gridManager!.roads += 5;
+    } else if (option == 'gamble_disaster') {
+      gridManager!.roads = max(0, gridManager!.roads - 10);
+      gridManager!.expressLanes += 1; // consolation prize
     }
 
     phase = GamePhase.playing;
@@ -591,20 +670,36 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   }
 
   void _checkGameOver() {
+    if (_gameOverTransitioning) return; // already transitioning, don't re-trigger
     final gm = gridManager;
     if (gm == null) return;
     for (final dest in gm.destinations) {
       final key = '${dest.x},${dest.y}';
       final overflow = gm.overflowLevels[key] ?? 0.0;
       if (overflow >= 1.0) {
-        phase = GamePhase.gameOver;
-        paused = true;
-        overlays.remove('hud');
-        overlays.add('gameOver');
-        onStateChanged?.call();
+        _startGameOverTransition(dest);
         return;
       }
     }
+  }
+
+  void _startGameOverTransition(GridPosition overflowDest) {
+    _gameOverTransitioning = true;
+    _gameOverTransitionTimer = 0.0;
+    // Zoom into the losing building for a cinematic beat
+    focusCameraOnGridPosition(overflowDest, zoomMultiplier: _gameOverZoomMultiplier);
+    // Pause spawning & game logic but keep the camera alive
+    paused = true;
+  }
+
+  void _finishGameOverTransition() {
+    _gameOverTransitioning = false;
+    clearCameraFocus();
+    userZoomMultiplier = 1.0;
+    phase = GamePhase.gameOver;
+    overlays.remove('hud');
+    overlays.add('gameOver');
+    onStateChanged?.call();
   }
 
   void _rebuildSpatialGrid() {
@@ -649,12 +744,34 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
 
   void _updateCameraSmoothing(double dt) {
+    // ── Game-over cinematic transition ─────────────────────────────────────────
+    if (_gameOverTransitioning) {
+      _gameOverTransitionTimer += dt;
+      // Smoothly lerp the viewfinder toward the focus target
+      if (_cameraFocusTarget != null) {
+        final t = 1.0 - pow(0.008, dt).toDouble();
+        camera.viewfinder.position += (_cameraFocusTarget! - camera.viewfinder.position) * t;
+      }
+      // Lerp zoom in
+      final targetZoom = (_targetZoom * _gameOverZoomMultiplier).clamp(0.2, 8.0);
+      final zoomT = 1.0 - pow(0.008, dt).toDouble();
+      camera.viewfinder.zoom += (targetZoom - camera.viewfinder.zoom) * zoomT;
+      if (_gameOverTransitionTimer >= _gameOverZoomInDuration) {
+        _finishGameOverTransition();
+      }
+      return;
+    }
+
     if ((camera.viewfinder.zoom - _targetZoom).abs() > 0.001) {
       final zoomLerp = 1.0 - pow(0.05, dt).toDouble();
       final delta = (_targetZoom - camera.viewfinder.zoom) * zoomLerp;
       // Clamp rate of zoom change to be smooth and frame-rate independent (max 0.3 units per second)
       final maxChange = 0.3 * dt;
+      final oldZoom = camera.viewfinder.zoom;
       camera.viewfinder.zoom += delta.clamp(-maxChange, maxChange);
+      if (GameConstants.debugInfrastructure && (camera.viewfinder.zoom - oldZoom).abs() > 0.01) {
+        debugPrint('[BREADCRUMB] Zoom changed: ${camera.viewfinder.zoom.toStringAsFixed(2)}x');
+      }
       _syncCameraCenter(dt: dt);
       _syncSpawnBounds();
     }
@@ -848,6 +965,16 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
   void _syncCameraCenter({bool instant = false, double dt = 0.016}) {
     if (gridManager == null) return;
+
+    // While a programmatic camera focus is active (e.g. event tap or game-over
+    // cinematic) we interpolate toward the focus target instead of the normal
+    // active-region center.
+    if (_cameraFocusTarget != null) {
+      final t = instant ? 1.0 : (1.0 - pow(0.001, dt).toDouble());
+      camera.viewfinder.position += (_cameraFocusTarget! - camera.viewfinder.position) * t;
+      return;
+    }
+
     final screenW = size.x - hudPanelWidth;
     final screenH = size.y;
     double zoom = camera.viewfinder.zoom;
@@ -857,10 +984,18 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     Vector2 target;
     if (spawnController != null) {
-      final w = (spawnController!.maxSpawnX - spawnController!.minSpawnX + 1) * cellSize;
-      final h = (spawnController!.maxSpawnY - spawnController!.minSpawnY + 1) * cellSize;
-      final targetX = (boardOffsetX + spawnController!.minSpawnX * cellSize) - ((screenW / zoom) - w) / 2;
-      final targetY = (boardOffsetY + spawnController!.minSpawnY * cellSize) - ((screenH / zoom) - h) / 2;
+      final dims = getSmoothActiveHalfDimensions();
+      final hw = dims.x;
+      final hh = dims.y;
+      final cx = gridCols / 2.0;
+      final cy = gridRows / 2.0;
+      final minX = math.max(2.0, cx - hw);
+      final minY = math.max(2.0, cy - hh);
+      final w = hw * 2.0 * cellSize;
+      final h = hh * 2.0 * cellSize;
+      
+      final targetX = (boardOffsetX + minX * cellSize) - ((screenW / zoom) - w) / 2;
+      final targetY = (boardOffsetY + minY * cellSize) - ((screenH / zoom) - h) / 2;
       target = Vector2(targetX, targetY);
     } else {
       final gridW = gridCols * cellSize;
@@ -879,6 +1014,28 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     }
   }
 
+  /// Smoothly pan and zoom the camera to centre on [pos] (grid coordinates).
+  /// [zoomMultiplier] scales the current game zoom — 1.0 keeps the normal
+  /// gameplay zoom, 2.5 zooms in for e.g. the game-over cinematic.
+  void focusCameraOnGridPosition(GridPosition pos, {double zoomMultiplier = 1.0}) {
+    final worldX = boardOffsetX + pos.x * cellSize + cellSize / 2;
+    final worldY = boardOffsetY + pos.y * cellSize + cellSize / 2;
+    final zoom = (zoomMultiplier > 0.0 ? zoomMultiplier : 1.0);
+    final screenW = size.x - hudPanelWidth;
+    final screenH = size.y;
+    final effectiveZoom = (_targetZoom * zoom).clamp(0.2, 8.0);
+    final targetX = worldX - (screenW / effectiveZoom) / 2;
+    final targetY = worldY - (screenH / effectiveZoom) / 2;
+    _cameraFocusTarget = Vector2(targetX, targetY);
+    userZoomMultiplier = zoom;
+  }
+
+  /// Clear any active programmatic camera focus, returning control to the
+  /// normal active-region tracking.  Called when the player pans/zooms.
+  void clearCameraFocus() {
+    _cameraFocusTarget = null;
+  }
+
   void _checkWeekTransition() {
     if (weekTimer >= GameConstants.weekDuration) {
       weekTimer = 0;
@@ -889,7 +1046,6 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   void _triggerWeeklyUpgrade() {
     if (gridManager == null) return;
 
-    // Increment week and expand active grid bounds
     week++;
     for (final dest in gridManager!.destinations) {
       final key = "${dest.x},${dest.y}";
@@ -899,6 +1055,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     _syncSpawnBounds();
     MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
 
+    // Road count scales up every 3 weeks (20 → 25 → 30 → ...)
+    weeklyBaseRoads = 20 + (week ~/ 3) * 5;
+
     final options = <String>['doubleRoads', 'trafficLights', 'smartJunction', 'expressLane'];
     if (selectedMapType == MapType.nile || selectedMapType == MapType.delta) {
       options.add('bridges');
@@ -906,16 +1065,26 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     if (selectedMapType == MapType.andes || selectedMapType == MapType.savanna || selectedMapType == MapType.arctic) {
       options.add('tunnels');
     }
-    
-    weeklyOptions = options;
+
+    options.shuffle();
+    // Always 3 choices: 2 normal + 1 gamble card
+    weeklyOptions = [...options.take(2), 'gamble'];
     weeklyOptions.shuffle();
-    weeklyOptions = weeklyOptions.take(2).toList();
-    
+
     phase = GamePhase.weeklyUpgrade;
     overlays.add('weeklyUpgrade');
-    // Pause game loop processing during upgrade selection to freeze camera and spawns
     paused = true;
     onStateChanged?.call();
+  }
+
+  /// Roll the gamble outcome. Returns a key that is passed back to applyUpgrade.
+  String rollGamble() {
+    final r = Random().nextDouble();
+    if (r < 0.08) return 'jackpot';   //  8% — massive haul
+    if (r < 0.28) return 'bigwin';    // 20% — great deal
+    if (r < 0.58) return 'win';       // 30% — solid win
+    if (r < 0.83) return 'bust';      // 25% — scraps
+    return 'disaster';                 // 17% — painful
   }
 
   void _syncSpawnBounds() {
@@ -990,17 +1159,34 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   @override
   void onScroll(PointerScrollInfo info) {
     if (phase != GamePhase.playing) return;
+    final screenFocal = info.eventPosition.global;
+    final worldFocalBefore = camera.viewfinder.globalToLocal(screenFocal);
+
     final scrollDelta = info.scrollDelta.global.y;
     if (scrollDelta < 0) {
-      userZoomMultiplier = (userZoomMultiplier * 1.08).clamp(0.5, 3.0);
+      userZoomMultiplier = (userZoomMultiplier * 1.08).clamp(0.2, 5.0);
     } else if (scrollDelta > 0) {
-      userZoomMultiplier = (userZoomMultiplier / 1.08).clamp(0.5, 3.0);
+      userZoomMultiplier = (userZoomMultiplier / 1.08).clamp(0.2, 5.0);
     }
+
+    final oldZoom = camera.viewfinder.zoom;
+    camera.viewfinder.zoom = _targetZoom;
+    if (GameConstants.debugInfrastructure && (camera.viewfinder.zoom - oldZoom).abs() > 0.01) {
+      debugPrint('[BREADCRUMB] Zoom changed manually (scroll): ${camera.viewfinder.zoom.toStringAsFixed(2)}x');
+    }
+
+    final worldFocalAfter = camera.viewfinder.globalToLocal(screenFocal);
+    camera.viewfinder.position += (worldFocalBefore - worldFocalAfter);
+
     onStateChanged?.call();
   }
 
   @override
   void onScaleStart(ScaleStartInfo info) {
+    // Cancel any programmatic camera focus (event tap / game-over cinematic)
+    // so the player's gesture takes control immediately.
+    clearCameraFocus();
+
     if (previewMode) {
       _initialZoom = camera.viewfinder.zoom;
       _scaleStartPixel = info.eventPosition.global;
@@ -1016,13 +1202,27 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     if (previewMode) {
       if (_scaleStartPixel == null || _initialCameraPos == null) return;
       
-      // Handle Zoom
-      camera.viewfinder.zoom = (_initialZoom * info.raw.scale).clamp(0.2, 5.0);
-      userZoomMultiplier = (camera.viewfinder.zoom / _baseZoom).clamp(0.2, 5.0);
+      final screenFocal = info.eventPosition.global;
+      // 1. Convert screen focal point to world before zooming
+      final worldFocalBefore = camera.viewfinder.globalToLocal(screenFocal);
+
+      // 2. Handle Zoom
+      final newZoom = (_initialZoom * info.raw.scale).clamp(0.2, 5.0);
+      if (GameConstants.debugInfrastructure && (camera.viewfinder.zoom - newZoom).abs() > 0.01) {
+        debugPrint('[BREADCRUMB] Zoom changed manually (pinch): ${newZoom.toStringAsFixed(2)}x');
+      }
+      camera.viewfinder.zoom = newZoom;
+      userZoomMultiplier = (newZoom / _baseZoom).clamp(0.2, 5.0);
       
-      // Handle Pan
-      final deltaPixel = info.eventPosition.global - _scaleStartPixel!;
+      // 3. Convert screen focal point to world after zooming
+      final worldFocalAfter = camera.viewfinder.globalToLocal(screenFocal);
+
+      // 4. Handle Pan & Focal-point correction to prevent jumps
+      final deltaPixel = screenFocal - _scaleStartPixel!;
       camera.viewfinder.position = _initialCameraPos! - deltaPixel / camera.viewfinder.zoom;
+      
+      // Correct viewfinder position so the focal point doesn't slide
+      camera.viewfinder.position += (worldFocalBefore - worldFocalAfter);
     } else {
       if (phase != GamePhase.playing || paused || _panStartPixel == null) return;
       
@@ -1460,7 +1660,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     final newSnapshot = gridManager!.takeUndoSnapshot();
     if (!_areSnapshotsIdentical(oldSnapshot, newSnapshot)) {
       _undoStack.add(oldSnapshot);
-      if (_undoStack.length > 20) {
+      if (_undoStack.length > 1) {
         _undoStack.removeAt(0);
       }
       canUndoNotifier.value = true;
@@ -1475,7 +1675,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     gridRenderer?.markDirty();
     _pathCache.clear();
     onStateChanged?.call();
-    canUndoNotifier.value = _undoStack.isNotEmpty;
+    canUndoNotifier.value = false; // Cap at 1 step undo, so gray out immediately
   }
 
   void _updateMapSpecificEvents(double dt) {

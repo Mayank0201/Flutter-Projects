@@ -295,6 +295,64 @@ class SpawnController {
     _stagedHouse2SpawnAt = null;
   }
 
+  /// Restore system state from grid cells during a resume (Issue 3 & 7)
+  void restoreStateFromGrid(int activeColorCount, double elapsedTime) {
+    this.activeColorCount = activeColorCount;
+    _elapsedTime = elapsedTime;
+    _lastSpawnTime = elapsedTime; // Prevent immediate spawns on load
+    _pressureTimer = 0;
+    
+    // Clear initial staged actions
+    _stagedInitialPlan = null;
+    _stagedInitialColor = null;
+    _stagedDestSpawnAt = null;
+    _stagedHouse2SpawnAt = null;
+    _queue.clear();
+
+    clusterCenters.clear();
+    residentialCenters.clear();
+    colorHomeZones.clear();
+    colorAllowedHouseZones.clear();
+    colorAllowedDestZones.clear();
+    
+    for (int ci = 0; ci < activeColorCount; ci++) {
+      // Re-detect destinations of this color
+      final dests = gridManager.destinations.where((d) => gridManager.grid[d.y][d.x].colorIndex == ci).toList();
+      if (dests.isNotEmpty) {
+        clusterCenters[ci] = dests.first;
+        final destZone = _getZoneAt(dests.first.x, dests.first.y);
+        colorAllowedDestZones[ci] = [destZone];
+      }
+      
+      // Re-detect houses of this color
+      final colorHouses = gridManager.houses.where((h) => gridManager.grid[h.y][h.x].colorIndex == ci).toList();
+      if (colorHouses.isNotEmpty) {
+        int sumX = 0;
+        int sumY = 0;
+        for (final h in colorHouses) {
+          sumX += h.x;
+          sumY += h.y;
+        }
+        final resCenter = GridPosition(sumX ~/ colorHouses.length, sumY ~/ colorHouses.length);
+        residentialCenters[ci] = resCenter;
+        
+        final houseZone = _getZoneAt(resCenter.x, resCenter.y);
+        colorHomeZones[ci] = houseZone;
+        colorAllowedHouseZones[ci] = [houseZone];
+      } else if (dests.isNotEmpty) {
+        // Fallback house center to first destination
+        residentialCenters[ci] = dests.first;
+        final houseZone = _getZoneAt(dests.first.x, dests.first.y);
+        colorHomeZones[ci] = houseZone;
+        colorAllowedHouseZones[ci] = [houseZone];
+      }
+      
+      dnaMap.putIfAbsent(ci, () => DistrictDNA.random(_random));
+    }
+    
+    _log('RESTORING SPAWN CONTROLLER: activeColorCount=$activeColorCount, elapsedTime=$elapsedTime, clusterCenters=$clusterCenters, residentialCenters=$residentialCenters');
+  }
+
   // ============================================================
   // STAGED INITIAL DISTRICT
   // The first district is committed in three beats instead of all at once
@@ -320,6 +378,15 @@ class SpawnController {
       _stagedDestSpawnAt = null;
       gridManager.commitPlacement(() => _placeStagedDestination(ci, plan));
       onSpawnComplete?.call();
+
+      // If there is no second house scheduled (plan had only 1 house),
+      // the house-2 branch below will never fire — clear staging now so
+      // the next initial-district request can start fresh.
+      if (_stagedHouse2SpawnAt == null) {
+        _stagedInitialPlan = null;
+        _stagedInitialColor = null;
+        return;
+      }
     }
 
     if (_stagedHouse2SpawnAt != null && _elapsedTime >= _stagedHouse2SpawnAt!) {
@@ -392,7 +459,8 @@ class SpawnController {
       // 3. FIND NEARBY HOUSES (Complete with entries)
       final housePlans = _findNearbyHouseSpots(colorIndex, resCenter, stage: stage, avoidDest: destPos);
       
-      if (housePlans.isEmpty) continue;
+      // Require at least 2 houses so staging always has both buildings ready.
+      if (housePlans.length < 2) continue;
 
       // 4. Create Plan & Commit
       final plan = DistrictPlan(
@@ -412,7 +480,7 @@ class SpawnController {
     return false;
   }
 
-  List<HousePlan> _findNearbyHouseSpots(int colorIndex, GridPosition center, {required PlanningStage stage, GridPosition? avoidDest}) {
+  List<HousePlan> _findNearbyHouseSpots(int colorIndex, GridPosition center, {required PlanningStage stage, GridPosition? avoidDest, bool isExpansion = false}) {
     final candidates = <GridPosition>[];
     double minDist = 1.0;
     double maxDist = 8.0;
@@ -430,7 +498,7 @@ class SpawnController {
           if (stage.index < PlanningStage.stage5ExtremeRelax.index) continue;
         }
 
-        if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.house)) continue;
+        if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.house, isExpansion: isExpansion)) continue;
         candidates.add(pos);
       }
     }
@@ -465,6 +533,18 @@ class SpawnController {
     }
 
     return result;
+  }
+
+  /// Returns true if the given tile is reserved for a staged (not-yet-committed)
+  /// building so that the player cannot build roads on top of it before the
+  /// building appears.  Called by GridManager.placeRoad.
+  bool isStagedBuildingPosition(int x, int y) {
+    final plan = _stagedInitialPlan;
+    if (plan == null) return false;
+    for (final spot in plan.allSpots) {
+      if (spot.x == x && spot.y == y) return true;
+    }
+    return false;
   }
 
   void _commitInitialDistrict(int colorIndex, DistrictPlan plan) {
@@ -656,7 +736,7 @@ class SpawnController {
 
         if (existingCenter != null && pos.manhattanDistance(existingCenter) < minDistFromExisting) continue;
 
-        if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.destination)) continue;
+        if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.destination, isExpansion: true)) continue;
         destCandidates.add(pos);
       }
     }
@@ -679,7 +759,7 @@ class SpawnController {
       if (resCenter == null && stage.index < PlanningStage.stage4StrongRelax.index) continue;
 
       // Find house candidates near the NEW residential center
-      final housePlans = _findNearbyHouseSpots(colorIndex, resCenter ?? destPos, stage: stage, avoidDest: destPos);
+      final housePlans = _findNearbyHouseSpots(colorIndex, resCenter ?? destPos, stage: stage, avoidDest: destPos, isExpansion: true);
       
       // [FIX] Atomic Expansion (Issue 2): Always require 2 houses for a matured color expansion
       if (housePlans.length < 2) continue; 
@@ -1260,7 +1340,7 @@ class SpawnController {
   // ============================================================
 
   /// Check that a tile is valid for spawning a building
-  bool _validateSpawnTile(GridPosition pos, int colorIndex, {required PlanningStage stage, required SpawnNodeType nodeType}) {
+  bool _validateSpawnTile(GridPosition pos, int colorIndex, {required PlanningStage stage, required SpawnNodeType nodeType, bool isExpansion = false}) {
     final profile = (nodeType == SpawnNodeType.house) ? BuildingProfile.residential : BuildingProfile.commercial;
     final cell = gridManager.grid[pos.y][pos.x];
 
@@ -1336,13 +1416,17 @@ class SpawnController {
     // ============================================================
     
     // [NEW] District Locality (Issue 1: Panic spawns too far)
-    final anchor = clusterCenters[colorIndex];
-    if (anchor != null) {
-      final distFromAnchor = pos.manhattanDistance(anchor);
-      // Hard cap even in Emergency: districts cannot teleport across the map
-      if (distFromAnchor > SpawnConfig.maxDistrictExpansionRadius) {
-        _log('REJECTED: Radius overflow ($distFromAnchor > ${SpawnConfig.maxDistrictExpansionRadius}) for Color $colorIndex');
-        return false;
+    // For expansion packages the new cluster is intentionally far from the
+    // anchor — skip the radius cap so it can actually land in a new zone.
+    if (!isExpansion) {
+      final anchor = clusterCenters[colorIndex];
+      if (anchor != null) {
+        final distFromAnchor = pos.manhattanDistance(anchor);
+        // Hard cap even in Emergency: districts cannot teleport across the map
+        if (distFromAnchor > SpawnConfig.maxDistrictExpansionRadius) {
+          _log('REJECTED: Radius overflow ($distFromAnchor > ${SpawnConfig.maxDistrictExpansionRadius}) for Color $colorIndex');
+          return false;
+        }
       }
     }
 

@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flame/components.dart';
+import 'package:flutter/foundation.dart';
 import '../models/grid_cell.dart';
+import '../models/game_constants.dart';
 import 'flow_grid_game.dart';
 import 'pathfinder.dart';
 
@@ -44,14 +46,17 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
     final event = EmergencyEvent(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       location: target,
-      description: "Medical Emergency in District",
+      description: "Medical Emergency",
       timeout: 60.0,
     );
 
     activeEvents.add(event);
     _spawnEmergencyVehicle(event);
     
-    // UI Feedback (later integrated into HUD)
+    if (GameConstants.debugInfrastructure) {
+      debugPrint('[BREADCRUMB] Emergency event triggered at: (${target.x}, ${target.y}). Timeout: 60s.');
+    }
+    game.onStateChanged?.call();
   }
 
   void _spawnEmergencyVehicle(EmergencyEvent event) {
@@ -75,6 +80,7 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
         cellSize: game.cellSize,
         offsetX: game.boardOffsetX,
         offsetY: game.boardOffsetY,
+        routeId: event.id,
       );
       game.cars.add(ev);
       game.world.add(ev);
@@ -89,6 +95,7 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
         if (event.timeout <= 0) {
           _handleFailure(event);
           activeEvents.removeAt(i);
+          game.onStateChanged?.call();
         }
       }
     }
@@ -96,11 +103,22 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
 
   void _handleFailure(EmergencyEvent event) {
     game.score -= 500;
-    // Penalties could include blocking the road or slowing down the district
+    if (GameConstants.debugInfrastructure) {
+      debugPrint('[BREADCRUMB] Emergency event failed (timeout) at: (${event.location.x}, ${event.location.y}).');
+    }
   }
 
   void resolveEvent(String eventId) {
-    activeEvents.removeWhere((e) => e.id == eventId);
-    game.score += 200;
+    final eventIndex = activeEvents.indexWhere((e) => e.id == eventId);
+    if (eventIndex != -1) {
+      final event = activeEvents[eventIndex];
+      activeEvents.removeAt(eventIndex);
+      game.score += 200;
+      if (GameConstants.debugInfrastructure) {
+        debugPrint('[BREADCRUMB] Emergency event resolved at: (${event.location.x}, ${event.location.y}).');
+      }
+      game.onStateChanged?.call();
+    }
   }
 }
+

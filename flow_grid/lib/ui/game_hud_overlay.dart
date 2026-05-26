@@ -61,10 +61,10 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 _topSection(),
+                                _previewSection(),
                                 _toolGrid(),
                                 _actionSection(),
                                 _speedSection(),
-                                _previewSection(),
                                 const SizedBox(height: 12),
                               ],
                             ),
@@ -442,17 +442,17 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     }
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.all(4),
+      margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-        borderRadius: BorderRadius.circular(6),
+        color: const Color(0xFF14161B),
+        border: Border.all(color: color.withValues(alpha: 0.25), width: 1),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(width: 4),
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,12 +462,15 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                   style: GoogleFonts.outfit(color: color, fontSize: 9, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
-                LinearProgressIndicator(
-                  value: (1.0 - (g.eventTimer / g.eventDuration)).clamp(0.0, 1.0),
-                  backgroundColor: Colors.transparent,
-                  color: color.withValues(alpha: 0.5),
-                  minHeight: 2,
+                const SizedBox(height: 3),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(1),
+                  child: LinearProgressIndicator(
+                    value: (1.0 - (g.eventTimer / g.eventDuration)).clamp(0.0, 1.0),
+                    backgroundColor: Colors.white10,
+                    color: color,
+                    minHeight: 1.5,
+                  ),
                 ),
               ],
             ),
@@ -478,72 +481,99 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
   }
 
   Widget _eventNotification(CityEvent event) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: event.color.withValues(alpha: 0.1),
-        border: Border.all(color: event.color.withValues(alpha: 0.3)),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        children: [
-          Icon(event.icon, color: event.color, size: 14),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  event.title.toUpperCase(),
-                  style: GoogleFonts.outfit(color: event.color, fontSize: 9, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                LinearProgressIndicator(
-                  value: 1.0 - (event.elapsed / event.duration),
-                  backgroundColor: Colors.transparent,
-                  color: event.color.withValues(alpha: 0.5),
-                  minHeight: 2,
-                ),
-              ],
+    final tilePos = event.affectedTile;
+    return GestureDetector(
+      onTap: tilePos != null
+          ? () => widget.game.focusCameraOnGridPosition(tilePos)
+          : null,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF14161B),
+          border: Border.all(color: event.color.withValues(alpha: 0.25), width: 1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(event.icon, color: event.color, size: 12),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    event.title.toUpperCase(),
+                    style: GoogleFonts.outfit(color: event.color, fontSize: 9, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(1),
+                    child: LinearProgressIndicator(
+                      value: (1.0 - (event.elapsed / event.duration)).clamp(0.0, 1.0),
+                      backgroundColor: Colors.white10,
+                      color: event.color,
+                      minHeight: 1.5,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _emergencyNotification(EmergencyEvent event) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.1),
-        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.emergency, color: Colors.redAccent, size: 14),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "EMERGENCY",
-                  style: GoogleFonts.outfit(color: Colors.redAccent, fontSize: 9, fontWeight: FontWeight.bold, decoration: TextDecoration.none),
-                ),
-                LinearProgressIndicator(
-                  value: event.timeout / 60.0,
-                  backgroundColor: Colors.transparent,
-                  color: Colors.redAccent,
-                  minHeight: 2,
-                ),
-              ],
-            ),
+    final pct = (event.timeout / 60.0).clamp(0.0, 1.0);
+    return GestureDetector(
+      onTap: () => widget.game.focusCameraOnGridPosition(event.location),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1215),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: Colors.redAccent.withValues(alpha: 0.4),
+            width: 1.0,
           ),
-        ],
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                value: pct,
+                strokeWidth: 2.0,
+                backgroundColor: Colors.white10,
+                color: Colors.redAccent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    event.description.toUpperCase(),
+                    style: GoogleFonts.outfit(
+                      color: Colors.redAccent,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

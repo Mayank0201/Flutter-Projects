@@ -180,6 +180,9 @@ class GridRenderer extends PositionComponent
     // Dynamic roadblock & maintenance event overlays
     _drawActiveEventOverlays(canvas);
 
+    // Emergency event overlays
+    _drawEmergencyOverlays(canvas);
+
     // Map Specific Events
     _drawMapSpecificEventVisuals(canvas);
 
@@ -202,30 +205,21 @@ class GridRenderer extends PositionComponent
 
     for (final anim in _spawnAnimations) {
       final t = ((now - anim.startTime) / _SpawnAnimation.duration).clamp(0.0, 1.0);
-      // Ease-out cubic for the radius so the ring shoots out quickly then settles.
       final ease = 1.0 - math.pow(1.0 - t, 3).toDouble();
       final cx = offsetX + anim.pos.x * cellSize + cellSize / 2;
       final cy = offsetY + anim.pos.y * cellSize + cellSize / 2;
 
-      // Outer expanding ring — very light gray, fades to transparent.
-      final outerRadius = cellSize * (0.35 + ease * 1.1);
-      final outerAlpha = (1.0 - t) * 0.16;
+      // Single very thin, soft expanding ring
+      final outerRadius = cellSize * (0.35 + ease * 0.55);
+      final outerAlpha = (1.0 - t) * 0.12;
       canvas.drawCircle(
         Offset(cx, cy),
         outerRadius,
-        Paint()..color = Colors.white.withValues(alpha: outerAlpha),
+        Paint()
+          ..color = Colors.white.withValues(alpha: outerAlpha)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0,
       );
-
-      // Soft inner glow that shrinks as the building "settles in".
-      final innerRadius = cellSize * (0.45 - t * 0.25);
-      if (innerRadius > 0) {
-        final innerAlpha = (1.0 - t) * 0.10;
-        canvas.drawCircle(
-          Offset(cx, cy),
-          innerRadius,
-          Paint()..color = Colors.white.withValues(alpha: innerAlpha),
-        );
-      }
     }
   }
 
@@ -1555,7 +1549,20 @@ class GridRenderer extends PositionComponent
         }
       } else {
         // Normal pip drawing (shifted above building)
-        final indicatorY = offsetY + pos.y * cellSize - cellSize * 0.2;
+        double indicatorY = offsetY + pos.y * cellSize - cellSize * 0.2;
+        if (isMature) {
+          // If mature, shift higher to avoid overlapping with penthouse structure & blinking beacon
+          final destScale = BuildingProfile.commercial.renderScale;
+          final size = cellSize * destScale;
+          final bSize = size * 0.72;
+          final bRectHeight = bSize * 0.65;
+          final cyLocal = offsetY + pos.y * cellSize + cellSize / 2;
+          final bRectTop = cyLocal + size * 0.06 - bRectHeight / 2;
+          final pHeight = bRectHeight * 0.75;
+          final pRectTop = bRectTop - pHeight + 2;
+          final antennaTop = pRectTop - size * 0.18;
+          indicatorY = antennaTop - 8.0;
+        }
         final pipR = cellSize * 0.06;
         final spacing = pipR * 2.5;
         final maxDemand = isMature
@@ -1781,27 +1788,9 @@ class GridRenderer extends PositionComponent
     final cx = game.gridCols / 2.0;
     final cy = game.gridRows / 2.0;
     
-    double hw = game.smoothActiveHalfWidth;
-    double hh = game.smoothActiveHalfHeight;
-    
-    if (game.size.x > 100 && game.size.y > 100) {
-      const double padding = 16.0;
-      final screenW = game.size.x - game.hudPanelWidth - (2 * padding);
-      final screenH = game.size.y - (2 * padding);
-      if (screenW > 0 && screenH > 0) {
-        final screenAspect = screenW / screenH;
-        final baseAspect = hw / hh;
-        if (screenAspect > baseAspect) {
-          hw = hh * screenAspect;
-          final maxHw = (game.gridCols - 4) / 2.0;
-          if (hw > maxHw) hw = maxHw;
-        } else {
-          hh = hw / screenAspect;
-          final maxHh = (game.gridRows - 4) / 2.0;
-          if (hh > maxHh) hh = maxHh;
-        }
-      }
-    }
+    final dims = game.getSmoothActiveHalfDimensions();
+    final hw = dims.x;
+    final hh = dims.y;
 
     final minX = math.max(2.0, cx - hw);
     final maxX = math.min(game.gridCols.toDouble() - 3.0, cx + hw);
@@ -1881,23 +1870,17 @@ class GridRenderer extends PositionComponent
   }
 
   void _drawWarningTriangle(Canvas canvas, double cx, double cy, double size) {
-    final path = Path();
-    path.moveTo(cx, cy - size * 0.5);
-    path.lineTo(cx + size * 0.5, cy + size * 0.4);
-    path.lineTo(cx - size * 0.5, cy + size * 0.4);
-    path.close();
-
-    canvas.drawPath(path, Paint()..color = Colors.amber);
-    canvas.drawPath(path, Paint()..color = Colors.black..style = PaintingStyle.stroke..strokeWidth = 1.0);
-    
     final textPainter = TextPainter(
-      text: const TextSpan(
-        text: '!',
-        style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold),
+      text: TextSpan(
+        text: '⚠️',
+        style: GoogleFonts.outfit(
+          color: Colors.amber,
+          fontSize: size,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    textPainter.paint(canvas, Offset(cx - textPainter.width / 2, cy - textPainter.height / 2 + 1));
+    textPainter.paint(canvas, Offset(cx - textPainter.width / 2, cy - textPainter.height / 2));
   }
 
   void _drawMapSpecificEventVisuals(Canvas canvas) {
@@ -1912,36 +1895,35 @@ class GridRenderer extends PositionComponent
       // Map-wide cold white-blue tint
       canvas.drawRect(
         Rect.fromLTWH(offsetX, offsetY, width, height),
-        Paint()..color = const Color(0x35E0F7FC),
+        Paint()..color = const Color(0x20E0F7FC),
       );
 
-      // Draw drifting snowflakes
-      final snowPaint = Paint()..color = Colors.white.withValues(alpha: 0.85);
-      final r = math.Random(42); // deterministic seed per frame
-      for (int i = 0; i < 60; i++) {
-        // Position drifts down-right over time
-        final rx = (r.nextDouble() * width + time * 60.0) % width;
-        final ry = (r.nextDouble() * height + time * 80.0) % height;
-        canvas.drawCircle(Offset(offsetX + rx, offsetY + ry), 1.5 + r.nextDouble() * 2.0, snowPaint);
+      // Draw drifting snowflakes (halved for performance and clean aesthetic)
+      final snowPaint = Paint()..color = Colors.white.withValues(alpha: 0.7);
+      final r = math.Random(42);
+      for (int i = 0; i < 30; i++) {
+        final rx = (r.nextDouble() * width + time * 40.0) % width;
+        final ry = (r.nextDouble() * height + time * 50.0) % height;
+        canvas.drawCircle(Offset(offsetX + rx, offsetY + ry), 1.0 + r.nextDouble() * 1.5, snowPaint);
       }
     } else if (game.activeEvent == 'dustStorm') {
       // Map-wide orange-brown sandstorm tint
       canvas.drawRect(
         Rect.fromLTWH(offsetX, offsetY, width, height),
-        Paint()..color = const Color(0x45E5A65D),
+        Paint()..color = const Color(0x25E5A65D),
       );
 
-      // Draw drifting dust particles (horizontal streaks)
-      final dustPaint = Paint()..color = const Color(0xFFC69C6D).withValues(alpha: 0.6);
+      // Draw drifting dust particles (halved)
+      final dustPaint = Paint()..color = const Color(0xFFC69C6D).withValues(alpha: 0.4);
       final r = math.Random(1337);
-      for (int i = 0; i < 40; i++) {
-        final rx = (r.nextDouble() * width + time * 120.0) % width;
-        final ry = (r.nextDouble() * height + time * 30.0) % height;
-        final length = 15.0 + r.nextDouble() * 25.0;
+      for (int i = 0; i < 20; i++) {
+        final rx = (r.nextDouble() * width + time * 80.0) % width;
+        final ry = (r.nextDouble() * height + time * 20.0) % height;
+        final length = 10.0 + r.nextDouble() * 15.0;
         canvas.drawLine(
           Offset(offsetX + rx, offsetY + ry),
-          Offset(offsetX + rx + length, offsetY + ry + 2.0),
-          dustPaint..strokeWidth = 1.0 + r.nextDouble() * 1.5,
+          Offset(offsetX + rx + length, offsetY + ry + 1.0),
+          dustPaint..strokeWidth = 0.8 + r.nextDouble() * 1.0,
         );
       }
     }
@@ -1958,16 +1940,11 @@ class GridRenderer extends PositionComponent
       // Draw 3 tiny gazelles crossing (little brown circles with legs/ears)
       for (int i = 0; i < 3; i++) {
         final offsetPhase = (time * 0.4 + i * 0.3) % 1.0;
-        // Move from left edge to right edge of cell
         final ax = cx - cellSize * 0.4 + offsetPhase * cellSize * 0.8;
-        final ay = cy + math.sin(offsetPhase * math.pi * 4.0) * 2.0; // slight hop
+        final ay = cy + math.sin(offsetPhase * math.pi * 4.0) * 1.5;
         
-        // Gazelle body
-        canvas.drawCircle(Offset(ax, ay), 3.0, Paint()..color = const Color(0xFF8B5A2B));
-        // Head
-        canvas.drawCircle(Offset(ax + 3.0, ay - 2.0), 1.8, Paint()..color = const Color(0xFF8B5A2B));
-        // Horns
-        canvas.drawLine(Offset(ax + 3.0, ay - 2.0), Offset(ax + 4.0, ay - 5.0), Paint()..color = Colors.black..strokeWidth = 0.8);
+        canvas.drawCircle(Offset(ax, ay), 2.0, Paint()..color = const Color(0xFF8B5A2B));
+        canvas.drawCircle(Offset(ax + 2.0, ay - 1.2), 1.2, Paint()..color = const Color(0xFF8B5A2B));
       }
     }
 
@@ -1978,204 +1955,115 @@ class GridRenderer extends PositionComponent
       final cy = offsetY + pos.y * cellSize + cellSize / 2;
       final cell = gridManager.grid[pos.y][pos.x];
 
-      // Draw flashing red warning light
-      final flash = (time * 5.0).floor() % 2 == 0;
+      // Draw flashing red warning light (minimalist)
+      final flash = (time * 4.0).floor() % 2 == 0;
       canvas.drawCircle(
         Offset(cx, cy),
-        cellSize * 0.5,
+        cellSize * 0.45,
         Paint()
-          ..color = (flash ? Colors.red : Colors.black).withValues(alpha: 0.3)
+          ..color = (flash ? Colors.redAccent : Colors.transparent).withValues(alpha: 0.25)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0,
+          ..strokeWidth = 1.2,
       );
 
       // Draw bridge flaps open (two dark rects separated in the center)
       final bool isVertical = cell.infrastructureAxis == InfrastructureAxis.vertical;
-      final bridgePaint = Paint()..color = const Color(0xFF5E6573);
+      final bridgePaint = Paint()..color = const Color(0xFF424953);
 
       if (isVertical) {
-        // Top flap
         canvas.drawRect(
-          Rect.fromLTWH(cx - cellSize * 0.2, cy - cellSize * 0.45, cellSize * 0.4, cellSize * 0.25),
+          Rect.fromLTWH(cx - cellSize * 0.15, cy - cellSize * 0.4, cellSize * 0.3, cellSize * 0.2),
           bridgePaint,
         );
-        // Bottom flap
         canvas.drawRect(
-          Rect.fromLTWH(cx - cellSize * 0.2, cy + cellSize * 0.2, cellSize * 0.4, cellSize * 0.25),
+          Rect.fromLTWH(cx - cellSize * 0.15, cy + cellSize * 0.2, cellSize * 0.3, cellSize * 0.2),
           bridgePaint,
         );
       } else {
-        // Left flap
         canvas.drawRect(
-          Rect.fromLTWH(cx - cellSize * 0.45, cy - cellSize * 0.2, cellSize * 0.25, cellSize * 0.4),
+          Rect.fromLTWH(cx - cellSize * 0.4, cy - cellSize * 0.15, cellSize * 0.2, cellSize * 0.3),
           bridgePaint,
         );
-        // Right flap
         canvas.drawRect(
-          Rect.fromLTWH(cx + cellSize * 0.2, cy - cellSize * 0.2, cellSize * 0.25, cellSize * 0.4),
+          Rect.fromLTWH(cx + cellSize * 0.2, cy - cellSize * 0.15, cellSize * 0.2, cellSize * 0.3),
           bridgePaint,
         );
       }
 
-      // Draw red stop barrier arms blocking lanes
+      // Draw simple red barrier line
       final barrierPaint = Paint()
-        ..color = Colors.red
-        ..strokeWidth = 3.0
+        ..color = Colors.redAccent
+        ..strokeWidth = 2.0
         ..strokeCap = StrokeCap.round;
-      final barrierSupportPaint = Paint()
-        ..color = const Color(0xFF333333)
-        ..style = PaintingStyle.fill;
 
       if (isVertical) {
-        canvas.drawCircle(Offset(cx - cellSize * 0.3, cy - cellSize * 0.38), 2.5, barrierSupportPaint);
-        canvas.drawLine(Offset(cx - cellSize * 0.3, cy - cellSize * 0.38), Offset(cx + cellSize * 0.3, cy - cellSize * 0.38), barrierPaint);
-
-        canvas.drawCircle(Offset(cx + cellSize * 0.3, cy + cellSize * 0.38), 2.5, barrierSupportPaint);
-        canvas.drawLine(Offset(cx - cellSize * 0.3, cy + cellSize * 0.38), Offset(cx + cellSize * 0.3, cy + cellSize * 0.38), barrierPaint);
+        canvas.drawLine(Offset(cx - cellSize * 0.25, cy - cellSize * 0.3), Offset(cx + cellSize * 0.25, cy - cellSize * 0.3), barrierPaint);
+        canvas.drawLine(Offset(cx - cellSize * 0.25, cy + cellSize * 0.3), Offset(cx + cellSize * 0.25, cy + cellSize * 0.3), barrierPaint);
       } else {
-        canvas.drawCircle(Offset(cx - cellSize * 0.38, cy - cellSize * 0.3), 2.5, barrierSupportPaint);
-        canvas.drawLine(Offset(cx - cellSize * 0.38, cy - cellSize * 0.3), Offset(cx - cellSize * 0.38, cy + cellSize * 0.3), barrierPaint);
-
-        canvas.drawCircle(Offset(cx + cellSize * 0.38, cy + cellSize * 0.3), 2.5, barrierSupportPaint);
-        canvas.drawLine(Offset(cx + cellSize * 0.38, cy - cellSize * 0.3), Offset(cx + cellSize * 0.38, cy + cellSize * 0.3), barrierPaint);
+        canvas.drawLine(Offset(cx - cellSize * 0.3, cy - cellSize * 0.25), Offset(cx - cellSize * 0.3, cy + cellSize * 0.25), barrierPaint);
+        canvas.drawLine(Offset(cx + cellSize * 0.3, cy - cellSize * 0.25), Offset(cx + cellSize * 0.3, cy + cellSize * 0.25), barrierPaint);
       }
     }
 
     // 4. Flash Flood submerged indicators
     if (game.activeEvent == 'flashFlood' && game.floodedRoads.isNotEmpty) {
       final floodPaint = Paint()
-        ..color = const Color(0x952196F3)
+        ..color = const Color(0x602196F3)
         ..style = PaintingStyle.fill;
 
       for (final pos in game.floodedRoads) {
         final cx = offsetX + pos.x * cellSize + cellSize / 2;
         final cy = offsetY + pos.y * cellSize + cellSize / 2;
 
-        // Draw blue water wavy ripple over the flooded tile
         canvas.drawCircle(
           Offset(cx, cy),
-          cellSize * 0.42,
+          cellSize * 0.4,
           floodPaint,
         );
 
-        // Draw a tiny wave pattern
         final wavePaint = Paint()
-          ..color = Colors.white.withValues(alpha: 0.6)
+          ..color = const Color(0xB02196F3)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.0;
-        final double waveY = cy + math.sin(time * 5.0) * 1.5;
-        canvas.drawLine(Offset(cx - cellSize * 0.25, waveY), Offset(cx + cellSize * 0.25, waveY), wavePaint);
-
-        // Draw warning triangle over the flooded tile
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round;
+        
+        canvas.drawLine(Offset(cx - 5, cy - 2), Offset(cx - 1, cy), wavePaint);
+        canvas.drawLine(Offset(cx - 1, cy), Offset(cx + 3, cy - 2), wavePaint);
+        
+        canvas.drawLine(Offset(cx - 3, cy + 2), Offset(cx + 1, cy + 4), wavePaint);
+        canvas.drawLine(Offset(cx + 1, cy + 4), Offset(cx + 5, cy + 2), wavePaint);
       }
     }
   }
 
   void _drawActiveEventOverlays(Canvas canvas) {
     final eventManager = game.eventManager;
-    final now = game.elapsedTime;
 
     for (final event in eventManager.activeEvents) {
       if (event.type == CityEventType.roadBlock && event.affectedTile != null) {
         final pos = event.affectedTile!;
         final cx = offsetX + pos.x * cellSize + cellSize / 2;
         final cy = offsetY + pos.y * cellSize + cellSize / 2;
+        // Vector orange roadblock barricade
+        final barrierW = cellSize * 0.5;
+        final barrierH = cellSize * 0.22;
+        final bRect = Rect.fromCenter(center: Offset(cx, cy), width: barrierW, height: barrierH);
+        
+        // Base feet
+        final footPaint = Paint()..color = Colors.grey..style = PaintingStyle.fill;
+        canvas.drawRect(Rect.fromLTWH(cx - barrierW * 0.4, cy + barrierH * 0.3, 2, 4), footPaint);
+        canvas.drawRect(Rect.fromLTWH(cx + barrierW * 0.4 - 2, cy + barrierH * 0.3, 2, 4), footPaint);
 
-        // 1. Pulsing warning glow under the tile
-        final pulse = 0.5 + 0.5 * math.sin(now * 6.0).abs();
-        final glowPaint = Paint()
-          ..shader = ui.Gradient.radial(
-            Offset(cx, cy),
-            cellSize * 0.8,
-            [Colors.deepOrange.withValues(alpha: 0.3 * pulse), Colors.transparent],
-          );
-        canvas.drawCircle(Offset(cx, cy), cellSize * 0.8, glowPaint);
-
-        // 2. Diagonal hazard stripes background on road
-        final tX = offsetX + pos.x * cellSize;
-        final tY = offsetY + pos.y * cellSize;
-        final bgPaint = Paint()..color = Colors.deepOrange.withValues(alpha: 0.15);
-        canvas.drawRect(Rect.fromLTWH(tX, tY, cellSize, cellSize), bgPaint);
-
-        final linePaint = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0
-          ..color = Colors.deepOrange.withValues(alpha: 0.5);
-        canvas.drawLine(Offset(tX, tY + cellSize * 0.25), Offset(tX + cellSize * 0.75, tY + cellSize), linePaint);
-        canvas.drawLine(Offset(tX, tY + cellSize * 0.75), Offset(tX + cellSize * 0.25, tY), linePaint);
-        canvas.drawLine(Offset(tX + cellSize * 0.25, tY), Offset(tX + cellSize, tY + cellSize * 0.75), linePaint);
-
-        // 3. Draw a premium construction barrier (barricade)
-        final barrierWidth = cellSize * 0.75;
-        final barrierHeight = cellSize * 0.55;
-        final bLeft = cx - barrierWidth / 2;
-        final bTop = cy - barrierHeight / 2;
-
-        // A-frame legs
-        final legPaint = Paint()
-          ..color = const Color(0xFF263238)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.5;
-        // Left leg
-        canvas.drawLine(Offset(bLeft + 4, cy + barrierHeight / 2), Offset(bLeft + 8, bTop), legPaint);
-        canvas.drawLine(Offset(bLeft + 12, cy + barrierHeight / 2), Offset(bLeft + 8, bTop), legPaint);
-        // Right leg
-        canvas.drawLine(Offset(bLeft + barrierWidth - 12, cy + barrierHeight / 2), Offset(bLeft + barrierWidth - 8, bTop), legPaint);
-        canvas.drawLine(Offset(bLeft + barrierWidth - 4, cy + barrierHeight / 2), Offset(bLeft + barrierWidth - 8, bTop), legPaint);
-
-        // Two horizontal boards
-        final boardPaint = Paint()..color = Colors.white;
-        final stripePaint = Paint()..color = Colors.deepOrange;
-
-        for (int b = 0; b < 2; b++) {
-          final boardTop = bTop + b * (barrierHeight * 0.38) + 2;
-          final boardRect = Rect.fromLTWH(bLeft, boardTop, barrierWidth, barrierHeight * 0.25);
-          // Draw white board
-          canvas.drawRect(boardRect, boardPaint);
-          canvas.drawRect(boardRect, Paint()..color = const Color(0xFF14161B)..style = PaintingStyle.stroke..strokeWidth = 1.0);
-
-          // Draw diagonal orange stripes on the board
-          canvas.save();
-          canvas.clipRect(boardRect);
-          for (double sx = -cellSize; sx < cellSize * 2; sx += 8) {
-            final path = Path()
-              ..moveTo(bLeft + sx, boardTop)
-              ..lineTo(bLeft + sx + 4, boardTop)
-              ..lineTo(bLeft + sx - 2, boardTop + boardRect.height)
-              ..lineTo(bLeft + sx - 6, boardTop + boardRect.height)
-              ..close();
-            canvas.drawPath(path, stripePaint);
-          }
-          canvas.restore();
+        // Barricade board
+        final boardPaint = Paint()..color = Colors.deepOrange..style = PaintingStyle.fill;
+        canvas.drawRect(bRect, boardPaint);
+        
+        // White stripes
+        final stripePaint = Paint()..color = Colors.white..style = PaintingStyle.fill;
+        for (int i = 0; i < 3; i++) {
+          final sx = bRect.left + (i * 2 + 1) * (barrierW / 6.0);
+          canvas.drawRect(Rect.fromLTWH(sx - 1.5, bRect.top, 3.0, barrierH), stripePaint);
         }
-
-        // 4. Floating bouncing caution sign
-        final bounce = math.sin(now * 5.0) * 3.0;
-        final iconY = cy - cellSize * 0.8 + bounce;
-
-        final signPath = Path()
-          ..moveTo(cx, iconY - 10)
-          ..lineTo(cx - 10, iconY + 8)
-          ..lineTo(cx + 10, iconY + 8)
-          ..close();
-        canvas.drawPath(signPath, Paint()..color = const Color(0xFFFFD54F));
-        canvas.drawPath(signPath, Paint()
-          ..color = const Color(0xFF14161B)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5);
-
-        final textPainter = TextPainter(
-          text: TextSpan(
-            text: '!',
-            style: GoogleFonts.outfit(
-              color: const Color(0xFF14161B),
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        textPainter.paint(canvas, Offset(cx - textPainter.width / 2, iconY - textPainter.height / 2 + 1));
       }
 
       else if (event.type == CityEventType.bridgeMaintenance && event.affectedTile != null) {
@@ -2183,182 +2071,48 @@ class GridRenderer extends PositionComponent
         final cx = offsetX + pos.x * cellSize + cellSize / 2;
         final cy = offsetY + pos.y * cellSize + cellSize / 2;
 
-        final pulse = 0.5 + 0.5 * math.sin(now * 6.0).abs();
-        final glowPaint = Paint()
-          ..shader = ui.Gradient.radial(
-            Offset(cx, cy),
-            cellSize * 0.8,
-            [Colors.amber.withValues(alpha: 0.3 * pulse), Colors.transparent],
-          );
-        canvas.drawCircle(Offset(cx, cy), cellSize * 0.8, glowPaint);
-
-        final tX = offsetX + pos.x * cellSize;
-        final tY = offsetY + pos.y * cellSize;
-        final bgPaint = Paint()..color = Colors.amber.withValues(alpha: 0.15);
-        canvas.drawRect(Rect.fromLTWH(tX, tY, cellSize, cellSize), bgPaint);
-
-        final linePaint = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0
-          ..color = Colors.amber.withValues(alpha: 0.5);
-        canvas.drawLine(Offset(tX, tY + cellSize * 0.25), Offset(tX + cellSize * 0.75, tY + cellSize), linePaint);
-        canvas.drawLine(Offset(tX, tY + cellSize * 0.75), Offset(tX + cellSize * 0.25, tY), linePaint);
-        canvas.drawLine(Offset(tX + cellSize * 0.25, tY), Offset(tX + cellSize, tY + cellSize * 0.75), linePaint);
-
-        // Draw a premium construction barrier (barricade) in yellow
-        final barrierWidth = cellSize * 0.75;
-        final barrierHeight = cellSize * 0.55;
-        final bLeft = cx - barrierWidth / 2;
-        final bTop = cy - barrierHeight / 2;
-
-        // A-frame legs
-        final legPaint = Paint()
-          ..color = const Color(0xFF263238)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.5;
-        canvas.drawLine(Offset(bLeft + 4, cy + barrierHeight / 2), Offset(bLeft + 8, bTop), legPaint);
-        canvas.drawLine(Offset(bLeft + 12, cy + barrierHeight / 2), Offset(bLeft + 8, bTop), legPaint);
-        canvas.drawLine(Offset(bLeft + barrierWidth - 12, cy + barrierHeight / 2), Offset(bLeft + barrierWidth - 8, bTop), legPaint);
-        canvas.drawLine(Offset(bLeft + barrierWidth - 4, cy + barrierHeight / 2), Offset(bLeft + barrierWidth - 8, bTop), legPaint);
-
-        // Two horizontal boards
-        final boardPaint = Paint()..color = Colors.white;
-        final stripePaint = Paint()..color = Colors.amber;
-
-        for (int b = 0; b < 2; b++) {
-          final boardTop = bTop + b * (barrierHeight * 0.38) + 2;
-          final boardRect = Rect.fromLTWH(bLeft, boardTop, barrierWidth, barrierHeight * 0.25);
-          canvas.drawRect(boardRect, boardPaint);
-          canvas.drawRect(boardRect, Paint()..color = const Color(0xFF14161B)..style = PaintingStyle.stroke..strokeWidth = 1.0);
-
-          canvas.save();
-          canvas.clipRect(boardRect);
-          for (double sx = -cellSize; sx < cellSize * 2; sx += 8) {
-            final path = Path()
-              ..moveTo(bLeft + sx, boardTop)
-              ..lineTo(bLeft + sx + 4, boardTop)
-              ..lineTo(bLeft + sx - 2, boardTop + boardRect.height)
-              ..lineTo(bLeft + sx - 6, boardTop + boardRect.height)
-              ..close();
-            canvas.drawPath(path, stripePaint);
-          }
-          canvas.restore();
-        }
-
-        // Bouncing tool sign
-        final bounce = math.sin(now * 5.0) * 3.0;
-        final iconY = cy - cellSize * 0.8 + bounce;
-
-        final signPath = Path()
-          ..moveTo(cx, iconY - 10)
-          ..lineTo(cx - 10, iconY + 8)
-          ..lineTo(cx + 10, iconY + 8)
-          ..close();
-        canvas.drawPath(signPath, Paint()..color = const Color(0xFFFFB300));
-        canvas.drawPath(signPath, Paint()
-          ..color = const Color(0xFF14161B)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5);
-
-        final textPainter = TextPainter(
-          text: TextSpan(
-            text: 'W',
-            style: GoogleFonts.outfit(
-              color: const Color(0xFF14161B),
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        textPainter.paint(canvas, Offset(cx - textPainter.width / 2, iconY - textPainter.height / 2 + 1));
+        // Minimalist vector wrench
+        final wrenchPaint = Paint()
+          ..color = Colors.blueGrey
+          ..style = PaintingStyle.fill;
+        
+        // Wrench handle
+        canvas.drawRect(
+          Rect.fromCenter(center: Offset(cx, cy), width: 3, height: cellSize * 0.4),
+          wrenchPaint,
+        );
+        // Wrench jaw (head)
+        canvas.drawCircle(Offset(cx, cy - cellSize * 0.15), 4.5, wrenchPaint);
+        canvas.drawCircle(Offset(cx, cy - cellSize * 0.15), 1.8, Paint()..color = GameConstants.backgroundColor..style = PaintingStyle.fill);
+        // Clip notch
+        canvas.drawRect(Rect.fromLTWH(cx - 1, cy - cellSize * 0.15 - 5, 2, 4), Paint()..color = GameConstants.backgroundColor);
       }
 
       else if (event.type == CityEventType.festival && event.affectedColor != null) {
         final colorIndex = event.affectedColor!;
         final destinations = gridManager.destinations.where((d) => gridManager.grid[d.y][d.x].colorIndex == colorIndex);
         final houses = gridManager.houses.where((h) => gridManager.grid[h.y][h.x].colorIndex == colorIndex);
-        
         final allPositions = [...destinations, ...houses];
 
         for (final pos in allPositions) {
           final cx = offsetX + pos.x * cellSize + cellSize / 2;
           final cy = offsetY + pos.y * cellSize + cellSize / 2;
 
-          // 1. Pulsing pink festival party aura
-          final pulse = 0.6 + 0.4 * math.sin(now * 4.0).abs();
-          final auraPaint = Paint()
-            ..shader = ui.Gradient.radial(
-              Offset(cx, cy),
-              cellSize * 1.5,
-              [Colors.pinkAccent.withValues(alpha: 0.35 * pulse), Colors.transparent],
-            );
-          canvas.drawCircle(Offset(cx, cy), cellSize * 1.5, auraPaint);
+          // Simple, very soft pink ring
+          final ringPaint = Paint()
+            ..color = Colors.pinkAccent.withValues(alpha: 0.4)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2;
+          canvas.drawCircle(Offset(cx, cy), cellSize * 0.65, ringPaint);
 
-          // 2. Confetti particles
-          for (int i = 0; i < 4; i++) {
-            final angle = (now * 2.0) + (i * math.pi / 2);
-            final radius = cellSize * 0.7 * (0.8 + 0.2 * math.sin(now * 3.0 + i));
-            final particleX = cx + math.cos(angle) * radius;
-            final particleY = cy - cellSize * 0.3 + math.sin(angle) * radius + math.sin(now * 4.0 + i) * 3.0;
-
-            final colors = [Colors.yellow, Colors.cyan, Colors.pink, Colors.greenAccent];
-            final particlePaint = Paint()..color = colors[i % colors.length];
-            canvas.drawCircle(Offset(particleX, particleY), 3.0, particlePaint);
-          }
-
-          // 3. Floating party balloons
-          final bounce = math.sin(now * 6.0) * 4.0;
-          final iconY = cy - cellSize * 1.2 + bounce;
-
-          for (int b = 0; b < 2; b++) {
-            final balloonOffset = b == 0 ? -10.0 : 10.0;
-            final balloonHeight = b == 0 ? 10.0 : 4.0;
-            final balloonColor = b == 0 ? Colors.redAccent : Colors.lightBlueAccent;
-
-            final bx = cx + balloonOffset;
-            final by = iconY - 10.0 - balloonHeight + math.sin(now * 3.0 + b) * 2.0;
-
-            // Draw balloon string
-            final stringPaint = Paint()
-              ..color = Colors.white54
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.0;
-            final stringPath = Path()
-              ..moveTo(bx, by + 5)
-              ..quadraticBezierTo(bx + (b == 0 ? -2 : 2), by + 12, bx, by + 18);
-            canvas.drawPath(stringPath, stringPaint);
-
-            // Draw balloon body (oval)
-            canvas.drawOval(
-              Rect.fromCenter(center: Offset(bx, by), width: 8, height: 10),
-              Paint()..color = balloonColor,
-            );
-            canvas.drawOval(
-              Rect.fromCenter(center: Offset(bx, by), width: 8, height: 10),
-              Paint()..color = const Color(0xFF14161B)..style = PaintingStyle.stroke..strokeWidth = 0.8,
-            );
-
-            // Draw small knot
-            final knotPath = Path()
-              ..moveTo(bx, by + 5)
-              ..lineTo(bx - 1.5, by + 7)
-              ..lineTo(bx + 1.5, by + 7)
-              ..close();
-            canvas.drawPath(knotPath, Paint()..color = balloonColor);
-          }
-
-          // 4. Bouncing party hat/emoji above building
-          final textPainter = TextPainter(
-            text: TextSpan(
-              text: '🎉',
-              style: GoogleFonts.outfit(
-                fontSize: 16,
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          textPainter.paint(canvas, Offset(cx - textPainter.width / 2, iconY - textPainter.height / 2));
+          // Vector festival indicator: 3 tiny colorful dots clustered
+          final dot1 = Offset(cx, cy - cellSize * 0.65);
+          final dot2 = Offset(cx - 3.5, cy - cellSize * 0.55);
+          final dot3 = Offset(cx + 3.5, cy - cellSize * 0.55);
+          
+          canvas.drawCircle(dot1, 2.0, Paint()..color = const Color(0xFFF48FB1)); // pink
+          canvas.drawCircle(dot2, 1.8, Paint()..color = const Color(0xFFCE93D8)); // purple
+          canvas.drawCircle(dot3, 2.0, Paint()..color = const Color(0xFFFFE082)); // gold
         }
       }
 
@@ -2370,32 +2124,82 @@ class GridRenderer extends PositionComponent
           final cx = offsetX + dest.x * cellSize + cellSize / 2;
           final cy = offsetY + dest.y * cellSize + cellSize / 2;
 
-          // 1. Pulsing red traffic surge aura
-          final pulse = 0.6 + 0.4 * math.sin(now * 5.0).abs();
-          final auraPaint = Paint()
-            ..shader = ui.Gradient.radial(
-              Offset(cx, cy),
-              cellSize * 1.5,
-              [Colors.redAccent.withValues(alpha: 0.35 * pulse), Colors.transparent],
-            );
-          canvas.drawCircle(Offset(cx, cy), cellSize * 1.5, auraPaint);
+          // Soft red ring
+          final ringPaint = Paint()
+            ..color = Colors.redAccent.withValues(alpha: 0.4)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2;
+          canvas.drawCircle(Offset(cx, cy), cellSize * 0.65, ringPaint);
 
-          // 2. Bouncing lightning emoji above building
-          final bounce = math.sin(now * 7.0) * 4.0;
-          final iconY = cy - cellSize * 1.2 + bounce;
-
-          final textPainter = TextPainter(
-            text: TextSpan(
-              text: '⚡',
-              style: GoogleFonts.outfit(
-                fontSize: 18,
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          textPainter.paint(canvas, Offset(cx - textPainter.width / 2, iconY - textPainter.height / 2));
+          // Minimalist lightning bolt path
+          final path = Path()
+            ..moveTo(cx + 1, cy - cellSize * 0.75)
+            ..lineTo(cx - 2, cy - cellSize * 0.60)
+            ..lineTo(cx, cy - cellSize * 0.60)
+            ..lineTo(cx - 1, cy - cellSize * 0.45)
+            ..lineTo(cx + 2, cy - cellSize * 0.63)
+            ..lineTo(cx, cy - cellSize * 0.63)
+            ..close();
+          canvas.drawPath(path, Paint()..color = Colors.amber..style = PaintingStyle.fill);
         }
       }
+    }
+  }
+
+  void _drawEmergencyOverlays(Canvas canvas) {
+    if (game.phase != GamePhase.playing) return;
+    final eventManager = game.emergencyManager;
+    final now = game.elapsedTime;
+
+    for (final event in eventManager.activeEvents) {
+      final pos = event.location;
+      final cx = offsetX + pos.x * cellSize + cellSize / 2;
+      final cy = offsetY + pos.y * cellSize + cellSize / 2;
+
+      // Gentle, slow pulsing alpha for a thin red circle around the destination
+      final pulseAlpha = 0.25 + 0.15 * math.sin(now * 3.0);
+      final ringPaint = Paint()
+        ..color = Colors.redAccent.withValues(alpha: pulseAlpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+      canvas.drawCircle(Offset(cx, cy), cellSize * 0.7, ringPaint);
+
+      // A very subtle, flat red warning dot or tiny 🚨 sign above the building, no bouncing
+      final iconY = cy - cellSize * 0.75;
+      final pct = (event.timeout / 60.0).clamp(0.0, 1.0);
+
+      // Red Cross vector shape (Plus Sign)
+      final crossPaint = Paint()
+        ..color = Colors.redAccent
+        ..style = PaintingStyle.fill;
+      final crossW = cellSize * 0.3;
+      final crossThick = cellSize * 0.08;
+      
+      // Horizontal bar
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(cx, iconY), width: crossW, height: crossThick),
+        crossPaint,
+      );
+      // Vertical bar
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(cx, iconY), width: crossThick, height: crossW),
+        crossPaint,
+      );
+
+      // Neat, tiny linear progress line right above the icon
+      final barWidth = cellSize * 0.5;
+      final barHeight = 2.0;
+      final bx = cx - barWidth / 2;
+      final by = iconY - 8.0;
+
+      canvas.drawRect(
+        Rect.fromLTWH(bx, by, barWidth, barHeight),
+        Paint()..color = Colors.white12,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(bx, by, barWidth * pct, barHeight),
+        Paint()..color = Colors.redAccent,
+      );
     }
   }
 }

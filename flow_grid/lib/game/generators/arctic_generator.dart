@@ -21,7 +21,13 @@ class ArcticMapGenerator extends MapGenerator {
 
   @override
   void generateInitialTerrain(GridManager grid, {int? minX, int? maxX, int? minY, int? maxY}) {
-    _generate(grid, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
+    int attempts = 0;
+    bool valid = false;
+    while (!valid && attempts < 3) {
+      _generate(grid, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
+      valid = _validate(grid);
+      attempts++;
+    }
   }
 
   void _generate(GridManager grid, {int? minX, int? maxX, int? minY, int? maxY}) {
@@ -134,6 +140,32 @@ class ArcticMapGenerator extends MapGenerator {
         }
       }
     }
+  }
+
+  bool _validate(GridManager grid) {
+    int mountainCount = 0;
+    int waterCount = 0;
+    for (var row in grid.grid) {
+      for (var cell in row) {
+        if (cell.isMountain) mountainCount++;
+        if (cell.isWater) waterCount++;
+      }
+    }
+    final total = grid.cols * grid.rows;
+    final mCov = mountainCount / total;
+    final wCov = waterCount / total;
+    // Mountain coverage 3%–15%, water coverage 4%–20%
+    if (mCov < 0.03 || mCov > 0.15) return false;
+    if (wCov < 0.04 || wCov > 0.20) return false;
+    // No column completely blocked by mountains
+    for (int x = 0; x < grid.cols; x++) {
+      bool blocked = true;
+      for (int y = 0; y < grid.rows; y++) {
+        if (!grid.grid[y][x].isMountain) { blocked = false; break; }
+      }
+      if (blocked) return false;
+    }
+    return true;
   }
 
   @override

@@ -36,7 +36,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   static const double maxWaitTime = 1.5;
   String? routeId;
   final List<Vector2> _trailPositions = [];
-  static const int _maxTrailPoints = 6;
+  static const int _maxTrailPoints = 2;
   double _trailDecayTimer = 0.0;
 
   // Follow-the-leader
@@ -457,6 +457,14 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   }
 
   void _onArrivedAtDestination() {
+    if (vehicleType == VehicleType.emergency) {
+      if (routeId != null) {
+        game.emergencyManager.resolveEvent(routeId!);
+      }
+      arrived = true;
+      return;
+    }
+
     final gm = game.gridManager;
     if (gm == null) {
       arrived = true;
@@ -833,8 +841,8 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
         final o2 = Offset(rx2 + halfSizeX, ry2 + halfSizeY);
 
         final ratio = i / _trailPositions.length;
-        final opacity = (1.0 - ratio) * 0.45;
-        final width = size.x * 0.45 * (1.0 - ratio * 0.7);
+        final opacity = (1.0 - ratio) * 0.32;
+        final width = size.x * 0.32 * (1.0 - ratio * 0.7);
 
         trailPaint.color = baseColor.withValues(alpha: opacity);
         trailPaint.strokeWidth = width;

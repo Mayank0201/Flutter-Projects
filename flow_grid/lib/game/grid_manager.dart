@@ -35,6 +35,11 @@ class GridManager {
   /// Callback when roads/tunnels/bridges are placed or removed, triggering path cache invalidation.
   VoidCallback? onTopologyChanged;
 
+  /// Optional guard set by SpawnController — returns true if the tile at (x,y)
+  /// is reserved for a staged building that has not yet committed.  When set,
+  /// player road-building on these tiles is silently blocked.
+  bool Function(int x, int y)? isStagedBuilding;
+
   String _key(GridPosition pos) => "${pos.x},${pos.y}";
 
   late List<List<GridCell>> grid;
@@ -1008,6 +1013,11 @@ class GridManager {
 
   bool placeRoad(int x, int y, {GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
     if (!isValid(x, y)) return false;
+
+    // [GUARD] Block player roads on tiles reserved for a staged (not-yet-committed) building.
+    if (owner == InfrastructureOwner.player && (isStagedBuilding?.call(x, y) ?? false)) {
+      return false;
+    }
     
     // [HARD RULE] No grid modification during preview (Issue 4)
     assert(interactionState != InteractionState.preview, 'CRITICAL: GridManager.placeRoad called during PREVIEW phase at ($x,$y)');

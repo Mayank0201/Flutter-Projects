@@ -21,7 +21,13 @@ class SavannaMapGenerator extends MapGenerator {
 
   @override
   void generateInitialTerrain(GridManager grid, {int? minX, int? maxX, int? minY, int? maxY}) {
-    _generate(grid, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
+    int attempts = 0;
+    bool valid = false;
+    while (!valid && attempts < 3) {
+      _generate(grid, minX: minX, maxX: maxX, minY: minY, maxY: maxY);
+      valid = _validate(grid);
+      attempts++;
+    }
   }
 
   void _generate(GridManager grid, {int? minX, int? maxX, int? minY, int? maxY}) {
@@ -76,6 +82,27 @@ class SavannaMapGenerator extends MapGenerator {
         }
       }
     }
+  }
+
+  bool _validate(GridManager grid) {
+    int mountainCount = 0;
+    for (var row in grid.grid) {
+      for (var cell in row) {
+        if (cell.isMountain) mountainCount++;
+      }
+    }
+    final coverage = mountainCount / (grid.cols * grid.rows);
+    // Ensure coverage is between 4% and 22%
+    if (coverage < 0.04 || coverage > 0.22) return false;
+    // No column completely blocked
+    for (int x = 0; x < grid.cols; x++) {
+      bool blocked = true;
+      for (int y = 0; y < grid.rows; y++) {
+        if (!grid.grid[y][x].isMountain) { blocked = false; break; }
+      }
+      if (blocked) return false;
+    }
+    return true;
   }
 
   @override
