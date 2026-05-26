@@ -511,7 +511,7 @@ class GridRenderer extends PositionComponent
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
 
-        if ((!cell.isRoad && !cell.isExpressLaneNode && !cell.isTunnel && !cell.isBridge && !cell.isHouse && !cell.isDestination) || cell.isPendingDeletion) {
+        if ((!cell.isRoad && !cell.isExpressLaneNode && !cell.isTunnel && !cell.isBridge && !cell.isHouse && !cell.isDestination && !cell.isSmartJunction) || cell.isPendingDeletion) {
           continue;
         }
 
@@ -540,7 +540,8 @@ class GridRenderer extends PositionComponent
                 (gridManager.grid[adjY][adjX].isRoad ||
                  gridManager.grid[adjY][adjX].isExpressLaneNode ||
                  gridManager.grid[adjY][adjX].isTunnel ||
-                 gridManager.grid[adjY][adjX].isBridge);
+                 gridManager.grid[adjY][adjX].isBridge ||
+                 gridManager.grid[adjY][adjX].isSmartJunction);
 
             if (hasAdjacentRoad) {
               double sx = midX;

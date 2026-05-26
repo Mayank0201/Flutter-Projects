@@ -1187,11 +1187,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // so the player's gesture takes control immediately.
     clearCameraFocus();
 
-    if (previewMode) {
-      _initialZoom = camera.viewfinder.zoom;
-      _scaleStartPixel = info.eventPosition.global;
-      _initialCameraPos = camera.viewfinder.position.clone();
-    } else {
+    // Always capture zoom start state in case user uses multi-touch
+    _initialZoom = camera.viewfinder.zoom;
+    _scaleStartPixel = info.eventPosition.global;
+    _initialCameraPos = camera.viewfinder.position.clone();
+
+    if (!previewMode) {
       _panStartPixel = info.eventPosition.global;
       _lastPlacedPos = null;
     }
@@ -1199,7 +1200,23 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
   @override
   void onScaleUpdate(ScaleUpdateInfo info) {
-    if (previewMode) {
+    final pointerCount = info.raw.pointerCount;
+
+    if (previewMode || pointerCount > 1) {
+      // Clear drag path if multi-touch starts so we don't draw weird trailing segments
+      if (pointerCount > 1) {
+        _panStartPixel = null;
+        if (_isDragging) {
+          _isDragging = false;
+          _dragPath.clear();
+          previewPath.clear();
+          expressLanePendingStart = null;
+          expressLaneDraggingEnd = null;
+          gridManager!.interactionState = InteractionState.idle;
+          gridRenderer?.markDirty();
+        }
+      }
+
       if (_scaleStartPixel == null || _initialCameraPos == null) return;
       
       final screenFocal = info.eventPosition.global;

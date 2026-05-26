@@ -17,6 +17,8 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
   bool _gambleRolling = false;
   bool _gambleRevealed = false;
   String? _gambleResult;
+  bool _gambleLockedIn = false;
+  bool _showGambleWarning = false;
 
   late AnimationController _spinCtrl;
   late AnimationController _revealCtrl;
@@ -44,8 +46,18 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
   }
 
   void _onGambleTap() {
-    if (_gambleRolling || _gambleRevealed) return;
-    setState(() => _gambleRolling = true);
+    if (_gambleRolling || _gambleRevealed || _gambleLockedIn) return;
+    setState(() {
+      _showGambleWarning = true;
+    });
+  }
+
+  void _confirmGamble() {
+    setState(() {
+      _showGambleWarning = false;
+      _gambleLockedIn = true;
+      _gambleRolling = true;
+    });
     Future.delayed(const Duration(milliseconds: 1400), () {
       if (!mounted) return;
       final result = widget.game.rollGamble();
@@ -56,6 +68,12 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
       });
       _spinCtrl.stop();
       _revealCtrl.forward();
+    });
+  }
+
+  void _cancelGamble() {
+    setState(() {
+      _showGambleWarning = false;
     });
   }
 
@@ -210,49 +228,54 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
         color = const Color(0xFF42A5F5);
     }
 
+    final isLockedOut = _gambleLockedIn || _showGambleWarning;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: GestureDetector(
-        onTap: () => widget.game.applyUpgrade(opt),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
+      child: Opacity(
+        opacity: isLockedOut ? 0.3 : 1.0,
+        child: GestureDetector(
+          onTap: isLockedOut ? null : () => widget.game.applyUpgrade(opt),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: color, size: 22),
                 ),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: GoogleFonts.outfit(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            decoration: TextDecoration.none)),
-                    Text(sub,
-                        style: GoogleFonts.outfit(
-                            color: Colors.white38,
-                            fontSize: 10,
-                            decoration: TextDecoration.none)),
-                  ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: GoogleFonts.outfit(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              decoration: TextDecoration.none)),
+                      Text(sub,
+                          style: GoogleFonts.outfit(
+                              color: Colors.white38,
+                              fontSize: 10,
+                              decoration: TextDecoration.none)),
+                    ],
+                  ),
                 ),
-              ),
-              Icon(Icons.chevron_right_rounded,
-                  color: color.withValues(alpha: 0.45), size: 18),
-            ],
+                Icon(Icons.chevron_right_rounded,
+                    color: color.withValues(alpha: 0.45), size: 18),
+              ],
+            ),
           ),
         ),
       ),
@@ -261,6 +284,88 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
 
   // ── Gamble card (pre-reveal) ──────────────────────────────────────────────
   Widget _buildGambleCard() {
+    if (_showGambleWarning) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2A1500),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.deepOrangeAccent.withValues(alpha: 0.8),
+              width: 2.0,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.deepOrangeAccent, size: 24),
+                  const SizedBox(width: 10),
+                  Text(
+                    'GO ALL IN?',
+                    style: GoogleFonts.outfit(
+                      color: Colors.deepOrangeAccent,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'If you choose to gamble, you cannot select the other options. Do you accept?',
+                style: GoogleFonts.outfit(
+                  color: Colors.white.withValues(alpha: 0.87),
+                  fontSize: 12,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _cancelGamble,
+                    child: Text(
+                      'CANCEL',
+                      style: GoogleFonts.outfit(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepOrangeAccent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    onPressed: _confirmGamble,
+                    child: Text(
+                      'ACCEPT',
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (_gambleRevealed && _gambleResult != null) return _buildRevealCard();
 
     return Padding(

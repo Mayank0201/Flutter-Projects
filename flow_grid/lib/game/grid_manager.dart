@@ -162,6 +162,7 @@ class GridManager {
       grid[y][x] = GridCell(); // Remove
       smartJunctions++; // Refund
       removeEdgesFor(x, y);
+      onTopologyChanged?.call();
     } else if (cell.isEmpty || cell.isRoad) {
       if (smartJunctions > 0) {
         grid[y][x] = GridCell(type: CellType.smartJunction, owner: InfrastructureOwner.player);
@@ -170,12 +171,18 @@ class GridManager {
         for (var d in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
           final nx = x + d[0];
           final ny = y + d[1];
-          if (isValid(nx, ny) && grid[ny][nx].isPassable) {
-            addEdge(x, y, nx, ny);
-            updateNodeConnections(nx, ny);
+          if (isValid(nx, ny)) {
+            final neighbor = grid[ny][nx];
+            if (neighbor.isPassable) {
+              addEdge(x, y, nx, ny);
+              updateNodeConnections(nx, ny);
+            } else if (neighbor.isHouse || neighbor.isDestination) {
+              connectBuilding(nx, ny, x, y);
+            }
           }
         }
         updateNodeConnections(x, y);
+        onTopologyChanged?.call();
       }
     }
   }
@@ -282,7 +289,7 @@ class GridManager {
       //    so a single-cell tunnel is a dead-end, and chains have a mouth
       //    only at each chain end (middle cells are corridor-internal).
       bool isTargetInfra = other.isTunnel || other.isBridge;
-      if (!isTargetInfra && (other.isRoad || other.isHouse || other.isDestination)) {
+      if (!isTargetInfra && (other.isRoad || other.isSmartJunction || other.isHouse || other.isDestination)) {
         int externalConns = _countExternalConnections(ex, ey);
         if (externalConns >= 1 && !hasEdge(ex, ey, ox, oy)) {
           throw 'REJECT';
@@ -1870,14 +1877,17 @@ class GridManager {
       final ny = y + off[1];
       if (isValid(nx, ny)) {
         final neighbor = grid[ny][nx];
-        if (neighbor.isPassable || neighbor.isHouse || neighbor.isDestination) {
+        if (neighbor.isPassable) {
           addEdge(x, y, nx, ny);
           updateNodeConnections(nx, ny);
+        } else if (neighbor.isHouse || neighbor.isDestination) {
+          connectBuilding(nx, ny, x, y);
         }
       }
     }
 
     updateNodeConnections(x, y);
+    onTopologyChanged?.call();
     return true;
   }
 
@@ -2192,7 +2202,7 @@ class GridManager {
         final neighborCell = grid[n[1]][n[0]];
         // An "external" connection is one to a road or building, NOT to another tunnel/bridge tile
         if (hasEdge(x, y, n[0], n[1])) {
-          if (neighborCell.isRoad && !neighborCell.isTunnel && !neighborCell.isBridge) {
+          if ((neighborCell.isRoad || neighborCell.isSmartJunction) && !neighborCell.isTunnel && !neighborCell.isBridge) {
             count++;
           } else if (neighborCell.isHouse || neighborCell.isDestination) {
             count++;
