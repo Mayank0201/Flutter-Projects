@@ -274,6 +274,7 @@ class SpawnController {
     }
 
     _processStagedInitialDistrict();
+    _processStagedExpansionDistrict();
     _maybeEnqueueDemandDrivenHouse();
     _processQueue();
   }
@@ -293,6 +294,11 @@ class SpawnController {
     _stagedInitialColor = null;
     _stagedDestSpawnAt = null;
     _stagedHouse2SpawnAt = null;
+    _stagedExpansionPlan = null;
+    _stagedExpansionColor = null;
+    _stagedExpansionZone = null;
+    _stagedExpansionDestAt = null;
+    _stagedExpansionHouse2At = null;
   }
 
   /// Restore system state from grid cells during a resume (Issue 3 & 7)
@@ -302,11 +308,16 @@ class SpawnController {
     _lastSpawnTime = elapsedTime; // Prevent immediate spawns on load
     _pressureTimer = 0;
     
-    // Clear initial staged actions
+    // Clear all staged actions
     _stagedInitialPlan = null;
     _stagedInitialColor = null;
     _stagedDestSpawnAt = null;
     _stagedHouse2SpawnAt = null;
+    _stagedExpansionPlan = null;
+    _stagedExpansionColor = null;
+    _stagedExpansionZone = null;
+    _stagedExpansionDestAt = null;
+    _stagedExpansionHouse2At = null;
     _queue.clear();
 
     clusterCenters.clear();
@@ -365,6 +376,18 @@ class SpawnController {
   int? _stagedInitialColor;
   double? _stagedDestSpawnAt;
   double? _stagedHouse2SpawnAt;
+
+  // ============================================================
+  // STAGED EXPANSION DISTRICT
+  // Exactly the same beat pattern as the initial district:
+  //   house1 immediately → dest +2 s → house2 +5 s
+  // Prevents all three expansion buildings from popping in at once.
+  // ============================================================
+  DistrictPlan? _stagedExpansionPlan;
+  int? _stagedExpansionColor;
+  SpawnZone? _stagedExpansionZone;
+  double? _stagedExpansionDestAt;
+  double? _stagedExpansionHouse2At;
 
   static const double _stagedDestDelay = 2.0;
   static const double _stagedHouse2Delay = 5.0;
@@ -540,9 +563,25 @@ class SpawnController {
   /// building appears.  Called by GridManager.placeRoad.
   bool isStagedBuildingPosition(int x, int y) {
     final plan = _stagedInitialPlan;
-    if (plan == null) return false;
-    for (final spot in plan.allSpots) {
-      if (spot.x == x && spot.y == y) return true;
+    if (plan != null) {
+      for (final spot in plan.allSpots) {
+        if (spot.x == x && spot.y == y) return true;
+      }
+    }
+    final expPlan = _stagedExpansionPlan;
+    if (expPlan != null) {
+      // Only dest and house2 are still pending — house1 is already placed.
+      // Check dest
+      if (expPlan.destPos.x == x && expPlan.destPos.y == y &&
+          _stagedExpansionDestAt != null) {
+        return true;
+      }
+      // Check house2
+      if (expPlan.houses.length >= 2 &&
+          expPlan.houses[1].pos.x == x && expPlan.houses[1].pos.y == y &&
+          _stagedExpansionHouse2At != null) {
+        return true;
+      }
     }
     return false;
   }
@@ -781,8 +820,7 @@ class SpawnController {
   }
 
   void _doCommitExpansion(int colorIndex, DistrictPlan plan, SpawnZone zone) {
-    // 1. ATOMIC VALIDATION (Ghost Reservation check)
-    // Ensure all target cells are still empty/valid before committing
+    // 1. ATOMIC VALIDATION
     for (final spot in plan.allSpots) {
       if (!gridManager.isValid(spot.x, spot.y) || !gridManager.grid[spot.y][spot.x].isEmpty) {
         _log('EXPANSION ATOMIC FAIL: Spot $spot became occupied. Aborting all.');
@@ -790,35 +828,30 @@ class SpawnController {
       }
     }
 
-    // 2. Destination
-    _log('[VALIDATE] type=DESTINATION reservation=${BuildingProfile.commercial.corridorLength} influence=${BuildingProfile.commercial.influenceRadius}');
-    final profile = districtPlanner.getProfileFor(colorIndex);
-    final name = DistrictNameGenerator.generate(profile.type);
-    gridManager.placeDestination(plan.destPos.x, plan.destPos.y, colorIndex, plan.destEntry, name: name);
-    onBuildingSpawned?.call(plan.destPos);
-    scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
-    final dDP = plan.destPos.getNeighbor(plan.destEntry);
-    gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
-    gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
-    districtPlanner.claimSector(colorIndex, plan.destPos, isCommercial: true);
-
-    // 3. Houses
-    for (final hPlan in plan.houses) {
-      _log('[VALIDATE] type=HOUSE reservation=${BuildingProfile.residential.corridorLength} influence=${BuildingProfile.residential.influenceRadius}');
-      gridManager.placeHouse(hPlan.pos.x, hPlan.pos.y, colorIndex, hPlan.entry);
-      onBuildingSpawned?.call(hPlan.pos);
-
-      // HARD ASSERTION
-      assert(gridManager.grid[hPlan.pos.y][hPlan.pos.x].isHouse, 'CRITICAL: Position ${hPlan.pos} must be a HOUSE');
-      
-      scoringService.reserveEntranceCorridor(hPlan.pos, hPlan.entry, isDestination: false);
-      final hDP = hPlan.pos.getNeighbor(hPlan.entry);
-      gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
-      gridManager.connectBuilding(hPlan.pos.x, hPlan.pos.y, hDP.x, hDP.y);
-      districtPlanner.claimSector(colorIndex, hPlan.pos, isCommercial: false);
+    if (plan.houses.isEmpty) {
+      _log('EXPANSION FAIL: plan has no houses');
+      return;
     }
 
-    // 4. State setup
+    // 2. Commit ONLY house 1 immediately, stage the rest:
+    //      t=0  : house 1
+    //      t=+2 : destination
+    //      t=+5 : house 2
+    final h1 = plan.houses.first;
+    _log('[VALIDATE] type=HOUSE (expansion h1) reservation=${BuildingProfile.residential.corridorLength}');
+    gridManager.placeHouse(h1.pos.x, h1.pos.y, colorIndex, h1.entry);
+    onBuildingSpawned?.call(h1.pos);
+    assert(gridManager.grid[h1.pos.y][h1.pos.x].isHouse,
+        'CRITICAL: Expansion house1 ${h1.pos} must be a HOUSE');
+    scoringService.reserveEntranceCorridor(h1.pos, h1.entry, isDestination: false);
+    final h1DP = h1.pos.getNeighbor(h1.entry);
+    gridManager.placeRoad(h1DP.x, h1DP.y, owner: InfrastructureOwner.systemGenerated);
+    gridManager.connectBuilding(h1.pos.x, h1.pos.y, h1DP.x, h1DP.y);
+    districtPlanner.claimSector(colorIndex, h1.pos, isCommercial: false);
+
+    // 3. Update zone state immediately so future spawns know about this color
+    colorAllowedHouseZones.putIfAbsent(colorIndex, () => []);
+    colorAllowedDestZones.putIfAbsent(colorIndex, () => []);
     if (!colorAllowedHouseZones[colorIndex]!.contains(zone)) {
       colorAllowedHouseZones[colorIndex]!.add(zone);
     }
@@ -826,8 +859,82 @@ class SpawnController {
       colorAllowedDestZones[colorIndex]!.add(zone);
     }
 
-    _log('EXPANSION PACKAGE COMMITTED: Color $colorIndex. New Dest at ${plan.destPos}.');
+    // 4. Schedule remaining staged commits
+    _stagedExpansionPlan = plan;
+    _stagedExpansionColor = colorIndex;
+    _stagedExpansionZone = zone;
+    _stagedExpansionDestAt = _elapsedTime + _stagedDestDelay;
+    _stagedExpansionHouse2At = plan.houses.length >= 2
+        ? _elapsedTime + _stagedHouse2Delay
+        : null;
+
+    _log('EXPANSION STAGE 1 COMMITTED: Color $colorIndex. House1 at ${h1.pos}; dest @+${_stagedDestDelay}s.');
     onSpawnComplete?.call();
+  }
+
+  void _processStagedExpansionDistrict() {
+    final plan = _stagedExpansionPlan;
+    final ci = _stagedExpansionColor;
+    final zone = _stagedExpansionZone;
+    if (plan == null || ci == null || zone == null) return;
+
+    if (_stagedExpansionDestAt != null && _elapsedTime >= _stagedExpansionDestAt!) {
+      _stagedExpansionDestAt = null;
+      // Place expansion destination
+      gridManager.commitPlacement(() {
+        if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return;
+        if (!gridManager.grid[plan.destPos.y][plan.destPos.x].isEmpty) {
+          _log('EXPANSION DEST: spot ${plan.destPos} no longer empty; skipping');
+          return;
+        }
+        final profile = districtPlanner.getProfileFor(ci);
+        final name = DistrictNameGenerator.generate(profile.type);
+        gridManager.placeDestination(plan.destPos.x, plan.destPos.y, ci, plan.destEntry, name: name);
+        onBuildingSpawned?.call(plan.destPos);
+        scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
+        final dDP = plan.destPos.getNeighbor(plan.destEntry);
+        gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
+        gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
+        districtPlanner.claimSector(ci, plan.destPos, isCommercial: true);
+        _log('EXPANSION DEST PLACED: Color $ci at ${plan.destPos}');
+      });
+      onSpawnComplete?.call();
+
+      if (_stagedExpansionHouse2At == null) {
+        _stagedExpansionPlan = null;
+        _stagedExpansionColor = null;
+        _stagedExpansionZone = null;
+        return;
+      }
+    }
+
+    if (_stagedExpansionHouse2At != null && _elapsedTime >= _stagedExpansionHouse2At!) {
+      _stagedExpansionHouse2At = null;
+      if (plan.houses.length >= 2) {
+        final h2 = plan.houses[1];
+        gridManager.commitPlacement(() {
+          if (!gridManager.isValid(h2.pos.x, h2.pos.y)) return;
+          if (!gridManager.grid[h2.pos.y][h2.pos.x].isEmpty) {
+            _log('EXPANSION HOUSE2: spot ${h2.pos} no longer empty; skipping');
+            return;
+          }
+          gridManager.placeHouse(h2.pos.x, h2.pos.y, ci, h2.entry);
+          onBuildingSpawned?.call(h2.pos);
+          assert(gridManager.grid[h2.pos.y][h2.pos.x].isHouse,
+              'CRITICAL: Expansion house2 ${h2.pos} must be a HOUSE');
+          scoringService.reserveEntranceCorridor(h2.pos, h2.entry, isDestination: false);
+          final h2DP = h2.pos.getNeighbor(h2.entry);
+          gridManager.placeRoad(h2DP.x, h2DP.y, owner: InfrastructureOwner.systemGenerated);
+          gridManager.connectBuilding(h2.pos.x, h2.pos.y, h2DP.x, h2DP.y);
+          districtPlanner.claimSector(ci, h2.pos, isCommercial: false);
+          _log('EXPANSION HOUSE2 PLACED: Color $ci at ${h2.pos}');
+        });
+        onSpawnComplete?.call();
+      }
+      _stagedExpansionPlan = null;
+      _stagedExpansionColor = null;
+      _stagedExpansionZone = null;
+    }
   }
 
   /// Request a spawn through the queue (the ONLY way gameplay code should spawn)
@@ -1116,18 +1223,20 @@ class SpawnController {
   // ============================================================
 
   GridPosition? _findHouseSpot(int colorIndex, {required bool isFirstHouse, required PlanningStage stage, GridPosition? center}) {
+    // Null-safe: if zone list isn't populated yet, fall back to all zones
+    final zones = colorAllowedHouseZones[colorIndex] ?? SpawnZone.values.toList();
+
     if (isFirstHouse) {
-      return _findSpotInZones(colorAllowedHouseZones[colorIndex]!, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
+      return _findSpotInZones(zones, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
     }
 
     center ??= residentialCenters[colorIndex] ?? clusterCenters[colorIndex];
     if (center == null) {
-      return _findSpotInZones(colorAllowedHouseZones[colorIndex]!, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
+      return _findSpotInZones(zones, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
     }
 
     // [NEW] Search within a wider neighborhood radius to allow spread
     final candidates = <GridPosition>[];
-    final zones = colorAllowedHouseZones[colorIndex]!;
 
     int radius = 15; // Max cluster search radius
     if (stage.index >= PlanningStage.stage3MoreRelaxed.index) radius += 5;
@@ -1154,7 +1263,7 @@ class SpawnController {
     if (candidates.isEmpty) {
       // Rule: No infinite fallback to random locations
       if (stage.index >= PlanningStage.stage3MoreRelaxed.index && stage.index < PlanningStage.stage5ExtremeRelax.index) {
-         return _findSpotInZones(colorAllowedHouseZones[colorIndex]!, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
+         return _findSpotInZones(zones, colorIndex, stage: stage, nodeType: SpawnNodeType.house);
       }
       return null;
     }
