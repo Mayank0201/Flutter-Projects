@@ -31,7 +31,7 @@ class EventManager extends Component with HasGameReference<FlowGridGame> {
 
   @override
   void update(double dt) {
-    if (game.paused) return;
+    if (game.paused || game.timeScale == 0.0) return;
     
     final safeDt = dt.clamp(0.0, 0.05) * game.timeScale;
     final currentWeek = game.week;

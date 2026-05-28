@@ -105,6 +105,32 @@ class GridRenderer extends PositionComponent
   final Paint _mountainPeakPaint = Paint()
     ..color = GameConstants.mountainHighlightColor.withValues(alpha: 0.4);
 
+  // Smart junction / roundabout donut paints
+  static final Paint _smartJunctionRingPaint = Paint()
+    ..color = GameConstants.roadColor
+    ..style = PaintingStyle.fill;
+
+  // Slightly darker fill for the center island — gives the hub a distinct identity.
+  static final Paint _smartJunctionIslandPaint = Paint()
+    ..color = const Color(0xFF0E1116)
+    ..style = PaintingStyle.fill;
+
+  // Subtle white glow ring drawn just outside the asphalt to give the hub a
+  // soft highlight without expensive blur operations.
+  static final Paint _smartJunctionGlowPaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.07)
+    ..style = PaintingStyle.fill;
+
+  static final Paint _smartJunctionOutlinePaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.28)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.8;
+
+  static final Paint _smartJunctionInnerOutlinePaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.12)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.0;
+
   GridRenderer({
     required this.gridManager,
     required this.cellSize,
@@ -175,7 +201,7 @@ class GridRenderer extends PositionComponent
     _drawDemandIndicators(canvas);
     _drawExpressLanePreview(canvas);
     _drawRoadPreview(canvas);
-    _drawCongestion(canvas);
+    // _drawCongestion(canvas);
 
     // Dynamic roadblock & maintenance event overlays
     _drawActiveEventOverlays(canvas);
@@ -511,7 +537,7 @@ class GridRenderer extends PositionComponent
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
 
-        if ((!cell.isRoad && !cell.isExpressLaneNode && !cell.isTunnel && !cell.isBridge && !cell.isHouse && !cell.isDestination && !cell.isSmartJunction) || cell.isPendingDeletion) {
+        if ((!cell.isRoad && !cell.isExpressLaneNode && !cell.isTunnel && !cell.isBridge && !cell.isHouse && !cell.isDestination) || cell.isPendingDeletion) {
           continue;
         }
 
@@ -838,28 +864,13 @@ class GridRenderer extends PositionComponent
     canvas.drawPath(path, outline);
   }
 
-  // Dedicated paints for the smart-junction donut. Previously this code
-  // mutated _roadPaint (shared with road drawing) which leaked style/color
-  // changes back into the road renderer and produced a fuzzy blob instead
-  // of a clean roundabout symbol.
-  static final Paint _smartJunctionRingPaint = Paint()
-    ..color = GameConstants.roadColor
-    ..style = PaintingStyle.fill;
-  static final Paint _smartJunctionHolePaint = Paint()
-    ..color = GameConstants.backgroundColor
-    ..style = PaintingStyle.fill;
-  static final Paint _smartJunctionOutlinePaint = Paint()
-    ..color = Colors.white.withValues(alpha: 0.25)
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 1.5;
-
   void _drawSmartJunctions(Canvas canvas, int minX, int minY, int maxX, int maxY) {
-    // Outer radius equals half a cell so the disk touches the cell boundary
-    // exactly where the road stroke from each neighbour terminates — the
-    // road and junction meet at the boundary with no visible gap. Inner
-    // radius gives the donut its hole for the "roundabout" read.
-    final outerR = cellSize * 0.5;
-    final innerR = cellSize * 0.24;
+    // Larger hub design — outerR/innerR are sized so the asphalt ring centerline
+    // sits at 0.85×cellSize, matching the driving radius in _rebuildSmoothPath.
+    // The ring extends into adjacent cells, covering road stubs cleanly.
+    final outerR = cellSize * 1.05;   // asphalt outer edge
+    final innerR = cellSize * 0.45;   // center island boundary
+    final glowR  = cellSize * 1.10;   // barely-visible ambient glow ring
 
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
@@ -869,15 +880,27 @@ class GridRenderer extends PositionComponent
 
         final cx = offsetX + x * cellSize + cellSize / 2;
         final cy = offsetY + y * cellSize + cellSize / 2;
+        final center = Offset(cx, cy);
 
-        // Outer disk + punched-out center give a clean donut/roundabout
-        // silhouette without depending on blur or paint mutation.
-        canvas.drawCircle(Offset(cx, cy), outerR, _smartJunctionRingPaint);
-        canvas.drawCircle(Offset(cx, cy), innerR, _smartJunctionHolePaint);
-        canvas.drawCircle(Offset(cx, cy), outerR, _smartJunctionOutlinePaint);
+        // Layer 1 — soft glow bloom (drawn first, underneath everything)
+        canvas.drawCircle(center, glowR, _smartJunctionGlowPaint);
+
+        // Layer 2 — asphalt ring (full disk, then island punches the hole via island paint)
+        canvas.drawCircle(center, outerR, _smartJunctionRingPaint);
+
+        // Layer 3 — center island (slightly darker than background)
+        canvas.drawCircle(center, innerR, _smartJunctionIslandPaint);
+
+        // Layer 4 — outer edge crisp white outline
+        canvas.drawCircle(center, outerR, _smartJunctionOutlinePaint);
+
+        // Layer 5 — inner edge soft outline (island border)
+        canvas.drawCircle(center, innerR, _smartJunctionInnerOutlinePaint);
       }
     }
   }
+
+
 
   void _drawBuildings(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     for (int x = minX; x < maxX; x++) {
@@ -1751,36 +1774,36 @@ class GridRenderer extends PositionComponent
     }
   }
 
-  void _drawCongestion(Canvas canvas) {
-    for (final pos in gridManager.infrastructure) {
-      final cell = gridManager.getCell(pos.x, pos.y);
-      if (!cell.isRoad && !cell.isExpressLaneNode) continue;
-
-      final load = gridManager.getRoadLoad(pos.x, pos.y);
-      if (load <= 0) continue;
-
-      final ratio = (load / cell.capacity).clamp(0.0, 1.0);
-      if (ratio < 0.4) continue;
-
-      final rect = Rect.fromLTWH(
-        offsetX + pos.x * cellSize,
-        offsetY + pos.y * cellSize,
-        cellSize,
-        cellSize,
-      );
-
-      Color color;
-      if (ratio >= 0.8) {
-        color = GameConstants.congestionHighColor.withValues(alpha: 0.3);
-      } else {
-        color = GameConstants.congestionLowColor.withValues(alpha: 0.2);
-      }
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect.deflate(2), const Radius.circular(6)),
-        Paint()..color = color,
-      );
-    }
-  }
+  // void _drawCongestion(Canvas canvas) {
+  //   for (final pos in gridManager.infrastructure) {
+  //     final cell = gridManager.getCell(pos.x, pos.y);
+  //     if (!cell.isRoad && !cell.isExpressLaneNode) continue;
+  // 
+  //     final load = gridManager.getRoadLoad(pos.x, pos.y);
+  //     if (load <= 0) continue;
+  // 
+  //     final ratio = (load / cell.capacity).clamp(0.0, 1.0);
+  //     if (ratio < 0.4) continue;
+  // 
+  //     final rect = Rect.fromLTWH(
+  //       offsetX + pos.x * cellSize,
+  //       offsetY + pos.y * cellSize,
+  //       cellSize,
+  //       cellSize,
+  //     );
+  // 
+  //     Color color;
+  //     if (ratio >= 0.8) {
+  //       color = GameConstants.congestionHighColor.withValues(alpha: 0.3);
+  //     } else {
+  //       color = GameConstants.congestionLowColor.withValues(alpha: 0.2);
+  //     }
+  //     canvas.drawRRect(
+  //       RRect.fromRectAndRadius(rect.deflate(2), const Radius.circular(6)),
+  //       Paint()..color = color,
+  //     );
+  //   }
+  // }
 
   /// Draws a soft vignette/fog outside the active spawnable area (Issue: City Reveal)
   void _drawCityVignette(Canvas canvas) {

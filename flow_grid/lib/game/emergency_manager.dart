@@ -28,7 +28,7 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
 
   @override
   void update(double dt) {
-    if (game.paused) return;
+    if (game.paused || game.timeScale == 0.0) return;
 
     _eventTimer += dt * game.timeScale;
     if (_eventTimer >= eventFrequency) {

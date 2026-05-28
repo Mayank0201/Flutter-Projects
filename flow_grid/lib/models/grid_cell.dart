@@ -242,7 +242,16 @@ class GridCell {
   ConnectionNodeType get connectionType {
     if (isConnectableEndpoint) return ConnectionNodeType.infrastructureConnector;
     if (isInfrastructureInternal) return ConnectionNodeType.corridorInternal;
-    if (type == CellType.road) return ConnectionNodeType.intersection;
+    if (type == CellType.road) {
+      int count = 0;
+      if (connUp) count++;
+      if (connDown) count++;
+      if (connLeft) count++;
+      if (connRight) count++;
+      if (count >= 3) {
+        return ConnectionNodeType.intersection;
+      }
+    }
     return ConnectionNodeType.none;
   }
 

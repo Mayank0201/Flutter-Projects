@@ -21,7 +21,7 @@ class TransitManager extends Component with HasGameReference<FlowGridGame> {
 
   @override
   void update(double dt) {
-    if (game.paused) return;
+    if (game.paused || game.timeScale == 0.0) return;
     
     _spawnTimer += dt * game.timeScale;
     if (_spawnTimer >= spawnInterval) {

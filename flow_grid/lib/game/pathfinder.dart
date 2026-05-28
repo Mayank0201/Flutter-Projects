@@ -126,9 +126,21 @@ class Pathfinder {
         
         // Smart Junction usage is encouraged
         if (neighbor.side != null) {
-          stepCost = 0.25; // Internal junction move is cheap
+          // Internal junction move: base cost is 0.25
+          final count = grid.getRoadLoad(neighbor.x, neighbor.y);
+          final capacity = neighborCell.capacity > 0 ? neighborCell.capacity : 5;
+          final load = count / (capacity * 1.5);
+          final impact = (vehicleType == VehicleType.emergency) ? 0.1 : 2.5;
+          final congestionWeight = 1.0 + (load * impact * congestionMultiplier);
+          stepCost = 0.25 * congestionWeight;
         } else if (neighborCell.type == CellType.smartJunction) {
-          stepCost = 0.5; // Entry cost
+          // Entry cost: base is 0.5
+          final count = grid.getRoadLoad(neighbor.x, neighbor.y);
+          final capacity = neighborCell.capacity > 0 ? neighborCell.capacity : 5;
+          final load = count / (capacity * 1.5);
+          final impact = (vehicleType == VehicleType.emergency) ? 0.1 : 2.5;
+          final congestionWeight = 1.0 + (load * impact * congestionMultiplier);
+          stepCost = 0.5 * congestionWeight;
         } else if (neighborCell.isRoad) {
           // Terrain speed cost
           if (neighborCell.speedMultiplier < 1.0) {

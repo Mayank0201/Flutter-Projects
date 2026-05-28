@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../models/game_constants.dart';
 import '../models/grid_cell.dart';
 import '../models/traffic_phase.dart';
+import '../models/road_occupancy.dart';
 import 'grid_manager.dart';
 import 'spawn_controller.dart';
 import 'district_planner.dart';
@@ -73,6 +74,36 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   int weeklyBaseRoads = 20;
 
   final Map<int, List<CarComponent>> carGrid = {};
+  final Map<String, RoadOccupancy> occupancyMap = {};
+
+  RoadOccupancy getOrCreateOccupancy(GridPosition pos) {
+    final key = pos.side != null ? "${pos.x},${pos.y},${pos.side!.name}" : "${pos.x},${pos.y}";
+    return occupancyMap.putIfAbsent(key, () {
+      final cell = gridManager?.getCell(pos.x, pos.y);
+      final occupancy = RoadOccupancy();
+      if (pos.side != null) {
+        // Roundabout sub-nodes are strictly single-occupancy
+        occupancy.maxCars = 1;
+      } else if (cell != null) {
+        if (cell.isHighway) {
+          occupancy.maxCars = 4;
+        } else if (cell.roadLevel >= 1) {
+          occupancy.maxCars = 3;
+        } else {
+          occupancy.maxCars = 2;
+        }
+      }
+      return occupancy;
+    });
+  }
+
+  void clearOccupancyAt(int x, int y) {
+    occupancyMap.remove("$x,$y");
+    for (final side in Direction.values) {
+      occupancyMap.remove("$x,$y,${side.name}");
+    }
+  }
+
   int gridWidth = 0;
   final Map<String, int> houseCarCounts = {};
 
@@ -343,6 +374,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     _elapsedTime = 0;
     activeColorCount = 1;
     _pathCache.clear();
+    occupancyMap.clear();
     // Reset cinematic transition state
     _gameOverTransitioning = false;
     _gameOverTransitionTimer = 0.0;
@@ -458,7 +490,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     debugPrint("[WORLD_INIT] Components added to game tree");
 
     // Connect callbacks
-    gridManager!.onTopologyChanged = () => _pathCache.clear();
+    gridManager!.onTopologyChanged = () {
+      _pathCache.clear();
+      for (final car in List.of(_cars)) {
+        car.recalculatePath();
+      }
+    };
     gridManager!.isStagedBuilding = (x, y) => spawnController?.isStagedBuildingPosition(x, y) ?? false;
 
     phase = GamePhase.playing;
@@ -618,7 +655,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       _debugLogTimer = 0;
     }
     
-    if (phase != GamePhase.playing || paused) return;
+    if (phase != GamePhase.playing || paused || _gameOverTransitioning || timeScale == 0.0) return;
     
     final safeDt = dt.clamp(0.0, 0.05);
     final scaledDt = safeDt * timeScale;
@@ -686,10 +723,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   void _startGameOverTransition(GridPosition overflowDest) {
     _gameOverTransitioning = true;
     _gameOverTransitionTimer = 0.0;
-    // Zoom into the losing building for a cinematic beat
+    // Zoom into the losing building for a cinematic beat.
+    // NOTE: Do NOT set paused = true here — Flame's paused flag stops the
+    // entire update() loop, which means _updateCameraSmoothing never ticks
+    // and _finishGameOverTransition is never called. Instead we use the
+    // _gameOverTransitioning flag to suppress game-logic tiers below.
     focusCameraOnGridPosition(overflowDest, zoomMultiplier: _gameOverZoomMultiplier);
-    // Pause spawning & game logic but keep the camera alive
-    paused = true;
   }
 
   void _finishGameOverTransition() {
@@ -749,12 +788,15 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       _gameOverTransitionTimer += dt;
       // Smoothly lerp the viewfinder toward the focus target
       if (_cameraFocusTarget != null) {
-        final t = 1.0 - pow(0.008, dt).toDouble();
+        final t = 1.0 - pow(0.005, dt).toDouble(); // smooth exponential lerp
         camera.viewfinder.position += (_cameraFocusTarget! - camera.viewfinder.position) * t;
       }
-      // Lerp zoom in
-      final targetZoom = (_targetZoom * _gameOverZoomMultiplier).clamp(0.2, 8.0);
-      final zoomT = 1.0 - pow(0.008, dt).toDouble();
+      // Lerp zoom in.
+      // NOTE: _targetZoom already incorporates userZoomMultiplier which was set
+      // to _gameOverZoomMultiplier by focusCameraOnGridPosition — do NOT
+      // multiply by _gameOverZoomMultiplier again or zoom double-compounds.
+      final targetZoom = _targetZoom.clamp(0.2, 8.0);
+      final zoomT = 1.0 - pow(0.005, dt).toDouble();
       camera.viewfinder.zoom += (targetZoom - camera.viewfinder.zoom) * zoomT;
       if (_gameOverTransitionTimer >= _gameOverZoomInDuration) {
         _finishGameOverTransition();
@@ -1600,6 +1642,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         break;
       case BuildTool.erase:
         gridManager!.eraseCell(pos.x, pos.y);
+        clearOccupancyAt(pos.x, pos.y);
         break;
       default:
         break;
