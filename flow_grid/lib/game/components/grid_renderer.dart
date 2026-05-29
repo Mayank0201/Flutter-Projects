@@ -231,21 +231,38 @@ class GridRenderer extends PositionComponent
 
     for (final anim in _spawnAnimations) {
       final t = ((now - anim.startTime) / _SpawnAnimation.duration).clamp(0.0, 1.0);
-      final ease = 1.0 - math.pow(1.0 - t, 3).toDouble();
       final cx = offsetX + anim.pos.x * cellSize + cellSize / 2;
       final cy = offsetY + anim.pos.y * cellSize + cellSize / 2;
 
-      // Single very thin, soft expanding ring
-      final outerRadius = cellSize * (0.35 + ease * 0.55);
-      final outerAlpha = (1.0 - t) * 0.12;
+      // 1. Draw a rapid blinking neon central beacon (0xFF00E5FF)
+      final blink = (math.sin(t * 30.0) >= 0.0) ? 1.0 : 0.25;
+      final beaconRadius = cellSize * 0.18;
       canvas.drawCircle(
         Offset(cx, cy),
-        outerRadius,
+        beaconRadius,
         Paint()
-          ..color = Colors.white.withValues(alpha: outerAlpha)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.0,
+          ..color = const Color(0xFF00E5FF).withValues(alpha: 0.85 * blink)
+          ..style = PaintingStyle.fill,
       );
+
+      // 2. Draw 3 staggered expanding ripple rings
+      for (int i = 0; i < 3; i++) {
+        final delay = i * 0.25;
+        if (t >= delay) {
+          final ringT = ((t - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+          final ease = 1.0 - math.pow(1.0 - ringT, 3).toDouble();
+          final radius = cellSize * (0.2 + ease * 0.9);
+          final alpha = (1.0 - ringT) * 0.8;
+          canvas.drawCircle(
+            Offset(cx, cy),
+            radius,
+            Paint()
+              ..color = const Color(0xFF00E5FF).withValues(alpha: alpha)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.5 - (i * 0.5),
+          );
+        }
+      }
     }
   }
 

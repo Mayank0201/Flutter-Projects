@@ -161,12 +161,20 @@ class GridManager {
     if (cell.type == CellType.smartJunction) {
       grid[y][x] = GridCell(); // Remove
       smartJunctions++; // Refund
+      infrastructure.remove(GridPosition(x, y));
       removeEdgesFor(x, y);
       onTopologyChanged?.call();
     } else if (cell.isEmpty || cell.isRoad) {
       if (smartJunctions > 0) {
+        if (cell.isRoad) {
+          removeEdgesFor(x, y);
+          if (cell.owner == InfrastructureOwner.player) {
+            roads++; // refund the overridden road
+          }
+        }
         grid[y][x] = GridCell(type: CellType.smartJunction, owner: InfrastructureOwner.player);
         smartJunctions--;
+        infrastructure.add(GridPosition(x, y));
         // Re-connect
         for (var d in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
           final nx = x + d[0];
@@ -1797,6 +1805,12 @@ class GridManager {
         infrastructure.remove(pos);
         if (cell.owner == InfrastructureOwner.player) {
           refunds['road'] = (refunds['road'] ?? 0) + 1;
+        }
+      } else if (cell.type == CellType.smartJunction) {
+        grid[pos.y][pos.x] = GridCell();
+        infrastructure.remove(pos);
+        if (cell.owner == InfrastructureOwner.player) {
+          refunds['smartJunction'] = (refunds['smartJunction'] ?? 0) + 1;
         }
       } else {
         grid[pos.y][pos.x] = GridCell();

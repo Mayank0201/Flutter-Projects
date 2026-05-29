@@ -59,6 +59,10 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
   double _intersectionWaitingTimer = 0.0;
   late final double _deadlockBreakTimeout = 3.0 + Random().nextDouble() * 1.5;
   
+  CarComponent? _closestObstacle;
+  final Set<CarComponent> _ignoredObstacles = {};
+  double _deadlockTimer = 0.0;
+
   // Roundabout dynamic lane tracking
   bool? _roundaboutInnerLane;
   bool get isRoundaboutInner => _roundaboutInnerLane ?? (hashCode % 2 == 0);
@@ -113,6 +117,9 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     _lastTargetMultiplier = 1.0;
     _currentLaneSign = 1.0;
     _targetLaneSign = 1.0;
+    _closestObstacle = null;
+    _ignoredObstacles.clear();
+    _deadlockTimer = 0.0;
 
     _rebuildSmoothPath();
 
@@ -289,6 +296,9 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     _targetLaneSign = 1.0;
     _roundaboutInnerLane = null;
     _intersectionWaitingTimer = 0.0;
+    _closestObstacle = null;
+    _ignoredObstacles.clear();
+    _deadlockTimer = 0.0;
     
     priority = 10;
     _rebuildSmoothPath();
@@ -709,6 +719,9 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     _distanceTraveled = 0.0;
     arrived = false;
     isReturning = true;
+    _closestObstacle = null;
+    _ignoredObstacles.clear();
+    _deadlockTimer = 0.0;
     _rebuildSmoothPath();
     _registerOccupancy();
   }
@@ -1059,6 +1072,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     }
 
     // --- Follow-the-leader, Road Occupancy, and Reservations ---
+    _closestObstacle = null;
     double targetMultiplier = 1.0;
     bool hasReservation = true;
     bool exitBlocked = false;
@@ -1137,6 +1151,8 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
                 }
                 if (entryOccupied) {
                   roundaboutEntryAllowed = false;
+                  _closestObstacle = isRoundaboutInner ? occupancy.reservedByInner : occupancy.reservedByOuter;
+                  _closestObstacle ??= occupancy.cars.where((c) => c.isRoundaboutInner == isRoundaboutInner).firstOrNull;
                   debugPrint("[ROUNDABOUT_BLOCKED] Car $this blocked at entry (${nextNode.x}, ${nextNode.y}) because same-lane entry segment is occupied/reserved.");
                 }
 
@@ -1156,6 +1172,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
                   }
                   if (hasSameLaneCar) {
                     roundaboutEntryAllowed = false;
+                    _closestObstacle = sideOcc.cars.where((c) => c.isRoundaboutInner == isRoundaboutInner).firstOrNull;
                     debugPrint("[ROUNDABOUT_YIELD] Car $this yielding to same-lane car inside roundabout at segment (${sidePos.x}, ${sidePos.y}, ${sidePos.side!.name})");
                   }
                 }
@@ -1206,6 +1223,8 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
                 // If exit is blocked, we slow down inside the roundabout using standard safe distance,
                 // rather than inserting clockwise nodes which bloats paths and causes mutual locks.
                 hasReservation = false;
+                _closestObstacle = occupancy.reservedBy;
+                _closestObstacle ??= occupancy.cars.where((c) => !_isOncomingCar(c)).firstOrNull;
                 if (progressToNext < stopTriggerDist) {
                   final mult = (progressToNext / stopTriggerDist).clamp(0.0, 1.0);
                   if (mult < targetMultiplier) {
@@ -1264,6 +1283,8 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
                   if (sameDirectionCars >= occupancyAfter.maxCars && 
                       !occupancyAfter.isReservedBy(this, false)) {
                     exitBlocked = true;
+                    _closestObstacle = occupancyAfter.reservedBy;
+                    _closestObstacle ??= occupancyAfter.cars.where((c) => !_isOncomingCar(c)).firstOrNull;
                   }
                 }
               }
@@ -1293,6 +1314,9 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
             }
 
             if (needsReservation && !hasReservation && !exitBlocked) {
+              _closestObstacle = occupancy.reservedBy;
+              _closestObstacle ??= occupancy.cars.firstOrNull;
+
               // Check axis allowance if standard intersection
               bool axisAllowed = true;
               if (isStandardIntersection && occupancy.reservedAxis != null) {
@@ -1324,6 +1348,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
               if (axisAllowed && hasPriority && canReserve && occupancy.cars.length < occupancy.maxCars) {
                 occupancy.setReservation(this, false);
                 hasReservation = true;
+                _closestObstacle = null;
                 debugPrint("[ROAD_OCCUPY] Car $this reserved (${nextNode.x}, ${nextNode.y})");
                 
                 if (isStandardIntersection) {
@@ -1406,6 +1431,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       
       for (final other in potentialObstacles) {
         if (identical(other, this) || other.onExpressLane || other.arrived) continue;
+        if (_ignoredObstacles.contains(other)) continue;
 
         // Oncoming check: if the other car is moving in the opposite direction along our path, ignore it
         bool isOncoming = false;
@@ -1434,8 +1460,10 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
         final otherIsExiting = otherNode.side != null && (otherNextNode == null || otherNextNode.side == null);
 
         if (myInOrNearRoundabout && otherInOrNearRoundabout && !myIsExiting && !otherIsExiting) {
-          if (isRoundaboutInner != other.isRoundaboutInner) {
-            continue;
+          if (myNode.side != null || otherNode.side != null) {
+            if (isRoundaboutInner != other.isRoundaboutInner) {
+              continue;
+            }
           }
         }
         
@@ -1484,6 +1512,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
           final mult = ((dist - safeDist) / (slowdownStartDist - safeDist)).clamp(0.0, 1.0);
           if (mult < targetMultiplier) {
             targetMultiplier = mult;
+            _closestObstacle = other;
           }
         }
       }
@@ -1583,6 +1612,7 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
     _currentPathIndex = _calculatePathIndex(_distanceTraveled);
 
     if (_currentPathIndex != oldPathIndex) {
+      _ignoredObstacles.clear();
       if (path.isNotEmpty && oldPathIndex < path.length && _currentPathIndex < path.length) {
         final oldPos = path[oldPathIndex];
         final newPos = path[_currentPathIndex];
@@ -1619,6 +1649,45 @@ class CarComponent extends PositionComponent with HasGameReference<FlowGridGame>
       _registerOccupancy();
     }
 
+    if (_currentSpeedMultiplier > 0.6) {
+      _ignoredObstacles.clear();
+    }
+
+    // --- Deadlock Cycle Detection & Resolution ---
+    if (_currentSpeedMultiplier < 0.05 && _isInDeadlockCycle()) {
+      _deadlockTimer += dt;
+      if (_deadlockTimer > _deadlockBreakTimeout) {
+        if (_closestObstacle != null) {
+          _ignoredObstacles.add(_closestObstacle!);
+          debugPrint("[DEADLOCK_BREAK] Car $this ignoring obstacle $_closestObstacle to break deadlock cycle");
+        }
+        if (_currentPathIndex + 1 < path.length) {
+          final nextNode = path[_currentPathIndex + 1];
+          final cell = game.gridManager?.getCell(nextNode.x, nextNode.y);
+          if (cell != null) {
+            final occupancy = game.getOrCreateOccupancy(nextNode);
+            final isRoundabout = cell.type == CellType.smartJunction;
+            occupancy.setReservation(this, isRoundabout);
+            debugPrint("[DEADLOCK_BREAK] Car $this forcing reservation on (${nextNode.x}, ${nextNode.y}) to break cycle");
+          }
+        }
+        _deadlockTimer = 0.0;
+      }
+    } else {
+      _deadlockTimer = 0.0;
+    }
+  }
+
+  bool _isInDeadlockCycle() {
+    CarComponent? slow = this;
+    CarComponent? fast = _closestObstacle;
+    
+    while (fast != null && fast != slow) {
+      slow = slow?._closestObstacle;
+      fast = fast._closestObstacle?._closestObstacle;
+    }
+    
+    return fast != null;
   }
 
   GridPosition _getCurrentGridPos() {

@@ -63,6 +63,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   set week(int v) => weekNotifier.value = v;
 
   int totalDeliveries = 0;
+  bool newHighScore = false;
   double weekTimer = 0;
   final TrafficClock trafficClock = TrafficClock();
   double _elapsedTime = 0;
@@ -370,6 +371,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     smoothWeek = 1.0;
     previewMode = false;
     totalDeliveries = 0;
+    newHighScore = false;
     weekTimer = 0;
     _elapsedTime = 0;
     activeColorCount = 1;
@@ -731,10 +733,15 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     focusCameraOnGridPosition(overflowDest, zoomMultiplier: _gameOverZoomMultiplier);
   }
 
-  void _finishGameOverTransition() {
+  void _finishGameOverTransition() async {
     _gameOverTransitioning = false;
     clearCameraFocus();
     userZoomMultiplier = 1.0;
+    
+    // Save high score and clear slot (permadeath)
+    newHighScore = await SaveManager.updateHighScore(selectedMapType, score);
+    await SaveManager.clearSave(slotIndex: currentSlotIndex);
+    
     phase = GamePhase.gameOver;
     overlays.remove('hud');
     overlays.add('gameOver');
@@ -1424,6 +1431,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     gridManager!.tunnels += refunds['tunnel'] ?? 0;
     gridManager!.bridges += refunds['bridge'] ?? 0;
     gridManager!.trafficLights += refunds['trafficLight'] ?? 0;
+    gridManager!.smartJunctions += refunds['smartJunction'] ?? 0;
     _updateInventoryNotifiers();
     gridRenderer?.markDirty();
     onStateChanged?.call();
@@ -1656,9 +1664,13 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     switch (activeTool) {
       case BuildTool.trafficLight:
         gridManager!.toggleTrafficLight(pos.x, pos.y);
+        _updateInventoryNotifiers();
+        onStateChanged?.call();
         break;
       case BuildTool.smartJunction:
         gridManager!.toggleSmartJunction(pos.x, pos.y);
+        _updateInventoryNotifiers();
+        onStateChanged?.call();
         break;
       case BuildTool.expressLane:
         // Handle express lane logic if applicable

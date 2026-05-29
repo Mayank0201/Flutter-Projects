@@ -1,127 +1,289 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../game/flow_grid_game.dart';
+import '../game/save_manager.dart';
 
-class GameOverOverlay extends StatelessWidget {
+class GameOverOverlay extends StatefulWidget {
   final FlowGridGame game;
 
   const GameOverOverlay({super.key, required this.game});
 
   @override
+  State<GameOverOverlay> createState() => _GameOverOverlayState();
+}
+
+class _GameOverOverlayState extends State<GameOverOverlay> {
+  int _highScore = 0;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHighScore();
+  }
+
+  Future<void> _loadHighScore() async {
+    final hs = await SaveManager.getHighScore(widget.game.selectedMapType);
+    if (mounted) {
+      setState(() {
+        _highScore = hs;
+        _loaded = true;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DefaultTextStyle(
-      style: GoogleFonts.outfit(decoration: TextDecoration.none),
-      child: Container(
-        color: Colors.black.withValues(alpha: 0.8),
-        child: Center(
-          child: SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 32),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 40,
-                  vertical: 48,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1C1F26),
-                  borderRadius: BorderRadius.circular(32),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    width: 1,
+    // Determine map name to display
+    final mapName = widget.game.selectedMapType.name.toUpperCase();
+
+    return BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+      child: DefaultTextStyle(
+        style: GoogleFonts.outfit(decoration: TextDecoration.none),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.75),
+          child: Center(
+            child: TweenAnimationBuilder<double>(
+              duration: const Duration(milliseconds: 500),
+              tween: Tween<double>(begin: 0.0, end: 1.0),
+              curve: Curves.easeOutBack,
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value.clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: 0.8 + (value * 0.2),
+                    child: child,
                   ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Title
-                    Text(
-                      'CITY OVERFLOW',
-                      style: GoogleFonts.outfit(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w300,
-                        color: const Color(0xFFE74C3C),
-                        letterSpacing: 4,
+                );
+              },
+              child: SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 400),
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF13151A).withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(
+                        color: const Color(0xFFE74C3C).withValues(alpha: 0.3),
+                        width: 1.5,
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Infrastructure limits reached.',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: Colors.white.withValues(alpha: 0.4),
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-
-                    // Stats
-                    _buildMinimalStat('Score', '${game.score}'),
-                    const SizedBox(height: 24),
-                    _buildMinimalStat('Weeks', '${game.week}'),
-                    const SizedBox(height: 24),
-                    _buildMinimalStat('Deliveries', '${game.totalDeliveries}'),
-
-                    const SizedBox(height: 56),
-
-                    // Action Buttons
-                    GestureDetector(
-                        onTap: () {
-                          game.overlays.remove('gameOver');
-                          game.startGame(resume: false);
-                        },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFE74C3C).withValues(alpha: 0.15),
+                          blurRadius: 30,
+                          spreadRadius: 2,
                         ),
-                        child: Center(
-                          child: Text(
-                            'RETRY',
-                            style: GoogleFonts.outfit(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black,
-                              letterSpacing: 2,
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(31),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Top Accent bar
+                          Container(
+                            height: 6,
+                            width: double.infinity,
+                            color: const Color(0xFFE74C3C),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // Title / Icon
+                                const Icon(
+                                  Icons.error_outline,
+                                  color: Color(0xFFE74C3C),
+                                  size: 48,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'CITY OVERFLOW',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 30,
+                                    fontWeight: FontWeight.w300,
+                                    color: const Color(0xFFE74C3C),
+                                    letterSpacing: 4,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Grid infrastructure limit exceeded.',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '$mapName REGION',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white.withValues(alpha: 0.6),
+                                      letterSpacing: 2,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 32),
+
+                                // New High Score Celebration Banner
+                                if (widget.game.newHighScore) ...[
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    margin: const EdgeInsets.only(bottom: 24),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          Colors.amber.withValues(alpha: 0.0),
+                                          Colors.amber.withValues(alpha: 0.2),
+                                          Colors.amber.withValues(alpha: 0.0),
+                                        ],
+                                      ),
+                                      border: Border.symmetric(
+                                        horizontal: BorderSide(
+                                          color: Colors.amber.withValues(alpha: 0.4),
+                                          width: 1,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(
+                                          Icons.emoji_events,
+                                          color: Colors.amber,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'NEW PERSONAL BEST!',
+                                          style: GoogleFonts.outfit(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.amber,
+                                            letterSpacing: 2,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+
+                                // Stats Grid
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildStatCard('Score', '${widget.game.score}', isPrimary: true),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: _buildStatCard(
+                                        'Best',
+                                        _loaded ? '$_highScore' : '--',
+                                        isHighScore: widget.game.newHighScore,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildStatCard('Weeks Survived', '${widget.game.week}'),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: _buildStatCard('Deliveries', '${widget.game.totalDeliveries}'),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 40),
+
+                                // Action Buttons
+                                GestureDetector(
+                                  onTap: () {
+                                    widget.game.overlays.remove('gameOver');
+                                    widget.game.startGame(resume: false, mapType: widget.game.selectedMapType);
+                                  },
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.white.withValues(alpha: 0.1),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'RETRY SIMULATION',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.black,
+                                          letterSpacing: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                GestureDetector(
+                                  onTap: () {
+                                    widget.game.overlays.remove('gameOver');
+                                    widget.game.overlays.add('mainMenu');
+                                    widget.game.phase = GamePhase.menu;
+                                  },
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    decoration: BoxDecoration(
+                                      color: Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.12),
+                                      ),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'MAIN MENU',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.white.withValues(alpha: 0.6),
+                                          letterSpacing: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    GestureDetector(
-                      onTap: () {
-                        game.overlays.remove('gameOver');
-                        game.overlays.add('mainMenu');
-                        game.phase = GamePhase.menu;
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.1),
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            'MAIN MENU',
-                            style: GoogleFonts.outfit(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white.withValues(alpha: 0.5),
-                              letterSpacing: 2,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -131,29 +293,53 @@ class GameOverOverlay extends StatelessWidget {
     );
   }
 
-  Widget _buildMinimalStat(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label.toUpperCase(),
-          style: GoogleFonts.inter(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: Colors.white.withValues(alpha: 0.3),
-            letterSpacing: 2,
-          ),
+  Widget _buildStatCard(String label, String value, {bool isPrimary = false, bool isHighScore = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      decoration: BoxDecoration(
+        color: isPrimary
+            ? const Color(0xFFE74C3C).withValues(alpha: 0.08)
+            : Colors.white.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isHighScore
+              ? Colors.amber.withValues(alpha: 0.3)
+              : isPrimary
+                  ? const Color(0xFFE74C3C).withValues(alpha: 0.2)
+                  : Colors.white.withValues(alpha: 0.05),
+          width: 1,
         ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: GoogleFonts.outfit(
-            fontSize: 24,
-            fontWeight: FontWeight.w400,
-            color: Colors.white,
+      ),
+      child: Column(
+        children: [
+          Text(
+            label.toUpperCase(),
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              color: isHighScore
+                  ? Colors.amber.withValues(alpha: 0.7)
+                  : Colors.white.withValues(alpha: 0.3),
+              letterSpacing: 1.5,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 6),
+          Text(
+            value,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.outfit(
+              fontSize: 26,
+              fontWeight: isPrimary ? FontWeight.w700 : FontWeight.w500,
+              color: isHighScore
+                  ? Colors.amber
+                  : isPrimary
+                      ? const Color(0xFFE74C3C)
+                      : Colors.white,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

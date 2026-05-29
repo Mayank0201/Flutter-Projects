@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'grid_manager.dart';
 import 'components/car_component.dart';
+import 'map_generator.dart';
 
 class SaveMetadata {
   final int slotIndex;
@@ -217,5 +218,20 @@ class SaveManager {
   static Future<void> clearSave({int slotIndex = 0}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_savePrefix$slotIndex');
+  }
+
+  static Future<int> getHighScore(MapType mapType) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('flow_grid_highscore_${mapType.name}') ?? 0;
+  }
+
+  static Future<bool> updateHighScore(MapType mapType, int score) async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentHigh = prefs.getInt('flow_grid_highscore_${mapType.name}') ?? 0;
+    if (score > currentHigh) {
+      await prefs.setInt('flow_grid_highscore_${mapType.name}', score);
+      return true;
+    }
+    return false;
   }
 }

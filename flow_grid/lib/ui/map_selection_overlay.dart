@@ -3,10 +3,33 @@ import '../game/flow_grid_game.dart';
 import '../game/map_generator.dart';
 import '../game/save_manager.dart';
 
-class MapSelectionOverlay extends StatelessWidget {
+class MapSelectionOverlay extends StatefulWidget {
   final FlowGridGame game;
 
   const MapSelectionOverlay({super.key, required this.game});
+
+  @override
+  State<MapSelectionOverlay> createState() => _MapSelectionOverlayState();
+}
+
+class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
+  final Map<MapType, int> _highScores = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHighScores();
+  }
+
+  Future<void> _loadHighScores() async {
+    for (final type in MapType.values) {
+      final hs = await SaveManager.getHighScore(type);
+      _highScores[type] = hs;
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +88,7 @@ class MapSelectionOverlay extends StatelessWidget {
                             description: 'Balanced baseline terrain. Ideal for training. Standard mechanics and layouts.',
                             icon: Icons.unfold_more,
                             color: Colors.blueAccent,
+                            highScore: _highScores[MapType.zen] ?? 0,
                             onTap: () => _startGame(context, MapType.zen),
                           ),
                           const SizedBox(width: 16),
@@ -73,6 +97,7 @@ class MapSelectionOverlay extends StatelessWidget {
                             description: 'Terracotta canyons and mountain pockets. Restricts expansions, requiring strategic valley connections.',
                             icon: Icons.landscape,
                             color: Colors.orangeAccent,
+                            highScore: _highScores[MapType.andes] ?? 0,
                             onTap: () => _startGame(context, MapType.andes),
                           ),
                           const SizedBox(width: 16),
@@ -81,6 +106,7 @@ class MapSelectionOverlay extends StatelessWidget {
                             description: 'Wide central river dividing fertile banks. Heavy reliance on water crossings and bridge management.',
                             icon: Icons.waves,
                             color: Colors.cyanAccent,
+                            highScore: _highScores[MapType.nile] ?? 0,
                             onTap: () => _startGame(context, MapType.nile),
                           ),
                           const SizedBox(width: 16),
@@ -89,6 +115,7 @@ class MapSelectionOverlay extends StatelessWidget {
                             description: 'Frozen Tundra. Features: Ice Roads over lakes (40% slower, 0 bridge cost), and periodic Blizzards that drop vehicle speed to 60%.',
                             icon: Icons.ac_unit,
                             color: Colors.lightBlueAccent,
+                            highScore: _highScores[MapType.arctic] ?? 0,
                             onTap: () => _startGame(context, MapType.arctic),
                           ),
                           const SizedBox(width: 16),
@@ -97,6 +124,7 @@ class MapSelectionOverlay extends StatelessWidget {
                             description: 'Dusty grasslands. Features: Unpaved Dirt Roads (20% slower), wild Gazelle Crossings blocking lanes, and blinding Dust Storms.',
                             icon: Icons.terrain,
                             color: Colors.amberAccent,
+                            highScore: _highScores[MapType.savanna] ?? 0,
                             onTap: () => _startGame(context, MapType.savanna),
                           ),
                           const SizedBox(width: 16),
@@ -105,6 +133,7 @@ class MapSelectionOverlay extends StatelessWidget {
                             description: 'River wetlands. Features: Periodic Drawbridges blocking lanes, and Flash Floods that temporarily submerge and close roads.',
                             icon: Icons.water,
                             color: Colors.tealAccent,
+                            highScore: _highScores[MapType.delta] ?? 0,
                             onTap: () => _startGame(context, MapType.delta),
                           ),
                         ],
@@ -113,8 +142,8 @@ class MapSelectionOverlay extends StatelessWidget {
                     const SizedBox(height: 32),
                     TextButton(
                       onPressed: () {
-                        game.overlays.remove('mapSelection');
-                        game.overlays.add('mainMenu');
+                        widget.game.overlays.remove('mapSelection');
+                        widget.game.overlays.add('mainMenu');
                       },
                       child: Text(
                         'BACK TO HEADQUARTERS',
@@ -138,8 +167,8 @@ class MapSelectionOverlay extends StatelessWidget {
 
   Future<void> _startGame(BuildContext context, MapType type) async {
     final slot = await SaveManager.getNextAvailableSlot();
-    game.overlays.remove('mapSelection');
-    game.startGame(resume: false, mapType: type, slotIndex: slot);
+    widget.game.overlays.remove('mapSelection');
+    widget.game.startGame(resume: false, mapType: type, slotIndex: slot);
   }
 }
 
@@ -148,6 +177,7 @@ class _MapCard extends StatefulWidget {
   final String description;
   final IconData icon;
   final Color color;
+  final int highScore;
   final VoidCallback onTap;
 
   const _MapCard({
@@ -155,6 +185,7 @@ class _MapCard extends StatefulWidget {
     required this.description,
     required this.icon,
     required this.color,
+    required this.highScore,
     required this.onTap,
   });
 
@@ -193,7 +224,7 @@ class _MapCardState extends State<_MapCard> {
                 size: 60,
                 color: _isHovered ? widget.color : Colors.white.withValues(alpha: 0.2),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
               Text(
                 widget.title,
                 style: const TextStyle(
@@ -201,6 +232,39 @@ class _MapCardState extends State<_MapCard> {
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // High Score Badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.emoji_events,
+                      size: 12,
+                      color: widget.highScore > 0 ? Colors.amberAccent : Colors.white.withValues(alpha: 0.3),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      widget.highScore > 0 ? 'BEST: ${widget.highScore}' : 'BEST: --',
+                      style: TextStyle(
+                        color: widget.highScore > 0 ? Colors.white.withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.4),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 12),
