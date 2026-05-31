@@ -234,35 +234,26 @@ class GridRenderer extends PositionComponent
       final cx = offsetX + anim.pos.x * cellSize + cellSize / 2;
       final cy = offsetY + anim.pos.y * cellSize + cellSize / 2;
 
-      // 1. Draw a rapid blinking neon central beacon (0xFF00E5FF)
-      final blink = (math.sin(t * 30.0) >= 0.0) ? 1.0 : 0.25;
-      final beaconRadius = cellSize * 0.18;
-      canvas.drawCircle(
-        Offset(cx, cy),
-        beaconRadius,
-        Paint()
-          ..color = const Color(0xFF00E5FF).withValues(alpha: 0.85 * blink)
-          ..style = PaintingStyle.fill,
+      // Exactly 3 slow, smooth flicker cycles (6 * pi) fading out towards the end
+      final wave = math.sin(t * math.pi * 6.0);
+      final blink = (wave + 1.0) / 2.0;
+      final fade = 1.0 - t;
+      final opacity = blink * fade * 0.55;
+
+      final size = cellSize * BuildingProfile.residential.renderScale;
+      final rect = Rect.fromCenter(
+        center: Offset(cx, cy),
+        width: size,
+        height: size,
       );
 
-      // 2. Draw 3 staggered expanding ripple rings
-      for (int i = 0; i < 3; i++) {
-        final delay = i * 0.25;
-        if (t >= delay) {
-          final ringT = ((t - delay) / (1.0 - delay)).clamp(0.0, 1.0);
-          final ease = 1.0 - math.pow(1.0 - ringT, 3).toDouble();
-          final radius = cellSize * (0.2 + ease * 0.9);
-          final alpha = (1.0 - ringT) * 0.8;
-          canvas.drawCircle(
-            Offset(cx, cy),
-            radius,
-            Paint()
-              ..color = const Color(0xFF00E5FF).withValues(alpha: alpha)
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.5 - (i * 0.5),
-          );
-        }
-      }
+      // Blinking white highlight over the house body
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, Radius.circular(size * 0.2)),
+        Paint()
+          ..color = Colors.white.withValues(alpha: opacity)
+          ..style = PaintingStyle.fill,
+      );
     }
   }
 
@@ -2262,7 +2253,7 @@ class _RenderChunk {
 }
 
 class _SpawnAnimation {
-  static const double duration = 1.2; // seconds
+  static const double duration = 2.2; // seconds
   final GridPosition pos;
   final double startTime;
   _SpawnAnimation(this.pos, this.startTime);

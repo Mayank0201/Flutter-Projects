@@ -155,7 +155,7 @@ class GridManager {
     }
   }
 
-  void toggleSmartJunction(int x, int y) {
+  void toggleSmartJunction(int x, int y, {void Function(String)? onError}) {
     if (!isValid(x, y)) return;
     final cell = grid[y][x];
     if (cell.type == CellType.smartJunction) {
@@ -165,33 +165,51 @@ class GridManager {
       removeEdgesFor(x, y);
       onTopologyChanged?.call();
     } else if (cell.isEmpty || cell.isRoad) {
-      if (smartJunctions > 0) {
-        if (cell.isRoad) {
-          removeEdgesFor(x, y);
-          if (cell.owner == InfrastructureOwner.player) {
-            roads++; // refund the overridden road
-          }
-        }
-        grid[y][x] = GridCell(type: CellType.smartJunction, owner: InfrastructureOwner.player);
-        smartJunctions--;
-        infrastructure.add(GridPosition(x, y));
-        // Re-connect
-        for (var d in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
-          final nx = x + d[0];
-          final ny = y + d[1];
+      if (smartJunctions <= 0) {
+        onError?.call("NO ROUNDABOUTS REMAINING");
+        return;
+      }
+
+      // Check 8-way mountain neighbor validation
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          if (dx == 0 && dy == 0) continue;
+          final nx = x + dx;
+          final ny = y + dy;
           if (isValid(nx, ny)) {
-            final neighbor = grid[ny][nx];
-            if (neighbor.isPassable) {
-              addEdge(x, y, nx, ny);
-              updateNodeConnections(nx, ny);
-            } else if (neighbor.isHouse || neighbor.isDestination) {
-              connectBuilding(nx, ny, x, y);
+            if (grid[ny][nx].type == CellType.mountain) {
+              onError?.call("CANNOT PLACE ROUNDABOUT ADJACENT TO MOUNTAIN");
+              return;
             }
           }
         }
-        updateNodeConnections(x, y);
-        onTopologyChanged?.call();
       }
+
+      if (cell.isRoad) {
+        removeEdgesFor(x, y);
+        if (cell.owner == InfrastructureOwner.player) {
+          roads++; // refund the overridden road
+        }
+      }
+      grid[y][x] = GridCell(type: CellType.smartJunction, owner: InfrastructureOwner.player);
+      smartJunctions--;
+      infrastructure.add(GridPosition(x, y));
+      // Re-connect
+      for (var d in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        final nx = x + d[0];
+        final ny = y + d[1];
+        if (isValid(nx, ny)) {
+          final neighbor = grid[ny][nx];
+          if (neighbor.isPassable) {
+            addEdge(x, y, nx, ny);
+            updateNodeConnections(nx, ny);
+          } else if (neighbor.isHouse || neighbor.isDestination) {
+            connectBuilding(nx, ny, x, y);
+          }
+        }
+      }
+      updateNodeConnections(x, y);
+      onTopologyChanged?.call();
     }
   }
 

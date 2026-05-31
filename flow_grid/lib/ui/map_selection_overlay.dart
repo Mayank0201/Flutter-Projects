@@ -108,6 +108,7 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                             color: Colors.cyanAccent,
                             highScore: _highScores[MapType.nile] ?? 0,
                             onTap: () => _startGame(context, MapType.nile),
+                            locked: true,
                           ),
                           const SizedBox(width: 16),
                           _MapCard(
@@ -117,6 +118,7 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                             color: Colors.lightBlueAccent,
                             highScore: _highScores[MapType.arctic] ?? 0,
                             onTap: () => _startGame(context, MapType.arctic),
+                            locked: true,
                           ),
                           const SizedBox(width: 16),
                           _MapCard(
@@ -126,6 +128,7 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                             color: Colors.amberAccent,
                             highScore: _highScores[MapType.savanna] ?? 0,
                             onTap: () => _startGame(context, MapType.savanna),
+                            locked: true,
                           ),
                           const SizedBox(width: 16),
                           _MapCard(
@@ -135,6 +138,7 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                             color: Colors.tealAccent,
                             highScore: _highScores[MapType.delta] ?? 0,
                             onTap: () => _startGame(context, MapType.delta),
+                            locked: true,
                           ),
                         ],
                       ),
@@ -179,6 +183,7 @@ class _MapCard extends StatefulWidget {
   final Color color;
   final int highScore;
   final VoidCallback onTap;
+  final bool locked;
 
   const _MapCard({
     required this.title,
@@ -187,6 +192,7 @@ class _MapCard extends StatefulWidget {
     required this.color,
     required this.highScore,
     required this.onTap,
+    this.locked = false,
   });
 
   @override
@@ -198,87 +204,132 @@ class _MapCardState extends State<_MapCard> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isLocked = widget.locked;
     return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+      onEnter: (_) {
+        if (!isLocked) setState(() => _isHovered = true);
+      },
+      onExit: (_) {
+        if (!isLocked) setState(() => _isHovered = false);
+      },
       child: GestureDetector(
-        onTap: widget.onTap,
+        onTap: isLocked ? null : widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width: 220,
           height: 360,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: _isHovered ? widget.color.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
+            color: isLocked
+                ? Colors.black.withValues(alpha: 0.4)
+                : (_isHovered ? widget.color.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03)),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: _isHovered ? widget.color : Colors.white.withValues(alpha: 0.1),
+              color: isLocked
+                  ? Colors.white.withValues(alpha: 0.03)
+                  : (_isHovered ? widget.color : Colors.white.withValues(alpha: 0.1)),
               width: 2,
             ),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                widget.icon,
-                size: 60,
-                color: _isHovered ? widget.color : Colors.white.withValues(alpha: 0.2),
+              Opacity(
+                opacity: isLocked ? 0.3 : 1.0,
+                child: Icon(
+                  widget.icon,
+                  size: 60,
+                  color: _isHovered ? widget.color : Colors.white.withValues(alpha: 0.2),
+                ),
               ),
               const SizedBox(height: 18),
               Text(
                 widget.title,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: isLocked ? Colors.white.withValues(alpha: 0.4) : Colors.white,
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 2,
                 ),
               ),
               const SizedBox(height: 8),
-              // High Score Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    width: 1,
+              // High Score Badge or Locked badge
+              if (!isLocked)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.emoji_events,
+                        size: 12,
+                        color: widget.highScore > 0 ? Colors.amberAccent : Colors.white.withValues(alpha: 0.3),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        widget.highScore > 0 ? 'BEST: ${widget.highScore}' : 'BEST: --',
+                        style: TextStyle(
+                          color: widget.highScore > 0 ? Colors.white.withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.4),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: Colors.redAccent.withValues(alpha: 0.25),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.lock,
+                        size: 12,
+                        color: Colors.redAccent,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'LOCKED',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.emoji_events,
-                      size: 12,
-                      color: widget.highScore > 0 ? Colors.amberAccent : Colors.white.withValues(alpha: 0.3),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      widget.highScore > 0 ? 'BEST: ${widget.highScore}' : 'BEST: --',
-                      style: TextStyle(
-                        color: widget.highScore > 0 ? Colors.white.withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.4),
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
               const SizedBox(height: 12),
               Text(
                 widget.description,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
+                  color: isLocked ? Colors.white.withValues(alpha: 0.25) : Colors.white.withValues(alpha: 0.6),
                   fontSize: 12,
                   height: 1.4,
                 ),
               ),
               const Spacer(),
-              if (_isHovered)
+              if (!isLocked && _isHovered)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
@@ -292,6 +343,16 @@ class _MapCardState extends State<_MapCard> {
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
+                  ),
+                )
+              else if (isLocked)
+                Text(
+                  'Available in future updates',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.24),
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
             ],

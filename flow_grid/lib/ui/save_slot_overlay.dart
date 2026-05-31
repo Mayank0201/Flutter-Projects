@@ -187,6 +187,10 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
                     icon: Icon(Icons.delete_outline, color: Colors.white.withValues(alpha: 0.3)),
                     onPressed: () async {
                       await SaveManager.clearSave(slotIndex: index);
+                      final activeSession = await SaveManager.getActiveSession();
+                      if (activeSession != null && activeSession['slotIndex'] == index) {
+                        await SaveManager.setActiveSession(index, false);
+                      }
                       _loadSlots();
                     },
                   ),

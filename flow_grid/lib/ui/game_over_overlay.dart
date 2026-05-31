@@ -1,8 +1,46 @@
 import 'dart:ui';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../game/flow_grid_game.dart';
 import '../game/save_manager.dart';
+
+class Ember {
+  double x, y;
+  double speed;
+  double radius;
+  double opacity;
+  double angle;
+  double angleSpeed;
+
+  Ember({
+    required this.x,
+    required this.y,
+    required this.speed,
+    required this.radius,
+    required this.opacity,
+    required this.angle,
+    required this.angleSpeed,
+  });
+}
+
+class EmberPainter extends CustomPainter {
+  final List<Ember> embers;
+  EmberPainter(this.embers);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+    for (final e in embers) {
+      paint.color = const Color(0xFFE74C3C).withValues(alpha: e.opacity);
+      paint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0);
+      canvas.drawCircle(Offset(e.x, e.y), e.radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
 
 class GameOverOverlay extends StatefulWidget {
   final FlowGridGame game;
@@ -13,14 +51,67 @@ class GameOverOverlay extends StatefulWidget {
   State<GameOverOverlay> createState() => _GameOverOverlayState();
 }
 
-class _GameOverOverlayState extends State<GameOverOverlay> {
+class _GameOverOverlayState extends State<GameOverOverlay> with SingleTickerProviderStateMixin {
   int _highScore = 0;
   bool _loaded = false;
+  late AnimationController _controller;
+  final List<Ember> _embers = [];
+  final math.Random _random = math.Random();
+  double _pulseVal = 0.0;
+  double _vignetteIntensity = 0.0;
 
   @override
   void initState() {
     super.initState();
     _loadHighScore();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 10),
+    )..addListener(_updateAnimation);
+    _controller.repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _updateAnimation() {
+    if (!mounted) return;
+    final size = MediaQuery.of(context).size;
+    setState(() {
+      _pulseVal = _controller.value * 2 * math.pi;
+      _vignetteIntensity = 0.5 + 0.15 * math.sin(_pulseVal * 2.0);
+
+      // Spawn embers
+      if (_embers.length < 40 && _random.nextDouble() < 0.15) {
+        _embers.add(Ember(
+          x: _random.nextDouble() * size.width,
+          y: size.height + 10,
+          speed: 30 + _random.nextDouble() * 50,
+          radius: 1.0 + _random.nextDouble() * 3.0,
+          opacity: 0.15 + _random.nextDouble() * 0.4,
+          angle: _random.nextDouble() * 2 * math.pi,
+          angleSpeed: -0.5 + _random.nextDouble() * 1.0,
+        ));
+      }
+
+      // Update embers
+      for (int i = _embers.length - 1; i >= 0; i--) {
+        final e = _embers[i];
+        e.y -= e.speed * 0.016;
+        e.angle += e.angleSpeed * 0.016;
+        e.x += math.sin(e.angle) * 8 * 0.016;
+        
+        final progress = (e.y / size.height).clamp(0.0, 1.0);
+        e.opacity = (progress * 0.5).clamp(0.0, 1.0);
+
+        if (e.y < -10 || e.opacity <= 0.0) {
+          _embers.removeAt(i);
+        }
+      }
+    });
   }
 
   Future<void> _loadHighScore() async {
@@ -35,29 +126,47 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    // Determine map name to display
     final mapName = widget.game.selectedMapType.name.toUpperCase();
+    final size = MediaQuery.of(context).size;
 
     return BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
       child: DefaultTextStyle(
         style: GoogleFonts.outfit(decoration: TextDecoration.none),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.75),
-          child: Center(
-            child: TweenAnimationBuilder<double>(
-              duration: const Duration(milliseconds: 500),
-              tween: Tween<double>(begin: 0.0, end: 1.0),
-              curve: Curves.easeOutBack,
-              builder: (context, value, child) {
-                return Opacity(
-                  opacity: value.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: 0.8 + (value * 0.2),
-                    child: child,
-                  ),
-                );
-              },
+        child: Stack(
+          children: [
+            // Radial Crimson Vignette background
+            Container(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.center,
+                  radius: 1.2,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.75),
+                    const Color(0xFFC0392B).withValues(alpha: 0.25 * _vignetteIntensity),
+                  ],
+                ),
+              ),
+            ),
+            // Custom Painter for rising embers
+            CustomPaint(
+              size: size,
+              painter: EmberPainter(_embers),
+            ),
+            Center(
+              child: TweenAnimationBuilder<double>(
+                duration: const Duration(milliseconds: 500),
+                tween: Tween<double>(begin: 0.0, end: 1.0),
+                curve: Curves.easeOutBack,
+                builder: (context, value, child) {
+                  return Opacity(
+                    opacity: value.clamp(0.0, 1.0),
+                    child: Transform.scale(
+                      scale: 0.8 + (value * 0.2),
+                      child: child,
+                    ),
+                  );
+                },
               child: SingleChildScrollView(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 400),
@@ -67,13 +176,13 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                       color: const Color(0xFF13151A).withValues(alpha: 0.95),
                       borderRadius: BorderRadius.circular(32),
                       border: Border.all(
-                        color: const Color(0xFFE74C3C).withValues(alpha: 0.3),
+                        color: const Color(0xFFE74C3C).withValues(alpha: 0.2 + 0.15 * math.sin(_pulseVal * 3.0)),
                         width: 1.5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFE74C3C).withValues(alpha: 0.15),
-                          blurRadius: 30,
+                          color: const Color(0xFFE74C3C).withValues(alpha: 0.1 + 0.08 * math.sin(_pulseVal * 3.0)),
+                          blurRadius: 20 + 8 * math.sin(_pulseVal * 3.0),
                           spreadRadius: 2,
                         ),
                       ],
@@ -288,6 +397,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
               ),
             ),
           ),
+        ],
         ),
       ),
     );

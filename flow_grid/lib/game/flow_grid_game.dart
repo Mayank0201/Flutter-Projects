@@ -323,6 +323,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
   VoidCallback? onStateChanged;
   Function(Map<String, dynamic>)? onStatsChanged;
+  void Function(String)? onPlacementWarning;
 
   @override
   Future<void> onLoad() async {
@@ -332,9 +333,16 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     await _loadVehicleSprites();
 
-    overlays.add('mainMenu');
-    paused = true;
-    debugPrint("[BOOT] onLoad complete, added mainMenu");
+    final activeSession = await SaveManager.getActiveSession();
+    if (activeSession != null) {
+      final slotIndex = activeSession['slotIndex'] as int;
+      debugPrint("[BOOT] Found active session on slot $slotIndex, resuming directly.");
+      startGame(resume: true, slotIndex: slotIndex);
+    } else {
+      overlays.add('mainMenu');
+      paused = true;
+      debugPrint("[BOOT] onLoad complete, added mainMenu");
+    }
   }
 
 
@@ -514,6 +522,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     _updateInventoryNotifiers();
     
+    await SaveManager.setActiveSession(slotIndex, true);
+    
     // Manage Overlays
     overlays.remove('mainMenu');
     overlays.remove('mapSelection');
@@ -545,6 +555,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       userZoomMultiplier: userZoomMultiplier,
       slotIndex: currentSlotIndex,
     );
+    SaveManager.setActiveSession(currentSlotIndex, true);
   }
 
   void applyUpgrade(String option) {
@@ -741,6 +752,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // Save high score and clear slot (permadeath)
     newHighScore = await SaveManager.updateHighScore(selectedMapType, score);
     await SaveManager.clearSave(slotIndex: currentSlotIndex);
+    await SaveManager.setActiveSession(currentSlotIndex, false);
     
     phase = GamePhase.gameOver;
     overlays.remove('hud');
@@ -1668,7 +1680,14 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         onStateChanged?.call();
         break;
       case BuildTool.smartJunction:
-        gridManager!.toggleSmartJunction(pos.x, pos.y);
+        gridManager!.toggleSmartJunction(
+          pos.x,
+          pos.y,
+          onError: (msg) {
+            onPlacementWarning?.call(msg);
+            gridRenderer?.addFloatingMessage(msg, pos, Colors.redAccent);
+          },
+        );
         _updateInventoryNotifiers();
         onStateChanged?.call();
         break;

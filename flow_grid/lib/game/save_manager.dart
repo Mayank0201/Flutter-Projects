@@ -234,4 +234,28 @@ class SaveManager {
     }
     return false;
   }
+
+  static Future<void> setActiveSession(int slotIndex, bool isActive) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('flow_grid_is_in_game', isActive);
+    if (isActive) {
+      await prefs.setInt('flow_grid_last_active_slot', slotIndex);
+    } else {
+      await prefs.remove('flow_grid_last_active_slot');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getActiveSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isInGame = prefs.getBool('flow_grid_is_in_game') ?? false;
+    if (isInGame) {
+      final slotIndex = prefs.getInt('flow_grid_last_active_slot');
+      if (slotIndex != null && await hasSaveGame(slotIndex: slotIndex)) {
+        return {
+          'slotIndex': slotIndex,
+        };
+      }
+    }
+    return null;
+  }
 }

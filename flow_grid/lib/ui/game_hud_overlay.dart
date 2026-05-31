@@ -1,4 +1,6 @@
 import 'dart:ui' as ui;
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../game/flow_grid_game.dart';
@@ -7,6 +9,7 @@ import '../models/city_event.dart';
 import '../game/map_generator.dart';
 import 'analytics_panel.dart';
 import '../game/emergency_manager.dart';
+import '../game/save_manager.dart';
 
 
 class GameHudOverlay extends StatefulWidget {
@@ -20,6 +23,9 @@ class GameHudOverlay extends StatefulWidget {
 class _GameHudOverlayState extends State<GameHudOverlay> {
   bool showAnalytics = false;
   bool showInfoPanel = false;
+  int _highScore = 0;
+  String? _warningMessage;
+  Timer? _warningTimer;
 
   @override
   void initState() {
@@ -27,6 +33,35 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     widget.game.onStateChanged = () {
       if (mounted) setState(() {});
     };
+    widget.game.onPlacementWarning = (msg) {
+      _warningTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _warningMessage = msg;
+        });
+      }
+      _warningTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+            _warningMessage = null;
+          });
+        }
+      });
+    };
+
+    SaveManager.getHighScore(g.selectedMapType).then((hs) {
+      if (mounted) {
+        setState(() {
+          _highScore = hs;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _warningTimer?.cancel();
+    super.dispose();
   }
 
   FlowGridGame get g => widget.game;
@@ -37,6 +72,59 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
       style: GoogleFonts.outfit(decoration: TextDecoration.none),
       child: Stack(
         children: [
+          if (_warningMessage != null)
+            Align(
+              alignment: Alignment.topCenter,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 20),
+                  child: TweenAnimationBuilder<double>(
+                    duration: const Duration(milliseconds: 250),
+                    tween: Tween<double>(begin: 0.0, end: 1.0),
+                    builder: (context, val, child) {
+                      return Transform.translate(
+                        offset: Offset(0, -20 * (1.0 - val)),
+                        child: Opacity(
+                          opacity: val,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFC0392B).withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 12),
+                          Text(
+                            _warningMessage!,
+                            style: GoogleFonts.outfit(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Align(
             alignment: Alignment.centerRight,
             child: SafeArea(
@@ -923,6 +1011,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                           children: [
                             _infoSectionTitle('CITY STATISTICS'),
                             _infoStatRow('SCORE', '${g.score}', Colors.amber),
+                            _infoStatRow('PERSONAL BEST', '${math.max(_highScore, g.score)}', Colors.amberAccent),
                             _infoStatRow('WEEK', '${g.week}', Colors.white70),
                             _infoStatRow('SATISFACTION', '${(g.gridManager!.regionalSatisfaction * 100).toInt()}%', 
                               g.gridManager!.regionalSatisfaction < 0.4 ? Colors.redAccent : Colors.lightGreenAccent),
