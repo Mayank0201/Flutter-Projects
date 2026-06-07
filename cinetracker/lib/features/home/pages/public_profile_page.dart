@@ -6,6 +6,7 @@ import '../../../model/badge_model.dart' as app_badge;
 import '../../../model/review_model.dart';
 import '../../../service/tmdb_service.dart';
 import 'movie_details_page.dart';
+import 'movie_reviews_page.dart';
 
 class PublicProfilePage extends StatefulWidget {
   final int userId;
@@ -506,28 +507,16 @@ class _ReviewItem extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: () async {
-              try {
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => const Center(child: CircularProgressIndicator()),
-                );
-                final movie = await TMDBService().getMovieDetails(review.movieId);
-                if (!context.mounted) return;
-                Navigator.pop(context); // pop loading dialog
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => MovieDetailsPage(movie: movie)),
-                );
-              } catch (e) {
-                if (context.mounted) {
-                  Navigator.pop(context); // pop loading dialog
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not load movie details')),
-                  );
-                }
-              }
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MovieReviewsPage(
+                    movieId: review.movieId,
+                    movieTitle: review.movieTitle ?? 'Movie',
+                  ),
+                ),
+              );
             },
             child: Container(
               padding: const EdgeInsets.all(12),

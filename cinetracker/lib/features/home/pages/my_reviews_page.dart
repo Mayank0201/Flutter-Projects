@@ -3,6 +3,7 @@ import '../../../model/review_model.dart';
 import '../../../service/rating_service.dart';
 import '../../../service/tmdb_service.dart';
 import 'movie_details_page.dart';
+import 'movie_reviews_page.dart';
 
 class MyReviewsPage extends StatefulWidget {
   const MyReviewsPage({super.key});
@@ -144,28 +145,16 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
     }
   }
 
-  Future<void> _openMovie(int movieId) async {
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-      final movie = await _tmdbService.getMovieDetails(movieId);
-      if (!mounted) return;
-      Navigator.pop(context); // pop loading dialog
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => MovieDetailsPage(movie: movie)),
-      );
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // pop loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not load movie details')),
-        );
-      }
-    }
+  void _openMovie(int movieId, String movieTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieReviewsPage(
+          movieId: movieId,
+          movieTitle: movieTitle,
+        ),
+      ),
+    );
   }
 
   @override
@@ -256,7 +245,7 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
           final review = _reviews[index];
           return _MyReviewCard(
             review: review,
-            onTap: () => _openMovie(review.movieId),
+            onTap: () => _openMovie(review.movieId, review.movieTitle ?? 'Movie'),
             onDelete: () => _deleteReview(review),
           );
         },
