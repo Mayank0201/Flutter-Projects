@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
+import 'dart:convert';
+import 'package:cinetracker/core/storage/token_storage.dart';
 import '../../../service/social_service.dart';
 import '../../../model/user_profile_model.dart';
 import '../../../model/badge_model.dart' as app_badge;
@@ -26,11 +28,38 @@ class _PublicProfilePageState extends State<PublicProfilePage> {
   UserProfile? _profile;
   bool _isLoading = true;
   String? _error;
+  int? _currentUserId;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUserId();
     _loadProfile();
+  }
+
+  // load current user id from jwt token
+  Future<void> _loadCurrentUserId() async {
+    final storage = TokenStorage();
+    final token = await storage.getAccessToken();
+    if (token != null && token.isNotEmpty) {
+      try {
+        final parts = token.split('.');
+        if (parts.length == 3) {
+          final payload = parts[1];
+          final normalized = base64Url.normalize(payload);
+          final resp = utf8.decode(base64Url.decode(normalized));
+          final decoded = json.decode(resp) as Map<String, dynamic>;
+          final id = (decoded['userId'] as num?)?.toInt();
+          if (mounted) {
+            setState(() {
+              _currentUserId = id;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('error decoding token in public profile: $e');
+      }
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -163,39 +192,40 @@ class _PublicProfilePageState extends State<PublicProfilePage> {
                             ),
                           ),
                           const SizedBox(height: 24),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: () async {
-                                  final isFollowing = _profile!.isFollowing;
-                                  try {
-                                    if (isFollowing) {
-                                      await _socialService.unfollowUser(widget.userId);
-                                    } else {
-                                      await _socialService.followUser(widget.userId);
+                          if (_currentUserId != widget.userId)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: () async {
+                                    final isFollowing = _profile!.isFollowing;
+                                    try {
+                                      if (isFollowing) {
+                                        await _socialService.unfollowUser(widget.userId);
+                                      } else {
+                                        await _socialService.followUser(widget.userId);
+                                      }
+                                      await _loadProfile();
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Failed to update follow status')),
+                                      );
                                     }
-                                    await _loadProfile();
-                                  } catch (e) {
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Failed to update follow status')),
-                                    );
-                                  }
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: _profile!.isFollowing 
-                                    ? colorScheme.surfaceContainerHighest
-                                    : colorScheme.primary,
-                                  foregroundColor: _profile!.isFollowing
-                                    ? colorScheme.onSurfaceVariant
-                                    : colorScheme.onPrimary,
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _profile!.isFollowing 
+                                      ? colorScheme.surfaceContainerHighest
+                                      : colorScheme.primary,
+                                    foregroundColor: _profile!.isFollowing
+                                      ? colorScheme.onSurfaceVariant
+                                      : colorScheme.onPrimary,
+                                  ),
+                                  child: Text(_profile!.isFollowing ? 'Unfollow' : 'Follow'),
                                 ),
-                                child: Text(_profile!.isFollowing ? 'Unfollow' : 'Follow'),
                               ),
                             ),
-                          ),
                           const SizedBox(height: 16),
                           if (_profile!.badges.isNotEmpty) ...[
                             Padding(
