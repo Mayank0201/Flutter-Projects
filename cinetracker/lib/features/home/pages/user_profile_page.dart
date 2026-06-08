@@ -573,12 +573,10 @@ class _ReviewItem extends StatelessWidget {
                           ],
                         ),
                         if (review.comment != null && review.comment!.isNotEmpty) ...[
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
                           Text(
                             review.comment!,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                            style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
                           ),
                         ],
                       ],

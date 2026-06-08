@@ -14,6 +14,8 @@ import 'package:cinetracker/core/utils/content_moderator.dart';
 import 'wishlist_page.dart';
 import 'challenges_page.dart';
 import 'my_reviews_page.dart';
+import 'movie_reviews_page.dart';
+import '../../../model/review_model.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -427,6 +429,26 @@ class _ProfilePageState extends State<ProfilePage> {
 
                   const SizedBox(height: 20),
 
+                  // ── Recent reviews ─────────────────────────────────
+                  if (_profile != null) ...[
+                    _buildSectionHeader(context, 'Recent Reviews'),
+                    if (_profile!.reviews.where((r) => r.comment != null && r.comment!.isNotEmpty).isNotEmpty) ...[
+                      ..._profile!.reviews
+                          .where((r) => r.comment != null && r.comment!.isNotEmpty)
+                          .take(5)
+                          .map((r) => _OwnRecentReviewItem(review: r)),
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                        child: Text(
+                          'No commented reviews yet.',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                  ],
+
                   // ── App section ────────────────────────────────────
                   _buildSectionHeader(context, 'App'),
                   _buildListTile(
@@ -707,4 +729,155 @@ Widget _buildBadgeIcon(String badgeName) {
   }
 
   return Icon(icon, color: color.withValues(alpha: 0.9), size: 30);
+}
+
+class _OwnRecentReviewItem extends StatelessWidget {
+  final Review review;
+
+  const _OwnRecentReviewItem({required this.review});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    String formattedDate = '';
+    try {
+      final dt = DateTime.parse(review.createdAt);
+      formattedDate =
+          '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+    } catch (_) {
+      formattedDate = review.createdAt;
+    }
+
+    final hasMovieInfo = review.movieTitle != null && review.movieTitle!.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+      child: Container(
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: colorScheme.outline.withValues(alpha: 0.12)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MovieReviewsPage(
+                      movieId: review.movieId,
+                      movieTitle: review.movieTitle ?? 'Movie',
+                    ),
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (hasMovieInfo) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              review.movieTitle!,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (formattedDate.isNotEmpty)
+                            Text(
+                              formattedDate,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.6),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          if (review.movieReleaseYear != null) ...[
+                            Text(
+                              '${review.movieReleaseYear}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          if (review.movieGenre != null &&
+                              review.movieGenre!.isNotEmpty)
+                            Expanded(
+                              child: Text(
+                                review.movieGenre!,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.primary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    Row(
+                      children: [
+                        ...List.generate(5, (i) {
+                          final filled = review.rating >= i + 1;
+                          return Icon(
+                            filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                            size: 14,
+                            color: filled
+                                ? const Color(0xFFFFB800)
+                                : colorScheme.onSurface.withValues(alpha: 0.2),
+                          );
+                        }),
+                        const SizedBox(width: 6),
+                        Text(
+                          review.rating.toStringAsFixed(1),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (review.comment != null &&
+                        review.comment!.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        review.comment!,
+                        style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

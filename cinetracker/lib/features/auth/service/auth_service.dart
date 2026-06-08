@@ -137,4 +137,63 @@ class AuthService {
 
     return serverMessage ?? "Registration failed. Please try again.";
   }
+
+  Future<void> forgotPassword(String email) async {
+    try {
+      await apiService.dio.post(
+        "/auth/forgot-password",
+        data: {"email": email},
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String? serverMessage;
+      if (data is Map<String, dynamic>) {
+        serverMessage = data['message']?.toString() ?? data['error']?.toString();
+      }
+      throw AuthException(serverMessage ?? "Failed to request password reset. Please try again.");
+    } catch (e) {
+      throw AuthException("An unexpected error occurred.");
+    }
+  }
+
+  Future<LoginTokens> googleLogin(String idToken) async {
+    try {
+      final response = await apiService.dio.post(
+        "/auth/google",
+        data: {"idToken": idToken},
+      );
+
+      final raw = response.data;
+      if (raw is Map<String, dynamic>) {
+        final dataMap = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+        final accessToken =
+            dataMap['accessToken']?.toString() ?? dataMap['access_token']?.toString() ?? dataMap['token']?.toString();
+        final refreshToken =
+            dataMap['refreshToken']?.toString() ?? dataMap['refresh_token']?.toString();
+
+        if (accessToken != null &&
+            accessToken.isNotEmpty &&
+            refreshToken != null &&
+            refreshToken.isNotEmpty) {
+          return LoginTokens(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+          );
+        }
+      }
+
+      throw AuthException(
+        "Invalid Google login response from server",
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String? serverMessage;
+      if (data is Map<String, dynamic>) {
+        serverMessage = data['message']?.toString() ?? data['error']?.toString();
+      }
+      throw AuthException(serverMessage ?? "Google login failed. Please try again.");
+    } catch (e) {
+      throw AuthException("An unexpected error occurred during Google sign in.");
+    }
+  }
 }

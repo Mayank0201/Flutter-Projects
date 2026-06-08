@@ -7,6 +7,8 @@ import '../../../core/network/api_service.dart';
 import '../../../provider/wishlist_provider.dart';
 import '../../../service/tmdb_service.dart';
 import 'register_screen.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,11 +29,60 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
 
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email'],
+  );
+
   @override
   void initState() {
     super.initState();
     authService = AuthService(apiService);
   }
+
+  Future<void> loginWithGoogle() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final String? idToken = googleAuth.idToken;
+
+      if (idToken == null) {
+        throw AuthException("Failed to retrieve Google ID Token");
+      }
+
+      final tokens = await authService.googleLogin(idToken);
+      apiService.setToken(tokens.accessToken);
+      tmdbService.setToken(tokens.accessToken);
+      await storage.saveTokens(
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      );
+
+      if (!mounted) return;
+      await context.read<WishlistProvider>().loadWatchlist();
+
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
+    } catch (e) {
+      debugPrint("Google login error: $e");
+      if (!mounted) return;
+
+      final message = e is AuthException ? e.message : "Google login failed";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
 
   void login() async {
     if (_isLoading) return;
@@ -143,7 +194,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 28),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _isLoading
+                        ? null
+                        : () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ForgotPasswordScreen(),
+                              ),
+                            );
+                          },
+                    child: Text(
+                      "Forgot Password?",
+                      style: TextStyle(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 SizedBox(
                   height: 52,
                   child: ElevatedButton(
@@ -158,6 +231,58 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           )
                         : const Text("Sign In"),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Divider(
+                        color: colorScheme.outlineVariant,
+                        thickness: 1,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        "OR",
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Divider(
+                        color: colorScheme.outlineVariant,
+                        thickness: 1,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    onPressed: _isLoading ? null : loginWithGoogle,
+                    icon: Image.network(
+                      'https://developers.google.com/identity/images/g-logo.png',
+                      height: 24,
+                      errorBuilder: (context, error, stackTrace) => const Icon(
+                        Icons.g_mobiledata_rounded,
+                        size: 30,
+                      ),
+                    ),
+                    label: const Text("Continue with Google"),
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      side: BorderSide(
+                        color: colorScheme.outline,
+                        width: 1,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
