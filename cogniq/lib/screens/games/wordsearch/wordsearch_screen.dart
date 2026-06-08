@@ -491,7 +491,8 @@ class _WordSearchScreenState extends State<WordSearchScreen> {
                     decoration: BoxDecoration(
                       color: context.bgCard,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: context.textMuted.withAlpha(100), width: 2),
+                      border: Border.all(color: context.textMuted.withAlpha(65), width: 1.2),
+                      boxShadow: AppTheme.cardShadow,
                     ),
                     child: GridView.builder(
                       physics: const NeverScrollableScrollPhysics(),
@@ -506,7 +507,7 @@ class _WordSearchScreenState extends State<WordSearchScreen> {
                         final pos = (r, c);
                         final isSel = _selection.contains(pos);
                         final isPerm = _permanentHighlights.contains(pos);
-
+ 
                         return GestureDetector(
                           onTap: () => _addCellToSelection(pos),
                           child: Container(
@@ -527,7 +528,7 @@ class _WordSearchScreenState extends State<WordSearchScreen> {
                                 style: GoogleFonts.outfit(
                                   fontSize: context.scale(gridSize > 10 ? 12 : gridSize > 8 ? 14 : 16),
                                   fontWeight: FontWeight.bold,
-                                  color: (isSel || isPerm) ? Colors.white : context.textPrimary,
+                                  color: isSel ? Colors.white : context.textPrimary,
                                 ),
                               ),
                             ),

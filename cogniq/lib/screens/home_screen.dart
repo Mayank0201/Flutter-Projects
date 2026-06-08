@@ -1,40 +1,41 @@
-import'dart:async';
-import'package:flutter/material.dart';
-import'package:google_fonts/google_fonts.dart';
-import'package:shared_preferences/shared_preferences.dart';
-import'../models/game_info.dart';
-import'../theme/app_theme.dart';
-import'../theme/settings_manager.dart';
-import'../theme/theme_manager.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/game_info.dart';
+import '../theme/app_theme.dart';
+import '../theme/settings_manager.dart';
+import '../theme/theme_manager.dart';
+import 'widgets/zen_sunset_widget.dart';
 
-// Map game id → Material icon (no emojis = no rendering issues)
+// Map game id → Material icon
 const Map<String, IconData> _gameIcons = {
-'wordle':      Icons.grid_4x4,
-'hangman':     Icons.person_outline,
-'weaver':      Icons.swap_horiz,
-'zip':         Icons.bolt,
-'crossclimb':  Icons.trending_up,
-'queens':      Icons.emoji_events_outlined,
-'chimp':       Icons.psychology_outlined,
-'connections': Icons.hub_outlined,
-'flagle':      Icons.flag_outlined,
-'wordbuilder': Icons.spellcheck_outlined,
-'memory':      Icons.style_outlined,
-'spellingbee': Icons.hive_outlined,
-'sudoku':      Icons.grid_on_outlined,
-'wordsearch':  Icons.search_outlined,
-'twentyfortyeight': Icons.filter_2_outlined,
-'reaction':    Icons.flash_on_outlined,
-'numbermemory': Icons.pin_outlined,
-'sequence':    Icons.pattern,
+  'wordle':      Icons.grid_4x4_outlined,
+  'hangman':     Icons.person_outline,
+  'weaver':      Icons.swap_horiz_outlined,
+  'zip':         Icons.bolt_outlined,
+  'crossclimb':  Icons.trending_up_outlined,
+  'queens':      Icons.star_outline_rounded,
+  'chimp':       Icons.psychology_outlined,
+  'connections': Icons.hub_outlined,
+  'flagle':      Icons.flag_outlined,
+  'wordbuilder': Icons.spellcheck_outlined,
+  'memory':      Icons.style_outlined,
+  'spellingbee': Icons.hive_outlined,
+  'sudoku':      Icons.grid_on_outlined,
+  'wordsearch':  Icons.search_outlined,
+  'twentyfortyeight': Icons.filter_2_outlined,
+  'reaction':    Icons.flash_on_outlined,
+  'numbermemory': Icons.pin_outlined,
+  'sequence':    Icons.pattern_outlined,
 };
 
 const Map<String, List<String>> _categories = {
-'All': [],
-'Word': ['wordle','hangman','weaver','crossclimb','wordbuilder','spellingbee','wordsearch'],
-'Logic': ['sudoku','queens','zip','connections','twentyfortyeight'],
-'Memory': ['chimp','memory','sequence'],
-'Speed': ['reaction'],
+  'All': [],
+  'Word': ['wordle', 'hangman', 'weaver', 'crossclimb', 'wordbuilder', 'spellingbee', 'wordsearch'],
+  'Logic': ['sudoku', 'queens', 'zip', 'connections', 'twentyfortyeight'],
+  'Memory': ['chimp', 'memory', 'sequence'],
+  'Speed': ['reaction'],
 };
 
 class HomeScreen extends StatefulWidget {
@@ -45,18 +46,18 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
-  String _activeCategory ='All';
+  String _activeCategory = 'All';
   int _dailyStreak = 0;
   bool _dailyCompleted = false;
   GameInfo? _todaysGame;
   int _currentTab = 0;
+  int _completedCount = 0;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300))..forward();
     
-    // Synchronously initialize _todaysGame to prevent LateInitializationError
     final now = DateTime.now().toUtc();
     final seed = now.year * 10000 + now.month * 100 + now.day;
     _todaysGame = kAllGames[seed % kAllGames.length];
@@ -73,12 +74,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Future<void> _loadDailyChallengeInfo() async {
     final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now().toUtc();
-    final dateStr ="${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}";
+    final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
     final seed = now.year * 10000 + now.month * 100 + now.day;
     
     _dailyStreak = prefs.getInt('daily_streak') ?? 0;
     _dailyCompleted = prefs.getBool('daily_completed_$dateStr') ?? false;
     _todaysGame = kAllGames[seed % kAllGames.length];
+
+    // Compute total exercises completed
+    int completed = 0;
+    for (final g in kAllGames) {
+      final lvl = prefs.getInt('level_${g.id}') ?? 0;
+      if (lvl > 0) completed += lvl;
+    }
+    _completedCount = completed;
 
     if (mounted) setState(() {});
   }
@@ -90,48 +99,75 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       body: SafeArea(
         child: _buildCurrentTabContent(),
       ),
-      bottomNavigationBar: Container(
+      bottomNavigationBar: _buildCustomBottomNavBar(),
+    );
+  }
+
+  Widget _buildCustomBottomNavBar() {
+    return Container(
+      height: 72,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2B2926).withAlpha(10),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          )
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildNavItem(0, Icons.home_outlined, Icons.home, 'Home'),
+          _buildNavItem(1, Icons.calendar_today_outlined, Icons.calendar_today, 'Daily'),
+          _buildNavItem(2, Icons.bar_chart_outlined, Icons.bar_chart, 'Stats'),
+          _buildNavItem(3, Icons.person_outlined, Icons.person, 'Profile'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavItem(int index, IconData outlineIcon, IconData solidIcon, String label) {
+    final isSelected = _currentTab == index;
+    final activeColor = AppTheme.dustyMauve;
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentTab = index;
+          _loadDailyChallengeInfo();
+        });
+      },
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: context.textMuted, width: 0.8),
-          ),
+          color: isSelected ? activeColor.withAlpha(25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
         ),
-        child: BottomNavigationBar(
-          currentIndex: _currentTab,
-          onTap: (idx) {
-            setState(() {
-              _currentTab = idx;
-              _loadDailyChallengeInfo();
-            });
-          },
-          backgroundColor: context.bgDark,
-          elevation: 0,
-          type: BottomNavigationBarType.fixed,
-          selectedItemColor: AppTheme.forestGreen,
-          unselectedItemColor: context.textSecondary,
-          selectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: GoogleFonts.inter(fontSize: 11),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home_outlined),
-              label:'Home',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSelected ? solidIcon : outlineIcon,
+              color: isSelected ? activeColor : context.textSecondary,
+              size: 22,
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.calendar_today_outlined),
-              activeIcon: Icon(Icons.calendar_today_outlined),
-              label:'Daily',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.bar_chart_outlined),
-              activeIcon: Icon(Icons.bar_chart_outlined),
-              label:'Stats',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outlined),
-              activeIcon: Icon(Icons.person_outlined),
-              label:'Profile',
-            ),
+            if (isSelected) ...[
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: activeColor,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -155,16 +191,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Widget _buildHomeTab() {
     final filteredGames = kAllGames.where((g) {
-      if (_activeCategory =='All') return true;
+      if (_activeCategory == 'All') return true;
       return _categories[_activeCategory]?.contains(g.id) ?? false;
     }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header
+        // Premium Spacious Header (Zen style)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -172,16 +208,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-'CogniQ',
-                    style: GoogleFonts.poppins(
-                      fontSize: context.scale(26),
-                      fontWeight: FontWeight.w700,
+                    'How are you feeling today?',
+                    style: GoogleFonts.outfit(
+                      fontSize: context.scale(22),
+                      fontWeight: FontWeight.w600,
                       color: context.textPrimary,
                       letterSpacing: -0.5,
                     ),
                   ),
+                  const SizedBox(height: 2),
                   Text(
-'A premium study in daily puzzles',
+                    'Cultivate your daily mindfulness & focus',
                     style: GoogleFonts.inter(
                       fontSize: context.scale(12),
                       color: context.textSecondary,
@@ -189,146 +226,56 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ],
               ),
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppTheme.dustyMauve.withAlpha(25),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.spa_outlined,
+                  color: AppTheme.dustyMauve,
+                  size: 20,
+                ),
+              ),
             ],
           ),
         ),
 
-        // Category Filter Tabs
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: _categories.keys.map((cat) {
-              final isActive = _activeCategory == cat;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: ChoiceChip(
-                  label: Text(cat),
-                  selected: isActive,
-                  onSelected: (selected) {
-                    if (selected) {
-                      setState(() {
-                        _activeCategory = cat;
-                        _ctrl.reset();
-                        _ctrl.forward();
-                      });
-                    }
-                  },
-                  labelStyle: GoogleFonts.inter(
-                    fontSize: context.scale(11),
-                    fontWeight: FontWeight.w600,
-                    color: isActive ? Colors.white : context.textSecondary,
-                  ),
-                  selectedColor: AppTheme.forestGreen,
-                  backgroundColor: context.bgCard,
-                  showCheckmark: false,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
-                    side: BorderSide(color: context.textMuted, width: 0.8),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-
-        // Main Content Area
+        // Expanded Scrollable Content
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             children: [
-              // Daily Challenge Block
-              if (_activeCategory =='All') ...[
-                GestureDetector(
-                  onTap: () => setState(() => _currentTab = 1),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 20),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: context.bgCard,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: context.textMuted,
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-"Today's Puzzle".toUpperCase(),
-                          style: GoogleFonts.poppins(
-                            fontSize: context.scale(10),
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.accentFor(_todaysGame?.id ??''),
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-"Daily Challenge",
-                          style: GoogleFonts.poppins(
-                            fontSize: context.scale(16),
-                            fontWeight: FontWeight.w700,
-                            color: context.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-"Play today's featured puzzle",
-                          style: GoogleFonts.inter(
-                            fontSize: context.scale(12),
-                            color: context.textSecondary,
-                          ),
-                        ),
-                        Divider(color: context.textMuted, height: 20, thickness: 0.8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-"Current Streak: $_dailyStreak days",
-                              style: GoogleFonts.inter(
-                                fontSize: context.scale(11),
-                                fontWeight: FontWeight.w600,
-                                color: context.textSecondary,
-                              ),
-                            ),
-                            if (_dailyCompleted)
-                              Text(
-"Completed",
-                                style: GoogleFonts.inter(
-                                  fontSize: context.scale(11),
-                                  fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF4A5D4E),
-                                ),
-                              )
-                            else
-                              Text(
-"Play Now →",
-                                style: GoogleFonts.inter(
-                                  fontSize: context.scale(11),
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.accentFor(_todaysGame?.id ??''),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              // 1. Mindful Report Dashboard (replaces the raw daily streak block)
+              _buildProgressReportCard(),
+              const SizedBox(height: 24),
 
-              // Clean printed-paper Grid
+              // "Todays Exercises" section title
+              Text(
+                'Today\'s Exercises',
+                style: GoogleFonts.outfit(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: context.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // 2. Custom category pill tabs
+              _buildCategoryChips(),
+              const SizedBox(height: 16),
+
+              // 3. Grid of Clean Zen Game Cards
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.25,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 14,
+                  childAspectRatio: 1.15,
                 ),
                 itemCount: filteredGames.length,
                 itemBuilder: (ctx, idx) {
@@ -339,6 +286,162 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildProgressReportCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'YOUR PROGRESS REPORT',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.dustyMauve,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildReportStat(
+                _dailyStreak > 0 ? '$_dailyStreak Days' : '0 Days',
+                'Active Streak',
+                Icons.wb_sunny_outlined,
+                AppTheme.warmAmber,
+              ),
+              Container(
+                width: 1,
+                height: 36,
+                color: context.textMuted.withAlpha(40),
+              ),
+              _buildReportStat(
+                '$_completedCount Cleared',
+                'Total Puzzles',
+                Icons.check_circle_outline,
+                AppTheme.softSage,
+              ),
+              Container(
+                width: 1,
+                height: 36,
+                color: context.textMuted.withAlpha(40),
+              ),
+              _buildReportStat(
+                _dailyCompleted ? 'Complete' : 'Pending',
+                'Daily Challenge',
+                Icons.star_outline_rounded,
+                AppTheme.dustyMauve,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportStat(String value, String label, IconData icon, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
+              Text(
+                value,
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: context.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              color: context.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _categories.keys.map((cat) {
+          final isActive = _activeCategory == cat;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _activeCategory = cat;
+                  _ctrl.reset();
+                  _ctrl.forward();
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isActive ? AppTheme.dustyMauve : context.bgCard,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: isActive ? null : AppTheme.cardShadow,
+                ),
+                child: Text(
+                  cat,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isActive ? Colors.white : context.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _CircularProgressBadge extends StatelessWidget {
+  final double value; // 0.0 to 1.0
+  final Color color;
+
+  const _CircularProgressBadge({
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // If progress is 0, show a faint complete track instead of an empty line
+    final displayValue = value == 0.0 ? 0.05 : value;
+    return SizedBox(
+      width: 24,
+      height: 24,
+      child: CircularProgressIndicator(
+        value: displayValue,
+        backgroundColor: color.withAlpha(25),
+        valueColor: AlwaysStoppedAnimation<Color>(color),
+        strokeWidth: 2.5,
+      ),
     );
   }
 }
@@ -377,6 +480,10 @@ class _GameCardState extends State<_GameCard> {
   Widget build(BuildContext context) {
     final accent = AppTheme.accentFor(widget.game.id);
     final icon = _gameIcons[widget.game.id] ?? Icons.games_outlined;
+    
+    // Sector progress fraction: level 1 = 0% progress in this block of 5 levels, level 5 = 80% progress
+    final progressFraction = ((_level - 1) % 5) / 5.0;
+
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
@@ -385,66 +492,54 @@ class _GameCardState extends State<_GameCard> {
       },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
-        scale: _pressed ? 0.98 : 1.0,
-        duration: const Duration(milliseconds: 80),
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 100),
         child: Container(
           decoration: BoxDecoration(
             color: context.bgCard,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(
-              color: context.textMuted,
-              width: 0.8,
-            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppTheme.cardShadow,
           ),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(icon, color: accent, size: context.scale(18)),
-                  Text(
-'Level $_level',
-                    style: GoogleFonts.inter(
-                      fontSize: context.scale(10),
-                      fontWeight: FontWeight.w600,
-                      color: context.textSecondary,
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: accent.withAlpha(25),
+                      borderRadius: BorderRadius.circular(10),
                     ),
+                    child: Icon(icon, color: accent, size: 16),
+                  ),
+                  _CircularProgressBadge(
+                    value: progressFraction,
+                    color: accent,
                   ),
                 ],
               ),
               const Spacer(),
               Text(
                 widget.game.name,
-                style: GoogleFonts.poppins(
-                  fontSize: context.scale(13),
-                  fontWeight: FontWeight.w700,
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
                   color: context.textPrimary,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
-                widget.game.description,
+                'Level $_level',
                 style: GoogleFonts.inter(
-                  fontSize: context.scale(9.5),
+                  fontSize: 10,
                   color: context.textSecondary,
-                  height: 1.25,
+                  fontWeight: FontWeight.w500,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
-              if (_streak > 0) ...[
-                const SizedBox(height: 4),
-                Text(
-'Best Streak: $_streak',
-                  style: GoogleFonts.inter(
-                    fontSize: context.scale(9),
-                    fontWeight: FontWeight.w600,
-                    color: accent,
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -492,16 +587,22 @@ class _StatsTabState extends State<_StatsTab> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       children: [
-        Text('Progress Log', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary)),
-        Text('A record of your daily exercises.', style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary)),
+        Text(
+          'Progress Log',
+          style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary),
+        ),
+        Text(
+          'A record of your daily focus and exercises.',
+          style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary),
+        ),
         const SizedBox(height: 20),
         Container(
           decoration: BoxDecoration(
             color: context.bgCard,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: context.textMuted, width: 0.8),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppTheme.cardShadow,
           ),
           child: Column(
             children: kAllGames.map((g) {
@@ -511,23 +612,37 @@ class _StatsTabState extends State<_StatsTab> {
               return Column(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
                           children: [
-                            Icon(_gameIcons[g.id] ?? Icons.gamepad_outlined, size: 18, color: accent),
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: accent.withAlpha(25),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(_gameIcons[g.id] ?? Icons.gamepad_outlined, size: 16, color: accent),
+                            ),
                             const SizedBox(width: 12),
-                            Text(g.name, style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: context.textPrimary)),
+                            Text(
+                              g.name,
+                              style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: context.textPrimary),
+                            ),
                           ],
                         ),
-                        Text('Level $lvl${strk > 0 ?'• Streak $strk':''}', style: GoogleFonts.inter(fontSize: 12, color: context.textSecondary)),
+                        Text(
+                          'Level $lvl${strk > 0 ? ' • Streak $strk' : ''}',
+                          style: GoogleFonts.inter(fontSize: 12, color: context.textSecondary, fontWeight: FontWeight.w500),
+                        ),
                       ],
                     ),
                   ),
                   if (g != kAllGames.last)
-                    Divider(color: context.textMuted, height: 1, thickness: 0.8),
+                    Divider(color: context.textMuted.withAlpha(40), height: 1, thickness: 0.8),
                 ],
               );
             }).toList(),
@@ -549,16 +664,22 @@ class _ProfileTab extends StatelessWidget {
       listenable: settingsNotifier,
       builder: (context, _) {
         return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
           children: [
-            Text('Settings', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary)),
-            Text('Configure your quiet study space.', style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary)),
+            Text(
+              'Settings',
+              style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary),
+            ),
+            Text(
+              'Configure your quiet mindfulness space.',
+              style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary),
+            ),
             const SizedBox(height: 20),
             Container(
               decoration: BoxDecoration(
                 color: context.bgCard,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: context.textMuted, width: 0.8),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: AppTheme.cardShadow,
               ),
               child: Column(
                 children: [
@@ -567,24 +688,24 @@ class _ProfileTab extends StatelessWidget {
                     builder: (ctx, _) {
                       return _ProfileTile(
                         icon: themeNotifier.isDarkMode ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-                        title:'Dark Mode',
+                        title: 'Dark Mode',
                         trailing: Switch.adaptive(
                           value: themeNotifier.isDarkMode,
                           onChanged: (_) => themeNotifier.toggleTheme(),
-                          activeColor: AppTheme.forestGreen,
+                          activeColor: AppTheme.dustyMauve,
                         ),
                       );
                     },
                   ),
-                  Divider(color: context.textMuted, height: 1, thickness: 0.8),
+                  Divider(color: context.textMuted.withAlpha(40), height: 1, thickness: 0.8),
                   _ProfileTile(
                     icon: Icons.text_fields,
-                    title:'Font Size',
+                    title: 'Font Size',
                     subtitle: settingsNotifier.fontScale == 0.85
-                        ?'Small'
+                        ? 'Small'
                         : settingsNotifier.fontScale == 1.0
-                            ?'Normal'
-                            :'Large',
+                            ? 'Normal'
+                            : 'Large',
                     trailing: SizedBox(
                       width: 120,
                       child: Slider(
@@ -592,64 +713,64 @@ class _ProfileTab extends StatelessWidget {
                         min: 0.85,
                         max: 1.15,
                         divisions: 2,
-                        activeColor: AppTheme.forestGreen,
+                        activeColor: AppTheme.dustyMauve,
                         onChanged: (val) {
                           settingsNotifier.setFontScale(val);
                         },
                       ),
                     ),
                   ),
-                  Divider(color: context.textMuted, height: 1, thickness: 0.8),
+                  Divider(color: context.textMuted.withAlpha(40), height: 1, thickness: 0.8),
                   _ProfileTile(
                     icon: Icons.vibration,
-                    title:'Haptic Feedback',
+                    title: 'Haptic Feedback',
                     trailing: Switch.adaptive(
                       value: settingsNotifier.hapticEnabled,
                       onChanged: (val) => settingsNotifier.setHaptic(val),
-                      activeColor: AppTheme.forestGreen,
-                    ),
-                  ),
-                  Divider(color: context.textMuted, height: 1, thickness: 0.8),
+                      activeColor: AppTheme.dustyMauve,
+                        ),
+                      ),
+                  Divider(color: context.textMuted.withAlpha(40), height: 1, thickness: 0.8),
                   _ProfileTile(
                     icon: Icons.volume_up_outlined,
-                    title:'Sound Effects',
+                    title: 'Sound Effects',
                     trailing: Switch.adaptive(
                       value: settingsNotifier.soundEnabled,
                       onChanged: (val) => settingsNotifier.setSound(val),
-                      activeColor: AppTheme.forestGreen,
+                      activeColor: AppTheme.dustyMauve,
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 24),
-            _SectionHeader(title:'Data Management'),
+            _SectionHeader(title: 'Data Management'),
             const SizedBox(height: 8),
             Container(
               decoration: BoxDecoration(
                 color: context.bgCard,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: context.textMuted, width: 0.8),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: AppTheme.cardShadow,
               ),
               child: _ProfileTile(
                 icon: Icons.delete_outline,
-                title:'Clear All Saved Progress',
+                title: 'Clear All Saved Progress',
                 titleColor: Colors.redAccent,
                 onTap: () => _showResetDialog(context),
               ),
             ),
             const SizedBox(height: 24),
-            _SectionHeader(title:'Info'),
+            _SectionHeader(title: 'Info'),
             const SizedBox(height: 8),
             Container(
               decoration: BoxDecoration(
                 color: context.bgCard,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: context.textMuted, width: 0.8),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: AppTheme.cardShadow,
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Text(
-'CogniQ is designed to help cultivate mindful daily puzzles. Clear, distraction-free study.',
+                'CogniQ is designed to help cultivate mindful daily puzzles. Clear, distraction-free study.',
                 style: GoogleFonts.inter(fontSize: 12, color: context.textSecondary, height: 1.4),
               ),
             ),
@@ -665,13 +786,13 @@ class _ProfileTab extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: context.textMuted, width: 0.8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
-'Reset Progress?',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, color: context.textPrimary),
+          'Reset Progress?',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary),
         ),
         content: Text(
-'This will clear all your level data and streaks. This action cannot be undone.',
+          'This will clear all your level data and streaks. This action cannot be undone.',
           style: GoogleFonts.inter(color: context.textSecondary, fontSize: 13),
         ),
         actions: [
@@ -709,7 +830,7 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
         title.toUpperCase(),
-        style: GoogleFonts.poppins(
+        style: GoogleFonts.outfit(
           color: context.textSecondary,
           fontSize: 11,
           fontWeight: FontWeight.bold,
@@ -731,10 +852,12 @@ class _ProfileTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final trailingWidget = trailing;
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
             Icon(icon, color: titleColor ?? context.textSecondary, size: 20),
@@ -743,10 +866,10 @@ class _ProfileTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: GoogleFonts.poppins(
+                  Text(title, style: GoogleFonts.outfit(
                     color: titleColor ?? context.textPrimary,
                     fontWeight: FontWeight.w600,
-                    fontSize: 13.5,
+                    fontSize: 14,
                   )),
                   if (subtitle != null) ...[
                     const SizedBox(height: 2),
@@ -758,7 +881,7 @@ class _ProfileTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (trailing != null) trailing!,
+            if (trailingWidget != null) trailingWidget,
           ],
         ),
       ),
@@ -776,17 +899,16 @@ class _DailyTab extends StatefulWidget {
 class _DailyTabState extends State<_DailyTab> {
   int _streak = 0;
   bool _completedToday = false;
-  String _dateStr ='';
+  String _dateStr = '';
   late GameInfo _todaysGame;
   int _todaysLevelIndex = 0;
   bool _loading = true;
   Timer? _countdownTimer;
-  String _timeLeft ='';
+  String _timeLeft = '';
 
   @override
   void initState() {
     super.initState();
-    // Default synchronous initialization to avoid LateInitializationError
     _todaysGame = kAllGames[0];
     _loadDailyState();
     _startCountdown();
@@ -812,22 +934,22 @@ class _DailyTabState extends State<_DailyTab> {
     final now = DateTime.now().toUtc();
     final tomorrow = DateTime.utc(now.year, now.month, now.day + 1);
     final diff = tomorrow.difference(now);
-    final h = diff.inHours.toString().padLeft(2,'0');
-    final m = (diff.inMinutes % 60).toString().padLeft(2,'0');
-    final s = (diff.inSeconds % 60).toString().padLeft(2,'0');
-    return'$h:$m:$s';
+    final h = diff.inHours.toString().padLeft(2, '0');
+    final m = (diff.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
   }
 
   Future<void> _loadDailyState() async {
     final now = DateTime.now().toUtc();
-    _dateStr ="${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}";
+    _dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
     final seed = now.year * 10000 + now.month * 100 + now.day;
 
     _todaysGame = kAllGames[seed % kAllGames.length];
     _todaysLevelIndex = (seed * 7) % 30;
 
     final prefs = await SharedPreferences.getInstance();
-    final lastCompleted = prefs.getString('daily_last_completed_date') ??'';
+    final lastCompleted = prefs.getString('daily_last_completed_date') ?? '';
     _streak = prefs.getInt('daily_streak') ?? 0;
 
     if (lastCompleted.isNotEmpty && lastCompleted != _dateStr) {
@@ -855,7 +977,7 @@ class _DailyTabState extends State<_DailyTab> {
 
     final prefs = await SharedPreferences.getInstance();
     final gameId = _todaysGame.id;
-    final levelKey ='level_$gameId';
+    final levelKey = 'level_$gameId';
 
     final realLevel = prefs.getInt(levelKey) ?? 0;
     await prefs.setInt('daily_backup_$gameId', realLevel);
@@ -876,7 +998,7 @@ class _DailyTabState extends State<_DailyTab> {
       settingsNotifier.hapticSuccess();
       
       int newStreak = _streak;
-      final lastCompleted = updatedPrefs.getString('daily_last_completed_date') ??'';
+      final lastCompleted = updatedPrefs.getString('daily_last_completed_date') ?? '';
       if (lastCompleted != _dateStr) {
         if (lastCompleted.isEmpty) {
           newStreak = 1;
@@ -915,11 +1037,11 @@ class _DailyTabState extends State<_DailyTab> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: context.textMuted, width: 0.8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Center(
           child: Text(
-'Challenge Completed!',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w800, color: const Color(0xFF4A5D4E), fontSize: 20),
+            'Challenge Completed!',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppTheme.softSage, fontSize: 20),
           ),
         ),
         content: Column(
@@ -927,16 +1049,16 @@ class _DailyTabState extends State<_DailyTab> {
           children: [
             const SizedBox(height: 8),
             Text(
-'$_streak',
-              style: GoogleFonts.poppins(fontSize: 44, fontWeight: FontWeight.w900, color: const Color(0xFF4A5D4E)),
+              '$_streak',
+              style: GoogleFonts.outfit(fontSize: 44, fontWeight: FontWeight.w900, color: AppTheme.softSage),
             ),
             Text(
-'Day Streak',
+              'Day Streak',
               style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
             Text(
-'You cleared today\'s challenge in ${_todaysGame.name}!',
+              'You cleared today\'s challenge in ${_todaysGame.name}!',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(color: context.textPrimary, fontSize: 14),
             ),
@@ -946,7 +1068,7 @@ class _DailyTabState extends State<_DailyTab> {
           Center(
             child: TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: Text('Continue', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: const Color(0xFF4A5D4E))),
+              child: Text('Continue', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppTheme.softSage)),
             ),
           ),
         ],
@@ -958,36 +1080,58 @@ class _DailyTabState extends State<_DailyTab> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final accent = AppTheme.accentFor(_todaysGame.id);
+
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       children: [
-        Text('Today\'s Puzzle', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary)),
-        Text('A new exercise is selected every day.', style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary)),
+        // Title & subtitle
+        Text(
+          'Daily Dose of Zen',
+          style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary),
+        ),
+        Text(
+          'A new exercise is selected every day to center your mind.',
+          style: GoogleFonts.inter(fontSize: 13, color: context.textSecondary),
+        ),
         const SizedBox(height: 20),
+
+        // Custom Sunset illustration
+        const ZenSunsetWidget(height: 180),
+        const SizedBox(height: 24),
+
+        // Main Featured Game block
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: context.bgCard,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: context.textMuted, width: 0.8),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppTheme.cardShadow,
           ),
           child: Column(
             children: [
               Text(
-                _completedToday ?'COMPLETED':'TODAY\'S FEATURED GAME',
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
+                _completedToday ? 'COMPLETED' : 'TODAY\'S FEATURED EXERCISE',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
                   fontWeight: FontWeight.w800,
-                  color: _completedToday ? const Color(0xFF4A5D4E) : accent,
+                  color: _completedToday ? AppTheme.softSage : accent,
                   letterSpacing: 1.2,
                 ),
               ),
+              const SizedBox(height: 20),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(25),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(_gameIcons[_todaysGame.id] ?? Icons.gamepad_outlined, size: 28, color: accent),
+              ),
               const SizedBox(height: 16),
-              Icon(_gameIcons[_todaysGame.id] ?? Icons.gamepad_outlined, size: 48, color: accent),
-              const SizedBox(height: 12),
               Text(
                 _todaysGame.name,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.outfit(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: context.textPrimary,
@@ -995,10 +1139,11 @@ class _DailyTabState extends State<_DailyTab> {
               ),
               const SizedBox(height: 4),
               Text(
-'Level ${_todaysLevelIndex + 1}',
+                'Level ${_todaysLevelIndex + 1}',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   color: context.textSecondary,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(height: 12),
@@ -1013,28 +1158,34 @@ class _DailyTabState extends State<_DailyTab> {
               ),
               const SizedBox(height: 24),
               if (_completedToday)
-                const Icon(Icons.check_circle_outline, color: Color(0xFF4A5D4E), size: 36)
+                const Icon(Icons.check_circle_outline, color: AppTheme.softSage, size: 36)
               else
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: accent,
-                    side: BorderSide(color: accent, width: 0.8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.dustyMauve,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 14),
                   ),
                   onPressed: _playChallenge,
-                  child: Text('Start Challenge', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                  child: Text(
+                    'Start Exercise',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
                 ),
             ],
           ),
         ),
-        const SizedBox(height: 30),
+        const SizedBox(height: 20),
+
+        // Stats summary row
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: context.bgCard,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: context.textMuted, width: 0.8),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppTheme.cardShadow,
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1042,17 +1193,39 @@ class _DailyTabState extends State<_DailyTab> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('DAILY STREAK', style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold, color: context.textSecondary, letterSpacing: 1.2)),
+                  Text(
+                    'DAILY STREAK',
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: context.textSecondary,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text('$_streak consecutive days', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: context.textPrimary)),
+                  Text(
+                    '$_streak consecutive days',
+                    style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: context.textPrimary),
+                  ),
                 ],
               ),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('NEXT PUZZLE IN', style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold, color: context.textSecondary, letterSpacing: 1.2)),
+                  Text(
+                    'NEXT PUZZLE IN',
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: context.textSecondary,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(_timeLeft, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: context.textPrimary)),
+                  Text(
+                    _timeLeft,
+                    style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: context.textPrimary),
+                  ),
                 ],
               ),
             ],

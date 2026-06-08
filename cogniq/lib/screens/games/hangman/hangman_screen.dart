@@ -57,9 +57,27 @@ class _HangmanScreenState extends State<HangmanScreen> {
     if (mounted) {
       setState(() {
         _levelIndex = savedLevel % _kGameWords.length;
-        _loadLevel();
+        _loadLevel(prefs);
       });
     }
+  }
+
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('hangman_word', _word);
+    await prefs.setStringList('hangman_guessed', _guessed.toList());
+    await prefs.setInt('hangman_wrong', _wrong);
+    await prefs.setBool('hangman_won', _won);
+    await prefs.setBool('hangman_gameover', _gameOver);
+  }
+
+  Future<void> _clearState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('hangman_word');
+    await prefs.remove('hangman_guessed');
+    await prefs.remove('hangman_wrong');
+    await prefs.remove('hangman_won');
+    await prefs.remove('hangman_gameover');
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
@@ -73,7 +91,7 @@ class _HangmanScreenState extends State<HangmanScreen> {
     if (earned && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('🎉 Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
           backgroundColor: AppTheme.accentFor('hangman'),
         ),
       );
@@ -94,12 +112,42 @@ class _HangmanScreenState extends State<HangmanScreen> {
     });
   }
 
-  void _loadLevel() {
-    _word = _kGameWords[_levelIndex % _kGameWords.length];
-    _guessed = {}; _wrong = 0; _gameOver = false; _won = false;
+  String _pickWordForLevel(int level) {
+    final rng = Random();
+    if (level < 15) {
+      return _kGameWords[rng.nextInt(26)];
+    } else if (level < 35) {
+      return _kGameWords[26 + rng.nextInt(26)];
+    } else {
+      final hardCount = _kGameWords.length - 52;
+      return _kGameWords[52 + rng.nextInt(hardCount)];
+    }
   }
 
-  void _reset() => setState(() => _loadLevel());
+  void _loadLevel([SharedPreferences? prefs, bool forceNewWord = false]) {
+    if (prefs != null && !forceNewWord) {
+      final savedWord = prefs.getString('hangman_word');
+      if (savedWord != null) {
+        _word = savedWord;
+        _guessed = (prefs.getStringList('hangman_guessed') ?? []).toSet();
+        _wrong = prefs.getInt('hangman_wrong') ?? 0;
+        _won = prefs.getBool('hangman_won') ?? false;
+        _gameOver = prefs.getBool('hangman_gameover') ?? false;
+        return;
+      }
+    }
+    _word = _pickWordForLevel(_levelIndex);
+    _guessed = {};
+    _wrong = 0;
+    _gameOver = false;
+    _won = false;
+    _clearState();
+  }
+
+  void _reset() {
+    _clearState();
+    setState(() => _loadLevel(null, true));
+  }
 
   void _guess(String letter) {
     if (_gameOver || _guessed.contains(letter)) return;
@@ -114,14 +162,16 @@ class _HangmanScreenState extends State<HangmanScreen> {
         _won = true;
         _savePersistedLevel(_levelIndex);
       }
+      _saveState();
     });
   }
 
   void _nextLevel() {
+    _clearState();
     setState(() {
       _levelIndex = (_levelIndex + 1) % _kGameWords.length;
       _savePersistedLevel(_levelIndex);
-      _loadLevel();
+      _loadLevel(null, true);
     });
   }
 
@@ -224,11 +274,28 @@ class _HangmanScreenState extends State<HangmanScreen> {
             child: Container(
               width: context.scale(32), height: context.scale(40), margin: const EdgeInsets.symmetric(horizontal: 2),
               decoration: BoxDecoration(
-                color: correct ? accentColor : wrong ? (context.isDarkMode ? const Color(0xFF3A3A3C) : const Color(0xFFE5E7EB)) : (context.isDarkMode ? const Color(0xFF818384) : const Color(0xFFD1D5DB)),
-                borderRadius: BorderRadius.circular(4),
+                color: correct 
+                    ? accentColor 
+                    : wrong 
+                        ? (context.isDarkMode ? const Color(0xFF222232) : const Color(0xFFEFEFF4)) 
+                        : context.bgCard,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: correct 
+                      ? accentColor 
+                      : wrong 
+                          ? Colors.transparent 
+                          : context.textMuted.withAlpha(65),
+                  width: 1.0,
+                ),
+                boxShadow: (correct || wrong) ? null : AppTheme.cardShadow,
               ),
-              child: Center(child: Text(l, style: GoogleFonts.outfit(fontSize: context.scale(13), fontWeight: FontWeight.w600,
-                color: wrong ? (context.isDarkMode ? const Color(0xFF555555) : const Color(0xFF9CA3AF)) : context.textPrimary))),
+              child: Center(child: Text(l, style: GoogleFonts.outfit(fontSize: context.scale(13), fontWeight: FontWeight.bold,
+                color: correct
+                    ? Colors.white
+                    : wrong 
+                        ? context.textMuted.withAlpha(120) 
+                        : context.textPrimary))),
             ));
         }).toList()),
       )).toList(),

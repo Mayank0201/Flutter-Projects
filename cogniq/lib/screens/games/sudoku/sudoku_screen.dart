@@ -1311,7 +1311,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                           child: Container(
                             decoration: BoxDecoration(
                               color: isSel 
-                                  ? accentColor.withAlpha(80) 
+                                  ? accentColor.withAlpha(45) 
                                   : isOrig 
                                       ? context.bgSurface 
                                       : context.bgCard,
@@ -1322,15 +1322,13 @@ class _SudokuScreenState extends State<SudokuScreen> {
                             ),
                             child: Center(
                               child: Text(
-                                value != 0 ?'$value':'',
+                                value != 0 ? '$value' : '',
                                 style: GoogleFonts.outfit(
                                   fontSize: context.scale(size == 9 ? 15 : 18),
-                                  fontWeight: isOrig ? FontWeight.w900 : FontWeight.w500,
+                                  fontWeight: isOrig ? FontWeight.w900 : FontWeight.w600,
                                   color: isOrig 
                                       ? context.textPrimary 
-                                      : isSel 
-                                          ? Colors.white 
-                                          : accentColor,
+                                      : accentColor,
                                 ),
                               ),
                             ),

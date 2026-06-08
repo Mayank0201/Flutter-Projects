@@ -1256,7 +1256,13 @@ class _FlagleScreenState extends State<FlagleScreen> {
         opacity: _revealed[idx] ? 0.0 : 1.0,
         duration: const Duration(milliseconds: 300),
         child: Container(
-          color: context.bgSurface,
+          decoration: BoxDecoration(
+            color: context.bgSurface,
+            border: Border.all(
+              color: context.isDarkMode ? Colors.black26 : const Color(0xFFE5E7EB),
+              width: 1.0,
+            ),
+          ),
           child: Center(
             child: Text(
               '${idx + 1}',

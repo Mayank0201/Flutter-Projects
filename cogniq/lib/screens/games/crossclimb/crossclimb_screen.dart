@@ -269,22 +269,37 @@ class CrossClimbScreen extends StatefulWidget {
 class _CrossClimbScreenState extends State<CrossClimbScreen> {
   int _levelIndex = 0;
   late CrossClimbLevel _level;
-  late List<String?> _slots; // 5 slots, null = empty
-  late List<String> _shuffledAnswers; // Shuffled answer tiles
-  String? _selectedTile; // For tap-to-place flow
   late List<bool?> _results; // null = unchecked/neutral, true = correct, false = wrong
   bool _won = false;
-
   int _hintCount = 0;
+
+  late List<TextEditingController> _controllers;
+  late List<FocusNode> _focusNodes;
 
   @override
   void initState() {
     super.initState();
     _level = _kLevels[0];
-    _slots = List.filled(5, null);
-    _shuffledAnswers = [];
+    _controllers = List.generate(3, (_) => TextEditingController());
+    _focusNodes = List.generate(3, (_) => FocusNode());
+    for (final node in _focusNodes) {
+      node.addListener(() {
+        if (mounted) setState(() {});
+      });
+    }
     _results = List.filled(5, null);
     _initLevel();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _initLevel() async {
@@ -294,9 +309,21 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
     if (mounted) {
       setState(() {
         _levelIndex = savedLevel % _kLevels.length;
-        _loadLevel();
+        _loadLevel(prefs);
       });
     }
+  }
+
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('crossclimb_slots', _controllers.map((c) => c.text).toList());
+    await prefs.setBool('crossclimb_won', _won);
+  }
+
+  Future<void> _clearState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('crossclimb_slots');
+    await prefs.remove('crossclimb_won');
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
@@ -317,62 +344,102 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
     }
   }
 
-  Future<void> _useHint() async {
-    if (_won || _hintCount <= 0) return;
-    int idx = -1;
-    for (int i = 0; i < _level.answers.length; i++) {
-      if (_slots[i] != _level.answers[i]) {
-        idx = i;
-        break;
+  bool _differsByOne(String? a, String? b) {
+    if (a == null || b == null) return false;
+    final cleanA = a.trim().toUpperCase();
+    final cleanB = b.trim().toUpperCase();
+    if (cleanA.isEmpty || cleanB.isEmpty) return false;
+    if (cleanA.length != cleanB.length) return false;
+    int diff = 0;
+    for (int i = 0; i < cleanA.length; i++) {
+      if (cleanA[i] != cleanB[i]) {
+        diff++;
+        if (diff > 1) return false;
       }
     }
-    if (idx == -1) return;
+    return diff == 1;
+  }
+
+  Future<void> _useHint() async {
+    if (_won || _hintCount <= 0) return;
 
     await HintManager.useHint('crossclimb');
     final newCount = await HintManager.getHints('crossclimb');
+
     setState(() {
       _hintCount = newCount;
-      final correctWord = _level.answers[idx];
-      // If correctWord was in another slot, clear it
-      final existingIdx = _slots.indexOf(correctWord);
-      if (existingIdx != -1) {
-        _slots[existingIdx] = null;
+      int idx = -1;
+      for (int i = 1; i <= 3; i++) {
+        if (_controllers[i - 1].text.toUpperCase().trim() != _level.answers[i]) {
+          idx = i;
+          break;
+        }
       }
-      // If a word was in this slot, return it to pool
-      final replacedWord = _slots[idx];
-      if (replacedWord != null && !_shuffledAnswers.contains(replacedWord)) {
-        _shuffledAnswers.add(replacedWord);
-      }
-      // Remove correctWord from pool
-      _shuffledAnswers.remove(correctWord);
-      _slots[idx] = correctWord;
-      _results[idx] = true;
-      _won = _slots.every((w) => w != null) && List.generate(5, (i) => _slots[i] == _level.answers[i]).every((r) => r);
-      if (_won) {
-        _savePersistedLevel(_levelIndex);
+      if (idx != -1) {
+        _controllers[idx - 1].text = _level.answers[idx];
+        _results[idx] = true;
+
+        bool allCorrect = true;
+        for (int i = 1; i <= 3; i++) {
+          if (_controllers[i - 1].text.toUpperCase().trim() != _level.answers[i]) {
+            allCorrect = false;
+          }
+        }
+        if (allCorrect) {
+          _won = true;
+          _savePersistedLevel(_levelIndex);
+          _clearState();
+        } else {
+          _saveState();
+        }
       }
     });
   }
 
-  void _loadLevel() {
+  void _loadLevel([SharedPreferences? prefs]) {
     _level = _kLevels[_levelIndex % _kLevels.length];
-    _slots = List.filled(_level.clues.length, null);
-    _shuffledAnswers = List<String>.from(_level.answers)..shuffle();
-    _selectedTile = null;
-    _results = List.filled(_level.clues.length, null);
+
+    if (prefs != null && prefs.containsKey('crossclimb_slots')) {
+      final savedSlots = prefs.getStringList('crossclimb_slots');
+      if (savedSlots != null && savedSlots.length == 3) {
+        for (int i = 0; i < 3; i++) {
+          _controllers[i].text = savedSlots[i];
+        }
+      } else {
+        for (int i = 0; i < 3; i++) {
+          _controllers[i].clear();
+        }
+      }
+      _won = prefs.getBool('crossclimb_won') ?? false;
+      _results = List.filled(5, null);
+      return;
+    }
+
+    for (int i = 0; i < 3; i++) {
+      _controllers[i].clear();
+    }
+    _results = List.filled(5, null);
     _won = false;
+    _clearState();
   }
 
   void _check() {
-    final newResults = List<bool?>.filled(_level.answers.length, null);
-    for (int i = 0; i < _level.answers.length; i++) {
-      newResults[i] = _slots[i] == _level.answers[i];
+    final newResults = List<bool?>.filled(5, null);
+    bool allCorrect = true;
+    for (int i = 1; i <= 3; i++) {
+      final input = _controllers[i - 1].text.toUpperCase().trim();
+      final correct = input == _level.answers[i];
+      newResults[i] = correct;
+      if (!correct) allCorrect = false;
     }
     setState(() {
       _results = newResults;
-      _won = newResults.every((r) => r == true);
-      if (_won) {
+      if (allCorrect) {
+        _won = true;
         _savePersistedLevel(_levelIndex);
+        _clearState();
+      } else {
+        _saveState();
       }
     });
   }
@@ -391,43 +458,211 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
     });
   }
 
-  void _selectTile(String tile) {
-    if (_won) return;
-    setState(() {
-      if (_selectedTile == tile) {
-        _selectedTile = null;
-      } else {
-        _selectedTile = tile;
-      }
-    });
+  Widget _buildNumberCircle(int num) {
+    return Container(
+      width: context.scale(28),
+      height: context.scale(28),
+      decoration: BoxDecoration(
+        color: AppTheme.crossclimbPurple.withOpacity(0.2),
+        shape: BoxShape.circle,
+        border: Border.all(color: AppTheme.crossclimbPurple.withOpacity(0.7), width: 1.5),
+      ),
+      child: Center(
+        child: Text(
+          '$num',
+          style: GoogleFonts.outfit(
+            color: AppTheme.crossclimbPurple,
+            fontWeight: FontWeight.w700,
+            fontSize: context.scale(12),
+          ),
+        ),
+      ),
+    );
   }
 
-  void _placeTile(int slotIdx) {
-    if (_won) return;
-    setState(() {
-      // If a tile is selected, place it here
-      if (_selectedTile != null) {
-        final placedTile = _selectedTile!;
-        // If this slot already has a tile, return it to pool
-        final prevTile = _slots[slotIdx];
-        if (prevTile != null) {
-          _shuffledAnswers.add(prevTile);
-        }
-        // Place new tile
-        _slots[slotIdx] = placedTile;
-        _shuffledAnswers.remove(placedTile);
-        _selectedTile = null;
-        _results[slotIdx] = null; // Reset result status
-      } else {
-        // No tile selected, tap to remove tile from slot back to pool
-        final tile = _slots[slotIdx];
-        if (tile != null) {
-          _slots[slotIdx] = null;
-          _shuffledAnswers.add(tile);
-          _results[slotIdx] = null;
-        }
-      }
-    });
+  Widget _buildConnectorLine(String? wordA, String? wordB) {
+    final connected = _differsByOne(wordA, wordB);
+    return Center(
+      child: Container(
+        width: 4,
+        height: 24,
+        decoration: BoxDecoration(
+          color: connected ? AppTheme.wordleGreen : Colors.redAccent.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(2),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBookendRow(int idx, String label) {
+    final word = _level.answers[idx];
+    return Row(
+      children: [
+        _buildNumberCircle(idx + 1),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Container(
+            height: context.scale(42),
+            decoration: BoxDecoration(
+              color: context.bgSurface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: context.textMuted.withAlpha(60), width: 1.2),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Text(
+                    word,
+                    style: GoogleFonts.outfit(
+                      color: context.textPrimary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: context.scale(15),
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppTheme.crossclimbPurple.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      label,
+                      style: GoogleFonts.outfit(
+                        color: AppTheme.crossclimbPurple,
+                        fontSize: context.scale(10),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSolvingRow(int slotIdx) {
+    final controller = _controllers[slotIdx - 1];
+    final focusNode = _focusNodes[slotIdx - 1];
+    final answerWord = _level.answers[slotIdx];
+    final wordLen = answerWord.length;
+    final text = controller.text;
+    final result = _results[slotIdx];
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: AppTheme.cardShadow,
+        border: Border.all(
+          color: result != null
+              ? (result ? AppTheme.wordleGreen.withOpacity(0.5) : Colors.redAccent.withOpacity(0.5))
+              : (focusNode.hasFocus ? AppTheme.crossclimbPurple.withOpacity(0.5) : Colors.transparent),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildNumberCircle(slotIdx + 1),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _level.clues[slotIdx],
+                  style: GoogleFonts.outfit(
+                    color: context.textPrimary,
+                    fontSize: context.scale(13),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (result != null)
+                Icon(
+                  result ? Icons.check_circle : Icons.cancel,
+                  color: result ? AppTheme.wordleGreen : Colors.redAccent,
+                  size: 20,
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () {
+              focusNode.requestFocus();
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(wordLen, (charIdx) {
+                final char = charIdx < text.length ? text[charIdx].toUpperCase() : '';
+                final isCurrentChar = charIdx == text.length && focusNode.hasFocus;
+                return Container(
+                  width: context.scale(38),
+                  height: context.scale(38),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: focusNode.hasFocus ? AppTheme.crossclimbPurple.withOpacity(0.05) : context.bgSurface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: result != null
+                          ? (result ? AppTheme.wordleGreen : Colors.redAccent)
+                          : (isCurrentChar
+                              ? AppTheme.crossclimbPurple
+                              : (char.isNotEmpty ? context.textPrimary.withOpacity(0.6) : context.textMuted.withAlpha(60))),
+                      width: isCurrentChar || result != null ? 2 : 1.2,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      char,
+                      style: GoogleFonts.outfit(
+                        fontSize: context.scale(16),
+                        fontWeight: FontWeight.bold,
+                        color: context.textPrimary,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          SizedBox(
+            width: 0,
+            height: 0,
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              maxLength: wordLen,
+              textCapitalization: TextCapitalization.characters,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                counterText: '',
+                border: InputBorder.none,
+              ),
+              onChanged: (val) {
+                setState(() {
+                  _results[slotIdx] = null;
+                  _saveState();
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -469,222 +704,62 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
           Padding(padding: const EdgeInsets.only(right: 12), child: Center(child: Text('Level ${_levelIndex + 1}', style: GoogleFonts.outfit(color: AppTheme.crossclimbPurple, fontSize: context.scale(13))))),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Text('Climb the word ladder! Drag or tap words to arrange them. Each word swaps exactly ONE letter.', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(children: [
-                ...List.generate(_level.clues.length, (i) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 0),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Ladder connector
-                      SizedBox(
-                        width: context.scale(28),
-                        child: Column(
-                          children: [
-                            Container(
-                              width: context.scale(28),
-                              height: context.scale(28),
-                              decoration: BoxDecoration(
-                                color: AppTheme.crossclimbPurple.withOpacity(0.2),
-                                shape: BoxShape.circle,
-                                border: Border.all(color: AppTheme.crossclimbPurple.withOpacity(0.7), width: 1.5),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '${i + 1}',
-                                  style: GoogleFonts.outfit(
-                                    color: AppTheme.crossclimbPurple,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: context.scale(12),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (i < _level.clues.length - 1)
-                              Container(
-                                width: 2,
-                                height: context.scale(45),
-                                color: AppTheme.crossclimbPurple.withOpacity(0.3),
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_level.clues[i], style: GoogleFonts.outfit(color: context.textPrimary, fontSize: context.scale(13))),
-                            const SizedBox(height: 4),
-                            DragTarget<String>(
-                              onAcceptWithDetails: (details) {
-                                final data = details.data;
-                                setState(() {
-                                  // Clear other slot if it was there
-                                  final oldIdx = _slots.indexOf(data);
-                                  if (oldIdx != -1) {
-                                    _slots[oldIdx] = null;
-                                  }
-                                  final prev = _slots[i];
-                                  if (prev != null) {
-                                    _shuffledAnswers.add(prev);
-                                  }
-                                  _slots[i] = data;
-                                  _shuffledAnswers.remove(data);
-                                  _results[i] = null;
-                                });
-                              },
-                              builder: (context, candidateData, rejectedData) {
-                                final currentWord = _slots[i];
-                                return GestureDetector(
-                                  onTap: () => _placeTile(i),
-                                  child: Container(
-                                    height: context.scale(42),
-                                    decoration: BoxDecoration(
-                                      color: currentWord != null ? AppTheme.crossclimbPurple.withOpacity(0.15) : context.bgSurface,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: _results[i] != null
-                                            ? (_results[i]! ? AppTheme.wordleGreen : Colors.redAccent)
-                                            : (currentWord != null ? AppTheme.crossclimbPurple : AppTheme.crossclimbPurple.withOpacity(0.3)),
-                                        width: currentWord != null ? 2 : 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.only(left: 12),
-                                          child: Text(
-                                            currentWord ?? ('• ' * _level.answers[i].length),
-                                            style: GoogleFonts.outfit(
-                                              color: currentWord != null ? context.textPrimary : context.textMuted.withOpacity(0.4),
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: context.scale(15),
-                                              letterSpacing: 2,
-                                            ),
-                                          ),
-                                        ),
-                                        if (_results[i] != null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(right: 12),
-                                            child: Icon(
-                                              _results[i]! ? Icons.check_circle : Icons.cancel,
-                                              color: _results[i]! ? AppTheme.wordleGreen : Colors.redAccent,
-                                              size: 20,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-                const SizedBox(height: 24),
-                if (!_won) ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.crossclimbPurple, padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                  onPressed: _check,
-                  child: Text('Check Answers', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700, fontSize: context.scale(14))),
-                ),
-                if (_won) ...[
-                  Text('You climbed to the top!', style: GoogleFonts.outfit(fontSize: context.scale(20), color: AppTheme.crossclimbPurple, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.crossclimbPurple, padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                    onPressed: _nextLevel,
-                    child: Text('Next Level →', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700, fontSize: context.scale(14))),
-                  ),
-                ],
-              ]),
-            ),
-          ),
-          // Word tile pool at bottom
-          if (!_won && _shuffledAnswers.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: context.bgSurface,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Word Pool:', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13, color: context.textSecondary)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _shuffledAnswers.map((word) {
-                      final isSelected = _selectedTile == word;
-                      return Draggable<String>(
-                        data: word,
-                        feedback: Material(
-                          color: Colors.transparent,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.crossclimbPurple,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              word,
-                              style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                        childWhenDragging: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: context.bgDark.withOpacity(0.5),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: context.textMuted.withOpacity(0.2)),
-                          ),
-                          child: Text(
-                            word,
-                            style: GoogleFonts.outfit(color: context.textMuted, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        child: GestureDetector(
-                          onTap: () => _selectTile(word),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isSelected ? AppTheme.crossclimbPurple : AppTheme.crossclimbPurple.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isSelected ? AppTheme.crossclimbPurple : AppTheme.crossclimbPurple.withOpacity(0.4),
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Text(
-                              word,
-                              style: GoogleFonts.outfit(
-                                color: isSelected ? Colors.white : context.textPrimary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Text(
+                'Solve the clues by typing words to build a valid word ladder!',
+                style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
+                textAlign: TextAlign.center,
               ),
             ),
-          const SizedBox(height: 12),
-        ],
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    _buildBookendRow(0, 'Start Word'),
+                    _buildConnectorLine(_level.answers[0], _controllers[0].text),
+                    _buildSolvingRow(1),
+                    _buildConnectorLine(_controllers[0].text, _controllers[1].text),
+                    _buildSolvingRow(2),
+                    _buildConnectorLine(_controllers[1].text, _controllers[2].text),
+                    _buildSolvingRow(3),
+                    _buildConnectorLine(_controllers[2].text, _level.answers[4]),
+                    _buildBookendRow(4, 'End Word'),
+                    const SizedBox(height: 24),
+                    if (!_won)
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.crossclimbPurple,
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: _check,
+                        child: Text('Check Answers', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700, fontSize: context.scale(14))),
+                      ),
+                    if (_won) ...[
+                      Text('You climbed to the top!', style: GoogleFonts.outfit(fontSize: context.scale(18), color: AppTheme.crossclimbPurple, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.crossclimbPurple,
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: _nextLevel,
+                        child: Text('Next Level →', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700, fontSize: context.scale(14))),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
       ),
     );
   }

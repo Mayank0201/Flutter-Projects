@@ -8,13 +8,12 @@ import'../../../theme/app_theme.dart';
 import'../../../theme/settings_manager.dart';
 import'../../../utils/hint_manager.dart';
 
-// 30 levels: starting sequence length for each level
 const List<int> _kStartLen = [
-  2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
-  7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
-  12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
+  3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+  13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+  23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
   // 10 new levels
-  23, 24, 25, 26, 27, 28, 29, 30, 32, 35,
+  33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
 ];
 
 enum _Phase { idle, playing, input, correct, wrong }
@@ -38,9 +37,9 @@ class _SequenceScreenState extends State<SequenceScreen> {
 
   static const _gridSize = 9; // 3x3
   static const List<Color> _tileColors = [
-    Color(0xFFEF4444), Color(0xFF3B82F6), Color(0xFFF59E0B),
-    Color(0xFF10B981), Color(0xFF8B5CF6), Color(0xFFEC4899),
-    Color(0xFF14B8A6), Color(0xFFF97316), Color(0xFF6366F1),
+    Color(0xFF86A380), Color(0xFF8FA8C4), Color(0xFFD29891),
+    Color(0xFFD8B28B), Color(0xFFB1A2C6), Color(0xFF8EBEB5),
+    Color(0xFFDEAA94), Color(0xFF98B8A6), Color(0xFFA5A5BC),
   ];
 
   int _hintCount = 0;
@@ -271,16 +270,14 @@ class _SequenceScreenState extends State<SequenceScreen> {
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         decoration: BoxDecoration(
-                          color: isHighlighted
-                              ? baseColor
-                              : (context.isDarkMode ? const Color(0xFF2A2A35) : const Color(0xFFE5E7EB)),
+                          color: isHighlighted ? baseColor : context.bgCard,
                           borderRadius: BorderRadius.circular(12),
                           border: isHighlighted
                               ? Border.all(color: Colors.white, width: 3)
-                              : null,
+                              : Border.all(color: context.textMuted.withAlpha(45), width: 1.0),
                           boxShadow: isHighlighted
                               ? [BoxShadow(color: baseColor.withAlpha(120), blurRadius: 16, spreadRadius: 2)]
-                              : null,
+                              : AppTheme.cardShadow,
                         ),
                       ),
                     );

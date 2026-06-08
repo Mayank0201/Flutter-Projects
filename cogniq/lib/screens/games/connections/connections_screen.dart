@@ -29,7 +29,7 @@ const List<ConnectionsPuzzle> _kPuzzles = [
     ConnectionsGroup(category: '🍎 Fruits', words: ['APPLE', 'MANGO', 'GRAPE', 'PEACH'], color: Color(0xFF6AAA64)),
     ConnectionsGroup(category: '⚽ Sports', words: ['SOCCER', 'TENNIS', 'RUGBY', 'POLO'], color: Color(0xFF4F9EE8)),
     ConnectionsGroup(category: '🗣️ Homophones of sky/weather words', words: ['REIGN', 'SON', 'BLEW', 'DUE'], color: Color(0xFFE67E22)),
-    ConnectionsGroup(category: '🔗 Words before "JACK"', words: ['FLAP', 'MONTEREY', 'APPLE', 'UNION'], color: Color(0xFFE84F9E)),
+    ConnectionsGroup(category: '🔗 Words before "JACK"', words: ['FLAP', 'MONTEREY', 'BLACK', 'UNION'], color: Color(0xFFE84F9E)),
   ]),
   ConnectionsPuzzle(title: 'Puzzle 3', groups: [
     ConnectionsGroup(category: '☁️ Weather', words: ['RAIN', 'SNOW', 'HAIL', 'SLEET'], color: Color(0xFF6AAA64)),
@@ -274,14 +274,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
 
     setState(() {
       _hintCount = newCount;
-      _solved.add(targetGroup!);
-      _words.removeWhere(targetGroup.words.contains);
-      _selected.removeWhere(targetGroup.words.contains);
-      _message = '💡 Revealed category: "${targetGroup.category}"';
-      if (_solved.length == _puzzle.groups.length) {
-        _won = true;
-        _savePersistedLevel(_puzzleIndex);
-      }
+      _message = '💡 Hint: One of the categories is "${targetGroup!.category}"';
     });
   }
 
@@ -417,11 +410,25 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   decoration: BoxDecoration(
-                    color: sel ? AppTheme.connectionsRed : context.bgSurface,
+                    color: sel ? AppTheme.connectionsRed : context.bgCard,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: sel ? AppTheme.connectionsRed : context.textMuted.withOpacity(0.3), width: sel ? 2 : 1),
+                    border: Border.all(
+                      color: sel ? AppTheme.connectionsRed : context.textMuted.withAlpha(60),
+                      width: 1.2,
+                    ),
+                    boxShadow: sel ? null : AppTheme.cardShadow,
                   ),
-                  child: Center(child: Text(w, style: GoogleFonts.outfit(fontSize: context.scale(11), fontWeight: FontWeight.w700, color: sel ? Colors.white : context.textPrimary), textAlign: TextAlign.center)),
+                  child: Center(
+                    child: Text(
+                      w,
+                      style: GoogleFonts.outfit(
+                        fontSize: context.scale(11),
+                        fontWeight: FontWeight.bold,
+                        color: sel ? Colors.white : context.textPrimary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 ),
               );
             }).toList(),
@@ -467,15 +474,31 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
 class _SolvedGroup extends StatelessWidget {
   final ConnectionsGroup group;
   const _SolvedGroup({required this.group});
+
+  Color _getZenColor(Color original) {
+    if (original.value == 0xFF6AAA64) return const Color(0xFF7FA875); // Sage
+    if (original.value == 0xFF4F9EE8) return const Color(0xFF6C96BC); // Slate Blue
+    if (original.value == 0xFFE67E22) return const Color(0xFFC58652); // Warm Amber
+    if (original.value == 0xFFE84F9E) return const Color(0xFFBD7FA3); // Soft Rose
+    return original;
+  }
+
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity, margin: const EdgeInsets.only(bottom: 6),
-    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-    decoration: BoxDecoration(color: group.color.withOpacity(0.3), borderRadius: BorderRadius.circular(10), border: Border.all(color: group.color.withOpacity(0.6))),
-    child: Column(children: [
-      Text(group.category, style: GoogleFonts.outfit(fontSize: context.scale(13), fontWeight: FontWeight.w700, color: group.color)),
-      const SizedBox(height: 4),
-      Text(group.words.join(' • '), style: GoogleFonts.outfit(fontSize: context.scale(12), color: context.textSecondary)),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final color = _getZenColor(group.color);
+    return Container(
+      width: double.infinity, margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      decoration: BoxDecoration(
+        color: color.withAlpha(context.isDarkMode ? 35 : 45),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withAlpha(90), width: 1.2),
+      ),
+      child: Column(children: [
+        Text(group.category, style: GoogleFonts.outfit(fontSize: context.scale(13), fontWeight: FontWeight.bold, color: color)),
+        const SizedBox(height: 4),
+        Text(group.words.join(' • '), style: GoogleFonts.outfit(fontSize: context.scale(12), color: context.textPrimary)),
+      ]),
+    );
+  }
 }

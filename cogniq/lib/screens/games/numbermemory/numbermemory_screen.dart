@@ -233,9 +233,20 @@ class _NumberMemoryScreenState extends State<NumberMemoryScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  LinearProgressIndicator(
-                    color: accent,
-                    backgroundColor: context.bgSurface,
+                  TweenAnimationBuilder<double>(
+                    duration: Duration(milliseconds: _digits * 400 + 500),
+                    tween: Tween<double>(begin: 1.0, end: 0.0),
+                    builder: (context, value, child) {
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: value,
+                          color: accent,
+                          backgroundColor: context.bgSurface,
+                          minHeight: 6,
+                        ),
+                      );
+                    },
                   ),
                 ],
 

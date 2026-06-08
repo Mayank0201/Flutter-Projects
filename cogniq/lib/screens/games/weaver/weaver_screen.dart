@@ -12,7 +12,7 @@ const List<List<String>> _kLevels = [
   ['CAT', 'COT', 'COG', 'DOG'],
   ['HOT', 'HOP', 'MOP', 'MAP'],
   ['BOY', 'TOY', 'TOO', 'TWO'],
-  ['BAT', 'CAT', 'COT', 'DOG'],
+  ['BAT', 'CAT', 'COT', 'COG', 'DOG'],
   ['WET', 'PET', 'POT', 'ROT'],
   // Medium (4 letters)
   ['COLD', 'CORD', 'WORD', 'WARD', 'WARM'],
@@ -25,7 +25,7 @@ const List<List<String>> _kLevels = [
   ['SHARK', 'SHARE', 'SHORE', 'STORE', 'STONE'],
   ['CLOCK', 'FLOCK', 'FLICK', 'SLICK', 'SLICE'],
   ['WATER', 'WAVER', 'SAVER', 'SEVER', 'FEVER'],
-  ['HOUSE', 'MOUSE', 'ROUSE', 'ROUTE', 'ROOTS'],
+  ['HOUSE', 'MOUSE', 'MOOSE', 'LOOSE', 'GOOSE'],
   // Expansions
   ['SUN', 'RUN', 'RAN', 'MAN'],
   ['LATE', 'LANE', 'LINE', 'FINE'],
@@ -43,9 +43,9 @@ const List<List<String>> _kLevels = [
   ['PRICE', 'PRIDE', 'PRIME', 'CRIME'],
   ['STEAM', 'STEAL', 'STEEL', 'STEER'],
   ['WOOD', 'FOOD', 'FOOT', 'SOOT', 'BOOT'],
-  ['WIND', 'WINE', 'LINE', 'LINT', 'LOST'],
+  ['WIND', 'WINE', 'MINE', 'MINT', 'MIST', 'LIST', 'FIST'],
   ['BEER', 'BEAR', 'BEAD', 'HEAD', 'HERD'],
-  ['RUST', 'MUST', 'MUTE', 'MATE', 'LATE'],
+  ['RUST', 'RUSE', 'MUSE', 'MUTE', 'MATE', 'LATE'],
   ['SHIP', 'SLIP', 'SLIT', 'SLOT', 'SHOT'],
   ['COAL', 'COAT', 'BOAT', 'BEAT', 'BEAR'],
   ['GRIN', 'GRIP', 'DRIP', 'DROP', 'CROP'],
@@ -279,44 +279,50 @@ class _WeaverScreenState extends State<WeaverScreen> {
     final prevWord = index == 0 ? _chain.first : _scrambledIntermediates[index - 1];
     final isConnected = _diffByOne(prevWord, word);
 
-    return Column(
+    return ReorderableDragStartListener(
       key: ValueKey(word),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildConnector(isConnected),
-        Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          color: context.bgSurface,
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(
-              color: isConnected ? Colors.green.withOpacity(0.5) : context.textMuted.withOpacity(0.2),
-              width: isConnected ? 2 : 1,
-            ),
-          ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: Icon(
-              Icons.drag_handle,
-              color: context.textMuted,
-            ),
-            title: Text(
-              word,
-              style: GoogleFonts.outfit(
-                fontSize: context.scale(18),
-                fontWeight: FontWeight.w700,
-                color: context.textPrimary,
-                letterSpacing: 4,
+      index: index,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildConnector(isConnected),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            color: context.bgSurface,
+            elevation: 1,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: isConnected ? Colors.green.withOpacity(0.5) : context.textMuted.withOpacity(0.2),
+                width: isConnected ? 2 : 1,
               ),
-              textAlign: TextAlign.center,
             ),
-            trailing: isConnected
-                ? const Icon(Icons.check_circle, color: Colors.green)
-                : const Icon(Icons.error_outline, color: Colors.orange),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Icon(
+                  Icons.drag_handle,
+                  color: context.textMuted,
+                ),
+              ),
+              title: Text(
+                word,
+                style: GoogleFonts.outfit(
+                  fontSize: context.scale(18),
+                  fontWeight: FontWeight.w700,
+                  color: context.textPrimary,
+                  letterSpacing: 4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              trailing: isConnected
+                  ? const Icon(Icons.check_circle, color: Colors.green)
+                  : const Icon(Icons.error_outline, color: Colors.orange),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -369,13 +375,14 @@ class _WeaverScreenState extends State<WeaverScreen> {
         ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: ReorderableListView(
+          buildDefaultDragHandles: false,
           padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          header: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                 child: Text(
                   'Drag the intermediate tiles to arrange them in order. Every connected card must differ by exactly one letter.',
                   style: GoogleFonts.outfit(
@@ -385,34 +392,14 @@ class _WeaverScreenState extends State<WeaverScreen> {
                   textAlign: TextAlign.center,
                 ),
               ),
-              const SizedBox(height: 20),
-              
+              const SizedBox(height: 12),
               _buildStartCard(),
-              
-              ReorderableListView(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                onReorder: (oldIndex, newIndex) {
-                  setState(() {
-                    if (newIndex > oldIndex) {
-                      newIndex -= 1;
-                    }
-                    final item = _scrambledIntermediates.removeAt(oldIndex);
-                    _scrambledIntermediates.insert(newIndex, item);
-                    _won = _checkWin();
-                    if (_won) {
-                      _savePersistedLevel(_levelIndex);
-                    }
-                  });
-                },
-                children: [
-                  for (int i = 0; i < _scrambledIntermediates.length; i++)
-                    _buildScrambledItem(_scrambledIntermediates[i], i),
-                ],
-              ),
-              
+            ],
+          ),
+          footer: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               _buildEndCard(),
-              
               if (_won) ...[
                 const SizedBox(height: 24),
                 Text(
@@ -445,6 +432,23 @@ class _WeaverScreenState extends State<WeaverScreen> {
               const SizedBox(height: 32),
             ],
           ),
+          onReorder: (oldIndex, newIndex) {
+            setState(() {
+              if (newIndex > oldIndex) {
+                newIndex -= 1;
+              }
+              final item = _scrambledIntermediates.removeAt(oldIndex);
+              _scrambledIntermediates.insert(newIndex, item);
+              _won = _checkWin();
+              if (_won) {
+                _savePersistedLevel(_levelIndex);
+              }
+            });
+          },
+          children: [
+            for (int i = 0; i < _scrambledIntermediates.length; i++)
+              _buildScrambledItem(_scrambledIntermediates[i], i),
+          ],
         ),
       ),
     );

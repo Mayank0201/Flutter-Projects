@@ -1,34 +1,41 @@
-import'package:flutter/material.dart';
-import'package:google_fonts/google_fonts.dart';
-import'screens/splash_screen.dart';
-import'screens/home_screen.dart';
-import'screens/settings_screen.dart';
-import'screens/daily_screen.dart';
-import'screens/games/wordle/wordle_screen.dart';
-import'screens/games/hangman/hangman_screen.dart';
-import'screens/games/weaver/weaver_screen.dart';
-import'screens/games/zip/zip_screen.dart';
-import'screens/games/crossclimb/crossclimb_screen.dart';
-import'screens/games/queens/queens_screen.dart';
-import'screens/games/patches/patches_screen.dart';
-import'screens/games/connections/connections_screen.dart';
-import'screens/games/flagle/flagle_screen.dart';
-import'screens/games/wordbuilder/wordbuilder_screen.dart';
-import'screens/games/memory/memory_screen.dart';
-import'screens/games/spellingbee/spellingbee_screen.dart';
-import'screens/games/sudoku/sudoku_screen.dart';
-import'screens/games/wordsearch/wordsearch_screen.dart';
-import'screens/games/twentyfortyeight/twentyfortyeight_screen.dart';
-import'screens/games/reaction/reaction_screen.dart';
-import'screens/games/numbermemory/numbermemory_screen.dart';
-import'screens/games/sequence/sequence_screen.dart';
-import'theme/app_theme.dart';
-import'theme/theme_manager.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'screens/splash_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/daily_screen.dart';
+import 'screens/games/wordle/wordle_screen.dart';
+import 'screens/games/hangman/hangman_screen.dart';
+import 'screens/games/weaver/weaver_screen.dart';
+import 'screens/games/zip/zip_screen.dart';
+import 'screens/games/crossclimb/crossclimb_screen.dart';
+import 'screens/games/queens/queens_screen.dart';
+import 'screens/games/patches/patches_screen.dart';
+import 'screens/games/connections/connections_screen.dart';
+import 'screens/games/flagle/flagle_screen.dart';
+import 'screens/games/wordbuilder/wordbuilder_screen.dart';
+import 'screens/games/memory/memory_screen.dart';
+import 'screens/games/spellingbee/spellingbee_screen.dart';
+import 'screens/games/sudoku/sudoku_screen.dart';
+import 'screens/games/wordsearch/wordsearch_screen.dart';
+import 'screens/games/twentyfortyeight/twentyfortyeight_screen.dart';
+import 'screens/games/reaction/reaction_screen.dart';
+import 'screens/games/numbermemory/numbermemory_screen.dart';
+import 'screens/games/sequence/sequence_screen.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_manager.dart';
 
-import'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'theme/settings_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   try {
     final prefs = await SharedPreferences.getInstance();
     final activeGame = prefs.getString('daily_backup_active_game');
@@ -51,7 +58,7 @@ class CogniQApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: themeNotifier,
+      listenable: Listenable.merge([themeNotifier, settingsNotifier]),
       builder: (context, _) {
         return MaterialApp(
           title:'CogniQ',
@@ -63,6 +70,15 @@ class CogniQApp extends StatelessWidget {
             textTheme: GoogleFonts.interTextTheme(AppTheme.darkTheme.textTheme),
           ),
           themeMode: themeNotifier.themeMode,
+          builder: (context, child) {
+            final mediaQueryData = MediaQuery.of(context);
+            return MediaQuery(
+              data: mediaQueryData.copyWith(
+                textScaleFactor: mediaQueryData.textScaleFactor * settingsNotifier.fontScale,
+              ),
+              child: child!,
+            );
+          },
           initialRoute:'/',
           routes: {
 '/': (ctx) => const SplashScreen(),

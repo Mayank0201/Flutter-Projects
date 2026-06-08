@@ -39,7 +39,7 @@ class _ChimpScreenState extends State<ChimpScreen> {
   int _nextToTap = 1;
   bool _won = false;
   bool _failed = false;
-
+  final Set<(int, int)> _glowingCells = {};
 
   bool _isHintShowing = false;
   int _hintCount = 0;
@@ -129,6 +129,18 @@ class _ChimpScreenState extends State<ChimpScreen> {
   void _onTap(int r, int c) {
     if (_won || _failed) return;
     final num = _numberAt(r, c);
+
+    setState(() {
+      _glowingCells.add((r, c));
+    });
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _glowingCells.remove((r, c));
+        });
+      }
+    });
+
     if (num == null) { if (_started) { setState(() => _failed = true); } return; }
 
     if (!_started && num == 1) {
@@ -239,22 +251,31 @@ class _ChimpScreenState extends State<ChimpScreen> {
                   final visible = _isCellVisible(r, c);
                   final isTapped = num != null && num < _nextToTap && _started;
                   final isHintHighlighted = _isHintShowing && num == _nextToTap;
+                  final isGlowing = _glowingCells.contains((r, c));
                   return GestureDetector(
                     onTap: () => _onTap(r, c),
                     child: Container(
                       width: cs - 6, height: cs - 6, margin: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
                         color: isTapped
-                            ? Colors.transparent // tapped cells can look cleared
-                            : (isHintHighlighted ? Colors.amber.withOpacity(0.2) : (context.isDarkMode ? const Color(0xFF1C1C2E) : const Color(0xFFE5E7EB))),
-                        borderRadius: BorderRadius.circular(6),
+                            ? Colors.transparent
+                            : (isGlowing
+                                ? AppTheme.patchesTeal.withAlpha(80)
+                                : (isHintHighlighted ? Colors.amber.withOpacity(0.2) : context.bgCard)),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isHintHighlighted
-                              ? Colors.amber
-                              : (isTapped
-                                  ? (context.isDarkMode ? const Color(0xFF1C1C2E).withOpacity(0.5) : const Color(0xFFE5E7EB).withOpacity(0.5))
-                                  : (context.isDarkMode ? const Color(0xFF2A2A3A) : const Color(0xFFD1D5DB))),
-                          width: isHintHighlighted ? 2.5 : 1.5),
+                          color: isGlowing
+                              ? AppTheme.patchesTeal
+                              : (isHintHighlighted
+                                  ? Colors.amber
+                                  : (isTapped
+                                      ? context.bgCard.withOpacity(0.1)
+                                      : context.textMuted.withAlpha(75))),
+                          width: (isHintHighlighted || isGlowing) ? 2.5 : 1.2,
+                        ),
+                        boxShadow: isGlowing
+                            ? [BoxShadow(color: AppTheme.patchesTeal.withAlpha(120), blurRadius: 10, spreadRadius: 1)]
+                            : (isTapped ? null : AppTheme.cardShadow),
                       ),
                       child: Center(child: visible && num != null
                         ? Text('$num', style: GoogleFonts.outfit(fontSize: cs * 0.36, fontWeight: FontWeight.w800,

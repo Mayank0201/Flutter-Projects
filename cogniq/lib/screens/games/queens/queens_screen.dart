@@ -30,7 +30,7 @@ const List<QueensLevel> _kLevels = [
   QueensLevel(n: 4, regions: [[0,0,0,0],[1,1,1,1],[2,2,2,2],[3,3,3,3]]),
   QueensLevel(n: 4, regions: [[0,1,2,3],[0,1,2,3],[0,1,2,3],[0,1,2,3]]),
   QueensLevel(n: 5, regions: [[0,0,0,0,0],[1,1,1,1,2],[3,3,3,2,2],[4,4,3,2,2],[4,4,4,4,2]]),
-  QueensLevel(n: 6, regions: [[0,0,0,1,1,1],[0,2,2,1,3,3],[2,2,4,4,3,3],[5,5,4,4,3,3],[5,5,5,5,3,3],[5,5,5,5,5,3]]),
+  QueensLevel(n: 6, regions: [[0, 0, 0, 0, 0, 1], [2, 2, 0, 0, 1, 1], [2, 2, 2, 3, 3, 1], [4, 2, 3, 3, 3, 3], [4, 4, 4, 5, 3, 3], [4, 4, 5, 5, 5, 5]]),
   QueensLevel(n: 7, regions: [[0,0,0,1,1,1,1],[2,0,0,3,1,4,4],[2,2,3,3,1,4,5],[2,6,6,3,1,5,5],[6,6,6,3,1,5,5],[6,6,6,3,1,5,5],[6,6,6,6,1,5,5]]),
   QueensLevel(n: 4, regions: [[0,0,0,1],[2,0,1,1],[2,2,3,1],[2,3,3,3]]),
   QueensLevel(n: 4, regions: [[0,1,1,1],[0,0,2,2],[3,0,0,2],[3,3,3,2]]),
@@ -72,16 +72,16 @@ const List<QueensLevel> _kLevels = [
     [6,6,6,6,1,7,7,7,7]
   ]),
   QueensLevel(n: 10, regions: [
-    [0,0,0,0,1,1,1,1,2,2],
-    [3,3,3,3,1,4,4,4,2,2],
-    [5,5,5,5,1,6,6,6,2,2],
-    [7,7,7,7,1,8,8,8,2,2],
-    [9,9,9,9,1,9,9,9,2,2],
-    [0,0,0,0,1,1,1,1,2,2],
-    [3,3,3,3,1,4,4,4,2,2],
-    [5,5,5,5,1,6,6,6,2,2],
-    [7,7,7,7,1,8,8,8,2,2],
-    [9,9,9,9,1,9,9,9,2,2]
+    [1, 1, 1, 1, 2, 2, 0, 0, 0, 0],
+    [1, 1, 1, 1, 2, 2, 2, 0, 0, 0],
+    [1, 1, 3, 2, 2, 2, 2, 2, 0, 0],
+    [4, 3, 3, 3, 2, 2, 2, 6, 0, 5],
+    [4, 4, 3, 3, 2, 7, 6, 6, 5, 5],
+    [4, 4, 3, 8, 7, 7, 6, 6, 5, 5],
+    [4, 4, 8, 8, 7, 7, 6, 6, 6, 5],
+    [4, 8, 8, 8, 7, 7, 7, 6, 6, 5],
+    [8, 8, 8, 8, 8, 7, 9, 9, 9, 5],
+    [8, 8, 8, 8, 9, 9, 9, 9, 9, 9]
   ]),
   QueensLevel(n: 9, regions: [
     [0,0,1,1,1,2,2,2,2],
@@ -175,28 +175,28 @@ const List<QueensLevel> _kLevels = [
     [0,0,0,0,9,9,2,2,2,3]
   ]),
   QueensLevel(n: 10, regions: [
-    [0,0,1,1,2,2,3,3,4,4],
-    [0,0,1,1,2,2,3,3,4,4],
-    [5,5,6,6,7,7,8,8,9,9],
-    [5,5,6,6,7,7,8,8,9,9],
-    [0,0,1,1,2,2,3,3,4,4],
-    [0,0,1,1,2,2,3,3,4,4],
-    [5,5,6,6,7,7,8,8,9,9],
-    [5,5,6,6,7,7,8,8,9,9],
-    [0,0,1,1,2,2,3,3,4,4],
-    [0,0,1,1,2,2,3,3,4,4]
+    [1, 1, 1, 1, 1, 2, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 2, 2, 3, 0, 0],
+    [4, 4, 1, 1, 2, 2, 2, 3, 3, 3],
+    [4, 4, 4, 1, 2, 2, 3, 3, 3, 3],
+    [4, 4, 4, 4, 4, 5, 5, 3, 3, 3],
+    [6, 4, 7, 7, 5, 5, 5, 5, 5, 5],
+    [6, 6, 7, 7, 8, 5, 5, 5, 5, 9],
+    [6, 7, 7, 7, 8, 8, 5, 5, 9, 9],
+    [6, 7, 7, 8, 8, 8, 8, 9, 9, 9],
+    [6, 7, 7, 8, 8, 8, 9, 9, 9, 9]
   ]),
   QueensLevel(n: 10, regions: [
-    [0,0,0,0,1,1,1,1,2,2],
-    [3,0,0,0,1,4,4,4,2,2],
-    [3,3,5,5,1,4,6,6,2,2],
-    [3,3,5,7,7,7,6,8,2,2],
-    [3,3,5,7,9,9,6,8,2,2],
-    [3,3,5,7,9,9,6,8,2,2],
-    [3,3,5,7,7,7,6,8,2,2],
-    [3,3,5,5,1,4,6,6,2,2],
-    [3,0,0,0,1,4,4,4,2,2],
-    [0,0,0,0,1,1,1,1,2,2]
+    [1, 1, 1, 1, 2, 2, 0, 0, 0, 0],
+    [1, 1, 1, 1, 2, 2, 2, 3, 0, 0],
+    [4, 4, 1, 2, 2, 2, 2, 3, 3, 0],
+    [4, 4, 4, 2, 2, 2, 3, 3, 3, 3],
+    [4, 4, 4, 4, 2, 6, 3, 3, 5, 5],
+    [4, 4, 4, 6, 6, 6, 6, 5, 5, 5],
+    [7, 4, 6, 6, 6, 6, 6, 6, 5, 5],
+    [7, 7, 7, 9, 6, 6, 8, 8, 5, 5],
+    [7, 7, 9, 9, 8, 8, 8, 8, 8, 8],
+    [7, 9, 9, 9, 9, 8, 8, 8, 8, 8]
   ]),
   QueensLevel(n: 8, regions: [
     [0,0,0,0,0,0,0,0],
@@ -297,16 +297,16 @@ const List<QueensLevel> _kLevels = [
     [8,8,8,8,8,8,8,8,0]
   ]),
   QueensLevel(n: 10, regions: [
-    [0,0,0,0,0,1,1,1,1,1],
-    [0,2,2,2,2,3,3,3,3,1],
-    [0,2,4,4,4,5,5,5,3,1],
-    [0,2,4,6,6,7,7,5,3,1],
-    [0,2,4,6,8,9,7,5,3,1],
-    [0,2,4,6,9,8,7,5,3,1],
-    [0,2,4,6,6,7,7,5,3,1],
-    [0,2,4,4,4,5,5,5,3,1],
-    [0,2,2,2,2,3,3,3,3,1],
-    [0,0,0,0,0,1,1,1,1,1]
+    [2, 2, 1, 1, 0, 0, 0, 0, 0, 0],
+    [2, 2, 1, 1, 1, 0, 3, 3, 4, 4],
+    [2, 2, 2, 1, 1, 3, 3, 3, 4, 4],
+    [2, 2, 2, 1, 3, 3, 3, 3, 4, 4],
+    [6, 2, 5, 5, 3, 3, 3, 4, 4, 4],
+    [6, 5, 5, 5, 5, 3, 3, 7, 4, 4],
+    [6, 6, 5, 5, 9, 7, 7, 7, 7, 8],
+    [6, 6, 5, 9, 9, 7, 7, 7, 7, 8],
+    [6, 6, 9, 9, 9, 9, 7, 7, 8, 8],
+    [6, 9, 9, 9, 9, 9, 9, 7, 8, 8]
   ]),
   // 10 new levels
   QueensLevel(n: 5, regions: [[0,0,0,0,0],[1,1,1,1,1],[2,2,2,2,2],[3,3,3,3,3],[4,4,4,4,4]]),
@@ -316,15 +316,9 @@ const List<QueensLevel> _kLevels = [
   QueensLevel(n: 6, regions: [[0,0,1,1,2,2],[0,0,1,1,2,2],[3,3,4,4,2,2],[3,3,4,4,5,5],[3,3,4,4,5,5],[3,3,4,4,5,5]]),
   QueensLevel(n: 6, regions: [[0,1,2,3,4,5],[0,1,2,3,4,5],[0,1,2,3,4,5],[0,1,2,3,4,5],[0,1,2,3,4,5],[0,1,2,3,4,5]]),
   QueensLevel(n: 7, regions: [[0,0,0,0,0,0,0],[1,1,1,1,1,1,1],[2,2,2,2,2,2,2],[3,3,3,3,3,3,3],[4,4,4,4,4,4,4],[5,5,5,5,5,5,5],[6,6,6,6,6,6,6]]),
-  QueensLevel(n: 7, regions: [[0,0,1,1,2,2,3],[0,0,1,1,2,2,3],[4,4,5,5,6,6,3],[4,4,5,5,6,6,3],[4,4,5,5,6,6,3],[4,4,5,5,6,6,3],[4,4,5,5,6,6,3]]),
+  QueensLevel(n: 7, regions: [[0, 0, 0, 0, 2, 1, 1], [0, 0, 3, 2, 2, 1, 1], [4, 3, 3, 2, 2, 2, 1], [4, 3, 3, 3, 2, 5, 1], [4, 4, 3, 3, 5, 5, 5], [4, 4, 3, 6, 5, 5, 5], [4, 6, 6, 6, 6, 5, 5]]),
   QueensLevel(n: 8, regions: [[0,0,1,1,2,2,3,3],[0,0,1,1,2,2,3,3],[4,4,5,5,6,6,7,7],[4,4,5,5,6,6,7,7],[0,0,1,1,2,2,3,3],[0,0,1,1,2,2,3,3],[4,4,5,5,6,6,7,7],[4,4,5,5,6,6,7,7]]),
   QueensLevel(n: 8, regions: [[0,0,0,0,1,1,1,1],[2,2,2,2,3,3,3,3],[4,4,4,4,5,5,5,5],[6,6,6,6,7,7,7,7],[0,0,0,0,1,1,1,1],[2,2,2,2,3,3,3,3],[4,4,4,4,5,5,5,5],[6,6,6,6,7,7,7,7]]),
-];
-
-const List<Color> _kColors = [
-  Color(0xFF6AAA64), Color(0xFF4F9EE8), Color(0xFFE67E22),
-  Color(0xFFE84F9E), Color(0xFF9B59B6), Color(0xFF1ABC9C), Color(0xFFC9B458),
-  Color(0xFF8E7C93), Color(0xFF7A909C), Color(0xFFC5B48D),
 ];
 
 class QueensScreen extends StatefulWidget {
@@ -346,14 +340,142 @@ class _QueensScreenState extends State<QueensScreen> {
 
   int _hintCount = 0;
   final GlobalKey _gridKey = GlobalKey();
+  final List<List<List<int>>> _history = [];
 
   @override
   void initState() {
     super.initState();
     // Default synchronous initialization to avoid LateInitializationError
-    _level = _kLevels[0];
+    _level = generateProceduralLevel(5, Random(8734));
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
     _initLevel();
+  }
+
+  QueensLevel generateProceduralLevel(int n, Random rand) {
+    // 1. Place stars first to guarantee a solution exists
+    final starCoords = placeStars(n, rand) ?? [];
+    final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
+    final seeds = <(int, int)>[];
+    if (starCoords.isNotEmpty) {
+      for (int i = 0; i < n; i++) {
+        final (r, c) = starCoords[i];
+        grid[r][c] = i;
+        seeds.add((r, c));
+      }
+    } else {
+      while (seeds.length < n) {
+        final r = rand.nextInt(n);
+        final c = rand.nextInt(n);
+        if (!seeds.contains((r, c))) {
+          seeds.add((r, c));
+          grid[r][c] = seeds.length - 1;
+        }
+      }
+    }
+
+    // 2. Grow regions around seeds using cellular growth
+    final borderCells = <int, List<(int, int)>>{};
+    for (int i = 0; i < n; i++) {
+      borderCells[i] = [seeds[i]];
+    }
+
+    bool hasUnassigned = true;
+    while (hasUnassigned) {
+      hasUnassigned = false;
+      for (int i = 0; i < n; i++) {
+        final borders = borderCells[i]!;
+        if (borders.isEmpty) continue;
+        final neighbors = <(int, int)>[];
+        for (final cell in borders) {
+          final (r, c) = cell;
+          final dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+          for (final (dr, dc) in dirs) {
+            final nr = r + dr;
+            final nc = c + dc;
+            if (nr >= 0 && nr < n && nc >= 0 && nc < n && grid[nr][nc] == -1) {
+              if (!neighbors.contains((nr, nc))) {
+                neighbors.add((nr, nc));
+              }
+            }
+          }
+        }
+        if (neighbors.isNotEmpty) {
+          hasUnassigned = true;
+          final nextCell = neighbors[rand.nextInt(neighbors.length)];
+          final (nr, nc) = nextCell;
+          grid[nr][nc] = i;
+          borders.add(nextCell);
+        } else {
+          borders.clear();
+        }
+      }
+
+      if (!hasUnassigned) {
+        for (int r = 0; r < n; r++) {
+          for (int c = 0; c < n; c++) {
+            if (grid[r][c] == -1) {
+              int minDist = 9999;
+              int bestRegion = 0;
+              for (int sr = 0; sr < n; sr++) {
+                for (int sc = 0; sc < n; sc++) {
+                  if (grid[sr][sc] != -1) {
+                    final dist = (sr - r).abs() + (sc - c).abs();
+                    if (dist < minDist) {
+                      minDist = dist;
+                      bestRegion = grid[sr][sc];
+                    }
+                  }
+                }
+              }
+              grid[r][c] = bestRegion;
+              hasUnassigned = true;
+            }
+          }
+        }
+      }
+    }
+    return QueensLevel(n: n, regions: grid);
+  }
+
+  List<(int, int)>? placeStars(int n, Random rand) {
+    for (int attempt = 0; attempt < 200; attempt++) {
+      final stars = <(int, int)>[];
+      final cols = List.generate(n, (i) => i)..shuffle(rand);
+      bool backtrack(int row) {
+        if (row == n) return true;
+        final shuffledCols = List<int>.from(cols);
+        for (final col in shuffledCols) {
+          bool ok = true;
+          for (final (sr, sc) in stars) {
+            if (sc == col) { ok = false; break; }
+            if ((sr - row).abs() == 1 && (sc - col).abs() == 1) { ok = false; break; }
+          }
+          if (ok) {
+            stars.add((row, col));
+            if (backtrack(row + 1)) return true;
+            stars.removeLast();
+          }
+        }
+        return false;
+      }
+      if (backtrack(0)) return stars;
+    }
+    return null;
+  }
+
+  void _saveToHistory() {
+    _history.add(_cells.map((row) => List<int>.from(row)).toList());
+    if (_history.length > 50) {
+      _history.removeAt(0);
+    }
+  }
+
+  void _undo() {
+    if (_history.isEmpty || _won) return;
+    setState(() {
+      _cells = _history.removeLast();
+      _error = '';
+    });
   }
 
   Future<void> _initLevel() async {
@@ -464,8 +586,21 @@ class _QueensScreenState extends State<QueensScreen> {
   }
 
   void _loadLevel() {
-    _level = _kLevels[_levelIndex % _kLevels.length];
+    int n = 5;
+    if (_levelIndex < 5) {
+      n = 5;
+    } else if (_levelIndex < 15) {
+      n = 6;
+    } else if (_levelIndex < 30) {
+      n = 7;
+    } else if (_levelIndex < 50) {
+      n = 8;
+    } else {
+      n = 9;
+    }
+    _level = generateProceduralLevel(n, Random(_levelIndex + 8734));
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
+    _history.clear();
     _error = ''; _won = false;
   }
 
@@ -473,16 +608,16 @@ class _QueensScreenState extends State<QueensScreen> {
 
   void _tap(int r, int c) {
     if (_won) return;
+    _saveToHistory();
     setState(() { _cells[r][c] = (_cells[r][c] + 1) % 3; _error = ''; });
   }
 
   void _onDragStart(int r, int c) {
     if (_won) return;
-    // If starting on empty or X cell, toggle X mode
-    // If starting on a queen cell, do nothing special
     if (_cells[r][c] == 2) return;
+    _saveToHistory();
     setState(() {
-      _dragTargetState = _cells[r][c] == 0 ? 1 : 0; // 0=empty → place X; X=1 → erase
+      _dragTargetState = _cells[r][c] == 0 ? 1 : 0;
       _lastDragCell = (r, c);
       _cells[r][c] = _dragTargetState;
       _error = '';
@@ -577,6 +712,11 @@ class _QueensScreenState extends State<QueensScreen> {
             color: context.textMuted,
             onPressed: () => RulesHelper.showRulesBottomSheet(context, 'queens', 'Star Battle'),
           ),
+          IconButton(
+            icon: const Icon(Icons.undo, size: 20),
+            color: context.textMuted,
+            onPressed: _history.isNotEmpty && !_won ? _undo : null,
+          ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
           Padding(padding: const EdgeInsets.only(right: 12),
             child: Center(child: Text('Level ${_levelIndex + 1}', style: GoogleFonts.outfit(color: AppTheme.queensOrange, fontSize: context.scale(13))))),
@@ -595,45 +735,115 @@ class _QueensScreenState extends State<QueensScreen> {
                 style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)), textAlign: TextAlign.center),
               const SizedBox(height: 12),
               Center(
-                child: Column(
-                  key: _gridKey,
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(_level.n, (r) =>
-                    Row(mainAxisSize: MainAxisSize.min,
-                      children: List.generate(_level.n, (c) {
-                        final regionId = _level.regions[r][c];
-                        final color = _kColors[regionId % _kColors.length];
-                        final state = _cells[r][c];
-                        return GestureDetector(
-                          onTap: () => _tap(r, c),
-                          onPanStart: (_) => _onDragStart(r, c),
-                          onPanUpdate: (d) {
-                            final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
-                            if (box == null) return;
-                            final localPos = box.globalToLocal(d.globalPosition);
-                            final cellDim = cellSize + 3.0; // cellSize + 2 * 1.5 margin
-                            final row = (localPos.dy / cellDim).floor();
-                            final col = (localPos.dx / cellDim).floor();
-                            if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
-                              _onDragUpdate(row, col);
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Column(
+                    key: _gridKey,
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(_level.n, (r) =>
+                      Row(mainAxisSize: MainAxisSize.min,
+                        children: List.generate(_level.n, (c) {
+                          final regionId = _level.regions[r][c];
+                          final state = _cells[r][c];
+
+                          final borderColor = context.textPrimary;
+                          final dividerColor = context.textSecondary.withAlpha(60);
+
+                          BorderSide getTopBorder() {
+                            if (r == 0 || _level.regions[r - 1][c] != regionId) {
+                              return BorderSide(color: borderColor, width: 2.5);
                             }
-                          },
-                          onPanEnd: (_) => _onDragEnd(),
-                          child: Container(
-                            width: cellSize, height: cellSize, margin: const EdgeInsets.all(1.5),
-                            decoration: BoxDecoration(
-                              color: color.withAlpha(state == 2 ? 200 : 65),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: color.withAlpha(110), width: 1),
+                            return BorderSide(color: dividerColor, width: 0.8);
+                          }
+
+                          BorderSide getLeftBorder() {
+                            if (c == 0 || _level.regions[r][c - 1] != regionId) {
+                              return BorderSide(color: borderColor, width: 2.5);
+                            }
+                            return BorderSide(color: dividerColor, width: 0.8);
+                          }
+
+                          BorderSide getRightBorder() {
+                            if (c == _level.n - 1) {
+                              return BorderSide(color: borderColor, width: 2.5);
+                            }
+                            return BorderSide(color: dividerColor, width: 0.8);
+                          }
+
+                          BorderSide getBottomBorder() {
+                            if (r == _level.n - 1) {
+                              return BorderSide(color: borderColor, width: 2.5);
+                            }
+                            return BorderSide(color: dividerColor, width: 0.8);
+                          }
+
+                          return GestureDetector(
+                            onTap: () => _tap(r, c),
+                            onPanStart: (_) => _onDragStart(r, c),
+                            onPanUpdate: (d) {
+                              final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+                              if (box == null) return;
+                              final localPos = box.globalToLocal(d.globalPosition);
+                              final cellDim = cellSize;
+                              final row = (localPos.dy / cellDim).floor();
+                              final col = (localPos.dx / cellDim).floor();
+                              if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
+                                _onDragUpdate(row, col);
+                              }
+                            },
+                            onPanEnd: (_) => _onDragEnd(),
+                            child: Builder(
+                              builder: (context) {
+                                final regionColorsLight = const [
+                                  Color(0xFFFBCFE8), // Pink
+                                  Color(0xFFBFDBFE), // Blue
+                                  Color(0xFFA7F3D0), // Green
+                                  Color(0xFFFDE68A), // Yellow
+                                  Color(0xFFDDD6FE), // Purple
+                                  Color(0xFFFED7AA), // Orange
+                                  Color(0xFF99F6E4), // Teal
+                                  Color(0xFFC7D2FE), // Indigo
+                                  Color(0xFFFECDD3), // Rose
+                                  Color(0xFFE2E8F0), // Slate/Gray
+                                ];
+                                final regionColorsDark = const [
+                                  Color(0xFF6E284E), // Dark Muted Pink
+                                  Color(0xFF1E3A5F), // Dark Muted Blue
+                                  Color(0xFF154C34), // Dark Muted Green
+                                  Color(0xFF614E18), // Dark Muted Yellow
+                                  Color(0xFF3F3066), // Dark Muted Purple
+                                  Color(0xFF613B17), // Dark Muted Orange
+                                  Color(0xFF184A45), // Dark Muted Teal
+                                  Color(0xFF223161), // Dark Muted Indigo
+                                  Color(0xFF63242F), // Dark Muted Rose
+                                  Color(0xFF1E293B), // Dark Muted Slate
+                                ];
+                                final regionColor = context.isDarkMode 
+                                    ? regionColorsDark[regionId % regionColorsDark.length]
+                                    : regionColorsLight[regionId % regionColorsLight.length];
+
+                                return Container(
+                                  width: cellSize, height: cellSize,
+                                  decoration: BoxDecoration(
+                                    color: regionColor,
+                                    border: Border(
+                                      top: getTopBorder(),
+                                      left: getLeftBorder(),
+                                      right: getRightBorder(),
+                                      bottom: getBottomBorder(),
+                                    ),
+                                  ),
+                                  child: Center(child: state == 1
+                                    ? Text('X', style: TextStyle(fontSize: cellSize * 0.38, color: context.isDarkMode ? Colors.white70 : Colors.black87, fontWeight: FontWeight.w900))
+                                    : state == 2
+                                      ? Text('★', style: TextStyle(fontSize: cellSize * 0.52, color: AppTheme.warmAmber, shadows: const [Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))]))
+                                      : null),
+                                );
+                              }
                             ),
-                            child: Center(child: state == 1
-                              ? Text('X', style: TextStyle(fontSize: cellSize * 0.38, color: color, fontWeight: FontWeight.w900))
-                              : state == 2
-                                ? Text('★', style: TextStyle(fontSize: cellSize * 0.48, color: Colors.white))
-                                : null),
-                          ),
-                        );
-                      }))),
+                          );
+                        }))),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

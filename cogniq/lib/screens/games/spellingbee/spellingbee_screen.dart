@@ -57,9 +57,9 @@ const List<SpellingBeeLevel> _kLevels = [
   SpellingBeeLevel(
     centerLetter:'N',
     outerLetters: ['A','C','E','O','P','R'],
-    targetCount: 6,
+    targetCount: 5,
     validWords: {
-'CON','ONE','PAN','PEN','PIN','CANE','CONE','COPE','OPEN','PANE','ACNE','ONCE','PRONE','CRONE'
+'CON','ONE','PAN','PEN','PIN','CANE','CONE','OPEN','PANE','ACNE','ONCE','PRONE','CRONE'
     },
   ),
   // Medium
@@ -93,9 +93,9 @@ const List<SpellingBeeLevel> _kLevels = [
   SpellingBeeLevel(
     centerLetter:'R',
     outerLetters: ['A','D','E','G','N','S'],
-    targetCount: 8,
+    targetCount: 7,
     validWords: {
-'RED','ERA','EAR','ARE','DEAR','DARE','READ','RAGE','GEAR','NEAR','EARN','SANG','RANG','DANGER','GARDEN','GRAND','GRANDER','RAGES','GEARS','NEARS','EARNS','DANGERS','GARDENS','GRANDS'
+'RED','ERA','EAR','ARE','DEAR','DARE','READ','RAGE','GEAR','NEAR','EARN','RANG','DANGER','GARDEN','GRAND','GRANDER','RAGES','GEARS','NEARS','EARNS','DANGERS','GARDENS','GRANDS'
     },
   ),
   SpellingBeeLevel(
@@ -120,7 +120,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['A','E','L','S','T','O'],
     targetCount: 4,
     validWords: {
-'PEA','PAL','POT','PET','PAT','TAP','POET','PLOT','PAST','POST','STOP','SPOT','PLATE','SLATE','PEAL','PLEA','PALE','POLE','POTS','PETS','PALS','PLOTS','PLATES','PLEAS','PALES','POLES'
+'PEA','PAL','POT','PET','PAT','POET','PLOT','PAST','POST','PLATE','PEAL','PLEA','PALE','POLE','POTS','PETS','PALS','PLOTS','PLATES','PLEAS','PALES','POLES'
     },
   ),
   SpellingBeeLevel(
@@ -152,7 +152,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['A','E','L','P','R','S'],
     targetCount: 4,
     validWords: {
-'RED','BED','BAD','LAD','PAD','DEAR','BEAR','BARE','BREAD','BEAD','BARD','LEAD','DEAL','PALE','PLEA','DEALER','PLEAD','PLEADS'
+'RED','BAD','LAD','PAD','DEAR','BREAD','BEAD','BARD','LEAD','DEAL','DEALER','PLEAD','PLEADS','ADDED','DARED','DRAPED'
     },
   ),
   SpellingBeeLevel(
@@ -160,7 +160,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['R','A','B','S','T','E'],
     targetCount: 5,
     validWords: {
-'CAB','CAR','BAR','ARC','CRAB','BARS','CABS','CARS','ARCS','CRABS','SCAB','BRAS','CART','CARTS','TRACE','CRATE','REACT'
+'CAB','CAR','ARC','CRAB','CABS','CARS','ARCS','CRABS','SCAB','CART','CARTS','TRACE','CRATE','REACT','CREST','CERT'
     },
   ),
   SpellingBeeLevel(
@@ -168,7 +168,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['L','O','W','S','E','R'],
     targetCount: 4,
     validWords: {
-'LOW','OWL','SOW','FLOW','WOLF','SLOW','FOWL','FLOWS','OWLS','WOLFS','FOWLS','LOWS','FLOWER','FLOWERS','WOLVES'
+'FLOW','FOWL','FLOWS','FOWLS','FLOWER','FLOWERS','FLOE','FLOES','FORE','FROE','FOES'
     },
   ),
   SpellingBeeLevel(
@@ -176,7 +176,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['I','O','N','S','T','E'],
     targetCount: 4,
     validWords: {
-'ION','NIL','LION','LOIN','LIONS','LOINS','SOIL','SILO','SLING','SLIT','LIST','LOST','LINE','LINES','TILE','TILES'
+'NIL','LION','LOIN','LIONS','LOINS','SILO','SLING','SLIT','LIST','LOST','LINE','LINES','TILE','TILES','LENT','LINTEL','INLET','ENLIST'
     },
   ),
   SpellingBeeLevel(
@@ -192,7 +192,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['E','A','R','C','H','T'],
     targetCount: 5,
     validWords: {
-'DEAR','READ','DREAD','HEARD','TREAD','CHEAT','EARTH','CHART','REACH','TEACH','HEAD','DATE','HATE','HEAT'
+'DEAR','READ','DREAD','HEARD','TREAD','HEAD','DATE','DACE','EACH','DEAD','DARE','DRAT','HARD','CHARD','ADHERE'
     },
   ),
   SpellingBeeLevel(
@@ -200,7 +200,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['L','A','Y','E','R','S'],
     targetCount: 5,
     validWords: {
-'PLAY','PLAYER','PLAYERS','PEAR','PEARL','PEARS','PEARLS','REAP','REAPS','PAY','PAYS','LAYER','LAYERS','PLEAS'
+'PLAY','PLAYER','PLAYERS','PEAR','PEARL','PEARS','PEARLS','REAP','REAPS','PAY','PAYS','PLEAS','YELP','YELPS','SPAY','PRAY','PRAYS','DRAPE','DRAPES','SPARE','SPEAR'
     },
   ),
   SpellingBeeLevel(
@@ -208,7 +208,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['N','E','T','W','R','K'],
     targetCount: 5,
     validWords: {
-'ONE','NET','TEN','WET','TWO','TON','NOTE','TONE','WORE','TORN','WORK','NETWORK','ROTE','KNOT','WOKE'
+'ONE','TWO','TON','NOTE','TONE','WORE','TORN','WORK','NETWORK','ROTE','KNOT','WOKE','TORE','ROOK','TOKEN','WOKEN'
     },
   ),
   SpellingBeeLevel(
@@ -216,7 +216,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['A','R','D','O','B','N'],
     targetCount: 4,
     validWords: {
-'CAR','CAD','CAB','CAN','COB','CON','CARD','CORD','COAL','BARD','BARN','ROAD','BOARD','BROAD','CARBON','CRAB'
+'CAR','CAD','CAB','CAN','COB','CON','CARD','CORD','CARBON','CRAB','CORN','ACORN','CROC','CODA','COBRA','BRACE'
     },
   ),
   SpellingBeeLevel(
@@ -224,15 +224,15 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['R','O','W','T','H','I'],
     targetCount: 4,
     validWords: {
-'GROW','GROWTH','GRIT','GOTH','WITH','WRIT','TRIG','RING','GRIN','GIRT','GROWT','GIRO'
+'GROW','GROWTH','GRIT','GOTH','TRIG','RING','GRIN','GIRT','GIRO','GRIOT','GOING'
     },
   ),
   SpellingBeeLevel(
     centerLetter:'B',
     outerLetters: ['L','A','C','K','S','E'],
-    targetCount: 5,
+    targetCount: 4,
     validWords: {
-'BLACK','BLACKS','BACK','BACKS','BASK','BALE','BALES','CABLE','CABLES','BASE','BAKE','BAKES','LACK','SACK'
+'BLACK','BLACKS','BACK','BACKS','BASK','BALE','BALES','BASE','BAKE','BAKES','BLEAK','BEAKS','CABLE','CABLES','BECK'
     },
   ),
   SpellingBeeLevel(
@@ -240,23 +240,23 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['N','I','T','E','D','S'],
     targetCount: 5,
     validWords: {
-'UNIT','UNITS','UNITED','DENT','DUET','DUETS','SEND','STUD','NUDE','NUDES','TUNE','TUNES','SUIT','SUITS','DUST'
+'UNIT','UNITS','UNITED','DUET','DUETS','STUD','NUDE','NUDES','TUNE','TUNES','SUIT','SUITS','DUST','DUNES','DUNE'
     },
   ),
   SpellingBeeLevel(
     centerLetter:'F',
     outerLetters: ['L','O','W','E','R','S'],
-    targetCount: 5,
+    targetCount: 4,
     validWords: {
-'FLOW','FLOWER','FLOWERS','WOLF','FOWL','LOW','OWL','SOW','FEW','FEWS','SELF','SERF','FORE','FRO','FOE'
+'FLOW','FLOWER','FLOWERS','FOWL','FEW','SELF','SERF','FORE','FROE','FOE','FLOE','FLOES','FOES','FROW','FOWLS','FLOWS'
     },
   ),
   SpellingBeeLevel(
     centerLetter:'V',
     outerLetters: ['I','C','T','O','R','Y'],
-    targetCount: 4,
+    targetCount: 3,
     validWords: {
-'VICTOR','VICTORY','CITY','RIOT','TRIO','TOY','TRY','CRY','COY','IVY'
+'VICTOR','VICTORY','IVY','IVORY','OVARY','VICAR'
     },
   ),
   SpellingBeeLevel(
@@ -264,7 +264,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['O','U','S','E','L','D'],
     targetCount: 5,
     validWords: {
-'HOUSE','HOLD','HOLDS','SHED','SHOE','HOSE','SOUL','USED','DUST','LOUD','HOULD','SOLD','DOLE','SHOLD'
+'HOUSE','HOLD','HOLDS','SHED','SHOE','HOSE','HOLES','HELD','HUED','SHOULD','SHOAL','SHOD'
     },
   ),
   // 10 new levels
@@ -321,7 +321,7 @@ const List<SpellingBeeLevel> _kLevels = [
     outerLetters: ['A','E','L','P','S','T'],
     targetCount: 6,
     validWords: {
-'CAT','ACT','LACE','CAPE','PACE','CLAP','CAST','CASE','PLACE','PLATE','PLEAT','CASTLE','SCALP','PASTE','SPACE','SCALE'
+'CAT','ACT','LACE','CAPE','PACE','CLAP','CAST','CASE','PLACE','CASTLE','SCALP','SPACE','SCALE','CLEAT','CLASP','CAPES','LACED','CAPS'
     },
   ),
   SpellingBeeLevel(
@@ -449,22 +449,13 @@ class _SpellingBeeScreenState extends State<SpellingBeeScreen> {
 
   void _addLetterToGuess(int index, String letter, Offset center) {
     if (_won) return;
-    if (_selectedIndices.length >= 2 && _selectedIndices[_selectedIndices.length - 2] == index) {
-      setState(() {
-        _currentGuess.removeLast();
-        _selectedIndices.removeLast();
-        _linePoints.removeLast();
-        _currentDragOffset = center;
-      });
-      return;
-    }
     if (!_selectedIndices.contains(index)) {
       setState(() {
         _currentGuess.add(letter);
         _selectedIndices.add(index);
         _linePoints.add(center);
         _currentDragOffset = center;
-        _message ='';
+        _message = '';
       });
     }
   }
@@ -744,21 +735,30 @@ class _SpellingBeeScreenState extends State<SpellingBeeScreen> {
                           ),
                         ),
                         // Center letter button
-                        Container(
-                          width: context.scale(60),
-                          height: context.scale(60),
-                          decoration: BoxDecoration(
-                            color: accentColor,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withAlpha(120), width: 2),
-                          ),
-                          child: Center(
-                            child: Text(
-                              _level.centerLetter,
-                              style: GoogleFonts.outfit(
-                                fontSize: context.scale(24),
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
+                        GestureDetector(
+                          onTap: () {
+                            if (_won) return;
+                            setState(() {
+                              _currentGuess.add(_level.centerLetter);
+                              _message = '';
+                            });
+                          },
+                          child: Container(
+                            width: context.scale(60),
+                            height: context.scale(60),
+                            decoration: BoxDecoration(
+                              color: accentColor,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white.withAlpha(120), width: 2),
+                            ),
+                            child: Center(
+                              child: Text(
+                                _level.centerLetter,
+                                style: GoogleFonts.outfit(
+                                  fontSize: context.scale(24),
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -774,21 +774,30 @@ class _SpellingBeeScreenState extends State<SpellingBeeScreen> {
                           return Positioned(
                             left: context.scale(110) + x - context.scale(26),
                             top: context.scale(110) + y - context.scale(26),
-                            child: Container(
-                              width: context.scale(52),
-                              height: context.scale(52),
-                              decoration: BoxDecoration(
-                                color: context.bgCard,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: context.textMuted.withAlpha(100), width: 2),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  letter,
-                                  style: GoogleFonts.outfit(
-                                    fontSize: context.scale(20),
-                                    fontWeight: FontWeight.w800,
-                                    color: context.textPrimary,
+                            child: GestureDetector(
+                              onTap: () {
+                                if (_won) return;
+                                setState(() {
+                                  _currentGuess.add(letter);
+                                  _message = '';
+                                });
+                              },
+                              child: Container(
+                                width: context.scale(52),
+                                height: context.scale(52),
+                                decoration: BoxDecoration(
+                                  color: context.bgCard,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: context.textMuted.withAlpha(100), width: 2),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    letter,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: context.scale(20),
+                                      fontWeight: FontWeight.w800,
+                                      color: context.textPrimary,
+                                    ),
                                   ),
                                 ),
                               ),

@@ -171,10 +171,10 @@ class _ReactionScreenState extends State<ReactionScreen> {
   Color _bgColor() {
     switch (_phase) {
       case _Phase.waiting: return context.bgDark;
-      case _Phase.ready: return const Color(0xFFDC2626);
-      case _Phase.go: return const Color(0xFF16A34A);
+      case _Phase.ready: return const Color(0xFFC05C55); // Terracotta
+      case _Phase.go: return const Color(0xFF6E8C6A); // Sage Green
       case _Phase.result: return context.bgDark;
-      case _Phase.tooEarly: return const Color(0xFFEA580C);
+      case _Phase.tooEarly: return const Color(0xFFC48F65); // Clay/Ochre
     }
   }
 

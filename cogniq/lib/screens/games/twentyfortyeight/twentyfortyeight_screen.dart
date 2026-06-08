@@ -239,20 +239,20 @@ class _TwentyFortyEightScreenState extends State<TwentyFortyEightScreen> with Ti
 
   Color _tileColor(int val) {
     switch (val) {
-      case 2: return const Color(0xFFEEE4DA);
-      case 4: return const Color(0xFFEDE0C8);
-      case 8: return const Color(0xFFF2B179);
-      case 16: return const Color(0xFFF59563);
-      case 32: return const Color(0xFFF67C5F);
-      case 64: return const Color(0xFFF65E3B);
-      case 128: return const Color(0xFFEDCF72);
-      case 256: return const Color(0xFFEDCC61);
-      case 512: return const Color(0xFFEDC850);
-      case 1024: return const Color(0xFFEDC53F);
-      case 2048: return const Color(0xFFEDC22E);
-      case 4096: return const Color(0xFF3C3A32);
-      case 8192: return const Color(0xFF3C3A32);
-      default: return context.isDarkMode ? const Color(0xFF2A2A35) : const Color(0xFFCDC1B4);
+      case 2: return const Color(0xFFECE7E1);
+      case 4: return const Color(0xFFE5DCD0);
+      case 8: return const Color(0xFFECAE8F);
+      case 16: return const Color(0xFFEB9F80);
+      case 32: return const Color(0xFFE98C7B);
+      case 64: return const Color(0xFFE57B6B);
+      case 128: return const Color(0xFFDFCC80);
+      case 256: return const Color(0xFFDCC870);
+      case 512: return const Color(0xFFD6C060);
+      case 1024: return const Color(0xFFCBB255);
+      case 2048: return const Color(0xFFC4A848);
+      case 4096: return const Color(0xFF8C8290);
+      case 8192: return const Color(0xFF746C7B);
+      default: return context.bgCard;
     }
   }
 
@@ -343,8 +343,9 @@ class _TwentyFortyEightScreenState extends State<TwentyFortyEightScreen> with Ti
                   height: context.scale(320),
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: context.isDarkMode ? const Color(0xFF1E1E28) : const Color(0xFFBBADA0),
+                    color: context.isDarkMode ? const Color(0xFF1E1E2C) : const Color(0xFFECECEF),
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(45), width: 1.0),
                   ),
                   child: GridView.builder(
                     physics: const NeverScrollableScrollPhysics(),
@@ -363,11 +364,15 @@ class _TwentyFortyEightScreenState extends State<TwentyFortyEightScreen> with Ti
                         decoration: BoxDecoration(
                           color: _tileColor(val),
                           borderRadius: BorderRadius.circular(8),
+                          border: val == 0 
+                              ? Border.all(color: context.textMuted.withAlpha(35), width: 0.8) 
+                              : null,
+                          boxShadow: val == 0 ? AppTheme.cardShadow : null,
                         ),
                         child: Center(
                           child: val > 0
                               ? Text(
-'$val',
+                                  '$val',
                                   style: GoogleFonts.outfit(
                                     fontSize: _fontSize(val),
                                     fontWeight: FontWeight.w800,
