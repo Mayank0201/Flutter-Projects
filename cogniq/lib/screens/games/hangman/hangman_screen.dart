@@ -218,44 +218,50 @@ class _HangmanScreenState extends State<HangmanScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Drawing + word side-by-side — compact top section
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                CustomPaint(size: Size(context.scale(130), context.scale(140)), painter: _HangmanPainter(_wrong, accentColor)),
-                Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text(displayWord, style: GoogleFonts.outfit(fontSize: context.scale(20), fontWeight: FontWeight.w700, color: context.textPrimary, letterSpacing: 3)),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Drawing + word side-by-side — compact top section
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                    CustomPaint(size: Size(context.scale(130), context.scale(140)), painter: _HangmanPainter(_wrong, accentColor)),
+                    Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(displayWord, style: GoogleFonts.outfit(fontSize: context.scale(20), fontWeight: FontWeight.w700, color: context.textPrimary, letterSpacing: 3)),
+                      const SizedBox(height: 8),
+                      Row(children: List.generate(6, (i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Icon(i < _wrong ? Icons.close : Icons.favorite_outline, size: 15,
+                          color: i < _wrong ? Colors.redAccent : context.textMuted),
+                      ))),
+                    ]),
+                  ]),
+                ),
+                if (_gameOver) ...[
+                  Text(
+                    _won ? 'Correct! The word was $_word' : 'The word was: $_word',
+                    style: GoogleFonts.outfit(fontSize: context.scale(15), fontWeight: FontWeight.w700,
+                      color: _won ? accentColor : Colors.redAccent),
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 8),
-                  Row(children: List.generate(6, (i) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3),
-                    child: Icon(i < _wrong ? Icons.close : Icons.favorite_outline, size: 15,
-                      color: i < _wrong ? Colors.redAccent : context.textMuted),
-                  ))),
-                ]),
-              ]),
+                  if (_won)
+                    TextButton(onPressed: _nextLevel,
+                      child: Text('Next Level →', style: GoogleFonts.outfit(color: accentColor, fontWeight: FontWeight.w700, fontSize: context.scale(15))))
+                  else
+                    TextButton(onPressed: _reset,
+                      child: Text('Try Again', style: GoogleFonts.outfit(color: accentColor, fontWeight: FontWeight.w700, fontSize: context.scale(15)))),
+                ],
+                const SizedBox(height: 4),
+                // Keyboard directly below
+                if (!_gameOver) _buildKeyboard(context, accentColor),
+                const SizedBox(height: 8),
+              ],
             ),
-            if (_gameOver) ...[
-              Text(
-                _won ? 'Correct! The word was $_word' : 'The word was: $_word',
-                style: GoogleFonts.outfit(fontSize: context.scale(15), fontWeight: FontWeight.w700,
-                  color: _won ? accentColor : Colors.redAccent),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              if (_won)
-                TextButton(onPressed: _nextLevel,
-                  child: Text('Next Level →', style: GoogleFonts.outfit(color: accentColor, fontWeight: FontWeight.w700, fontSize: context.scale(15))))
-              else
-                TextButton(onPressed: _reset,
-                  child: Text('Try Again', style: GoogleFonts.outfit(color: accentColor, fontWeight: FontWeight.w700, fontSize: context.scale(15)))),
-            ],
-            const SizedBox(height: 4),
-            // Keyboard directly below
-            if (!_gameOver) _buildKeyboard(context, accentColor),
-            const SizedBox(height: 8),
-          ],
+          ),
         ),
       ),
     );

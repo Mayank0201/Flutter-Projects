@@ -34,7 +34,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         opacity: _fade,
         child: Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('', style: TextStyle(fontSize: context.scale(56))),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Image.asset(
+                'assets/icon/app_icon.png',
+                width: context.scale(100),
+                height: context.scale(100),
+              ),
+            ),
             const SizedBox(height: 20),
             Text('CogniQ',
               style: GoogleFonts.outfit(fontSize: context.scale(40), fontWeight: FontWeight.w800, color: context.textPrimary, letterSpacing: -1)),

@@ -434,158 +434,162 @@ class _WordSearchScreenState extends State<WordSearchScreen> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10),
-          child: Column(
-            children: [
-              Text(
+        child: Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10),
+              child: Column(
+                children: [
+                  Text(
 'Drag over letters to select a word, then tap SUBMIT',
-                style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              // Target Words checklist
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _level.targetWords.map((word) {
-                  final found = _foundWords.contains(word);
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: found ? accentColor.withAlpha(40) : context.bgCard,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: found ? accentColor : context.textMuted.withAlpha(50),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Text(
-                      word,
-                      style: GoogleFonts.outfit(
-                        fontSize: context.scale(12),
-                        fontWeight: FontWeight.bold,
-                        color: found ? context.textPrimary : context.textMuted,
-                        decoration: found ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 24),
-              // Word Search Grid
-              Center(
-                child: GestureDetector(
-                  onPanStart: (d) {
-                    final pos = _cellAt(d.globalPosition);
-                    if (pos != null) _addCellToSelection(pos);
-                  },
-                  onPanUpdate: (d) {
-                    final pos = _cellAt(d.globalPosition);
-                    if (pos != null) _addCellToSelection(pos);
-                  },
-                  child: Container(
-                    key: _gridKey,
-                    width: context.scale(280),
-                    height: context.scale(280),
-                    decoration: BoxDecoration(
-                      color: context.bgCard,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: context.textMuted.withAlpha(65), width: 1.2),
-                      boxShadow: AppTheme.cardShadow,
-                    ),
-                    child: GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: gridSize * gridSize,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: gridSize,
-                      ),
-                      itemBuilder: (ctx, idx) {
-                        final r = idx ~/ gridSize;
-                        final c = idx % gridSize;
-                        final letter = _grid[r][c];
-                        final pos = (r, c);
-                        final isSel = _selection.contains(pos);
-                        final isPerm = _permanentHighlights.contains(pos);
+                    style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  // Target Words checklist
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _level.targetWords.map((word) {
+                      final found = _foundWords.contains(word);
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: found ? accentColor.withAlpha(40) : context.bgCard,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: found ? accentColor : context.textMuted.withAlpha(50),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Text(
+                          word,
+                          style: GoogleFonts.outfit(
+                            fontSize: context.scale(12),
+                            fontWeight: FontWeight.bold,
+                            color: found ? context.textPrimary : context.textMuted,
+                            decoration: found ? TextDecoration.lineThrough : null,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  // Word Search Grid
+                  Center(
+                    child: GestureDetector(
+                      onPanStart: (d) {
+                        final pos = _cellAt(d.globalPosition);
+                        if (pos != null) _addCellToSelection(pos);
+                      },
+                      onPanUpdate: (d) {
+                        final pos = _cellAt(d.globalPosition);
+                        if (pos != null) _addCellToSelection(pos);
+                      },
+                      child: Container(
+                        key: _gridKey,
+                        width: context.scale(280),
+                        height: context.scale(280),
+                        decoration: BoxDecoration(
+                          color: context.bgCard,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: context.textMuted.withAlpha(65), width: 1.2),
+                          boxShadow: AppTheme.cardShadow,
+                        ),
+                        child: GridView.builder(
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: gridSize * gridSize,
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: gridSize,
+                          ),
+                          itemBuilder: (ctx, idx) {
+                            final r = idx ~/ gridSize;
+                            final c = idx % gridSize;
+                            final letter = _grid[r][c];
+                            final pos = (r, c);
+                            final isSel = _selection.contains(pos);
+                            final isPerm = _permanentHighlights.contains(pos);
  
-                        return GestureDetector(
-                          onTap: () => _addCellToSelection(pos),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: isSel
-                                  ? accentColor.withAlpha(120)
-                                  : isPerm
-                                      ? accentColor.withAlpha(50)
-                                      : Colors.transparent,
-                              border: Border.all(
-                                  color: context.textMuted.withAlpha(20),
-                                  width: 0.5,
+                            return GestureDetector(
+                              onTap: () => _addCellToSelection(pos),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isSel
+                                      ? accentColor.withAlpha(120)
+                                      : isPerm
+                                          ? accentColor.withAlpha(50)
+                                          : Colors.transparent,
+                                  border: Border.all(
+                                      color: context.textMuted.withAlpha(20),
+                                      width: 0.5,
+                                    ),
                                 ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                letter,
-                                style: GoogleFonts.outfit(
-                                  fontSize: context.scale(gridSize > 10 ? 12 : gridSize > 8 ? 14 : 16),
-                                  fontWeight: FontWeight.bold,
-                                  color: isSel ? Colors.white : context.textPrimary,
+                                child: Center(
+                                  child: Text(
+                                    letter,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: context.scale(gridSize > 10 ? 12 : gridSize > 8 ? 14 : 16),
+                                      fontWeight: FontWeight.bold,
+                                      color: isSel ? Colors.white : context.textPrimary,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  if (_message.isNotEmpty)
+                    Text(
+                      _message,
+                      style: GoogleFonts.outfit(
+                        color: _won ? accentColor : Colors.redAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: context.scale(14),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  // Action buttons
+                  if (!_won)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        TextButton(
+                          onPressed: _clearSelection,
+                          child: Text('CLEAR', style: GoogleFonts.outfit(color: context.textSecondary, fontWeight: FontWeight.bold, fontSize: context.scale(14))),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: accentColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            elevation: 0,
                           ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              if (_message.isNotEmpty)
-                Text(
-                  _message,
-                  style: GoogleFonts.outfit(
-                    color: _won ? accentColor : Colors.redAccent,
-                    fontWeight: FontWeight.bold,
-                    fontSize: context.scale(14),
-                  ),
-                ),
-              const SizedBox(height: 16),
-              // Action buttons
-              if (!_won)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    TextButton(
-                      onPressed: _clearSelection,
-                      child: Text('CLEAR', style: GoogleFonts.outfit(color: context.textSecondary, fontWeight: FontWeight.bold, fontSize: context.scale(14))),
-                    ),
+                          onPressed: _submitWord,
+                          child: Text('SUBMIT', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
+                        ),
+                      ],
+                    )
+                  else
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: accentColor,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         elevation: 0,
                       ),
-                      onPressed: _submitWord,
-                      child: Text('SUBMIT', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
+                      onPressed: _nextLevel,
+                      child: Text('Next Level →', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
                     ),
-                  ],
-                )
-              else
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accentColor,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    elevation: 0,
-                  ),
-                  onPressed: _nextLevel,
-                  child: Text('Next Level →', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
-                ),
-              const SizedBox(height: 12),
-            ],
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
           ),
         ),
       ),

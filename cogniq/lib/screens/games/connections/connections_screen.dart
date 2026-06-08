@@ -387,9 +387,10 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
           Padding(padding: const EdgeInsets.only(right: 12), child: Center(child: Text('Level ${_puzzleIndex + 1}', style: GoogleFonts.outfit(color: AppTheme.connectionsRed, fontSize: context.scale(13))))),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: [
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
           // Mistakes left text and dots
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Text('Mistakes: ', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(14))),
@@ -465,7 +466,8 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                 child: Text('Try Again', style: GoogleFonts.outfit(color: context.textPrimary, fontWeight: FontWeight.w700, fontSize: context.scale(14))),
               ),
           ],
-        ]),
+          ]),
+        ),
       ),
     );
   }

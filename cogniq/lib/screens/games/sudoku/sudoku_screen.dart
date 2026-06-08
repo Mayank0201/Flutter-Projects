@@ -1257,166 +1257,168 @@ class _SudokuScreenState extends State<SudokuScreen> {
         ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10),
-            child: Column(
-              children: [
-                Text(
+        child: Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10),
+              child: Column(
+                children: [
+                  Text(
 'Fill the ${size}x${size} grid so every row, column and subgrid contains unique numbers from 1 to $size',
-                  style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                // Sudoku Board Display
-                Center(
-                  child: Container(
-                    width: context.scale(boardScale),
-                    height: context.scale(boardScale),
-                    decoration: BoxDecoration(
-                      color: context.bgCard,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: context.textMuted, width: 2),
-                    ),
-                    child: GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: size * size,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: size,
+                    style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  // Sudoku Board Display
+                  Center(
+                    child: Container(
+                      width: context.scale(boardScale),
+                      height: context.scale(boardScale),
+                      decoration: BoxDecoration(
+                        color: context.bgCard,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: context.textMuted, width: 2),
                       ),
-                      itemBuilder: (ctx, idx) {
-                        final r = idx ~/ size;
-                        final c = idx % size;
-                        final value = _board[r][c];
-                        final isOrig = _isOriginal(r, c);
-                        final isSel = r == _selectedRow && c == _selectedCol;
-                        
-                        BorderSide borderRight;
-                        BorderSide borderBottom;
-                        
-                        if (size == 4) {
-                          borderRight = (c == 1) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
-                          borderBottom = (r == 1) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
-                        } else if (size == 6) {
-                          borderRight = (c == 2) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
-                          borderBottom = (r == 1 || r == 3) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
-                        } else {
-                          // size == 9
-                          borderRight = (c == 2 || c == 5) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
-                          borderBottom = (r == 2 || r == 5) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
-                        }
+                      child: GridView.builder(
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: size * size,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: size,
+                        ),
+                        itemBuilder: (ctx, idx) {
+                          final r = idx ~/ size;
+                          final c = idx % size;
+                          final value = _board[r][c];
+                          final isOrig = _isOriginal(r, c);
+                          final isSel = r == _selectedRow && c == _selectedCol;
+                          
+                          BorderSide borderRight;
+                          BorderSide borderBottom;
+                          
+                          if (size == 4) {
+                            borderRight = (c == 1) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
+                            borderBottom = (r == 1) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
+                          } else if (size == 6) {
+                            borderRight = (c == 2) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
+                            borderBottom = (r == 1 || r == 3) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
+                          } else {
+                            // size == 9
+                            borderRight = (c == 2 || c == 5) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
+                            borderBottom = (r == 2 || r == 5) ? BorderSide(color: context.textMuted, width: 2) : BorderSide(color: context.textMuted.withAlpha(40), width: 0.5);
+                          }
 
-                        return GestureDetector(
-                          onTap: () => _selectCell(r, c),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: isSel 
-                                  ? accentColor.withAlpha(45) 
-                                  : isOrig 
-                                      ? context.bgSurface 
-                                      : context.bgCard,
-                              border: Border(
-                                right: borderRight,
-                                bottom: borderBottom,
+                          return GestureDetector(
+                            onTap: () => _selectCell(r, c),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isSel 
+                                    ? accentColor.withAlpha(45) 
+                                    : isOrig 
+                                        ? context.bgSurface 
+                                        : context.bgCard,
+                                border: Border(
+                                  right: borderRight,
+                                  bottom: borderBottom,
+                                ),
                               ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                value != 0 ? '$value' : '',
-                                style: GoogleFonts.outfit(
-                                  fontSize: context.scale(size == 9 ? 15 : 18),
-                                  fontWeight: isOrig ? FontWeight.w900 : FontWeight.w600,
-                                  color: isOrig 
-                                      ? context.textPrimary 
-                                      : accentColor,
+                              child: Center(
+                                child: Text(
+                                  value != 0 ? '$value' : '',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: context.scale(size == 9 ? 15 : 18),
+                                    fontWeight: isOrig ? FontWeight.w900 : FontWeight.w600,
+                                    color: isOrig 
+                                        ? context.textPrimary 
+                                        : accentColor,
+                                  ),
                                 ),
                               ),
                             ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  if (_message.isNotEmpty)
+                    Text(
+                      _message,
+                      style: GoogleFonts.outfit(
+                        color: _won ? accentColor : Colors.redAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: context.scale(14),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  // Number Pad (1 to size)
+                  if (!_won) ...[
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      alignment: WrapAlignment.center,
+                      children: List.generate(size, (i) => i + 1).map((n) {
+                        return SizedBox(
+                          width: context.scale(size == 9 ? 42 : 50),
+                          height: context.scale(size == 9 ? 42 : 50),
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: context.bgSurface,
+                              foregroundColor: context.textPrimary,
+                              padding: EdgeInsets.zero,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                side: BorderSide(
+                                  color: (_selectedRow != -1) ? accentColor : context.textMuted.withAlpha(50),
+                                  width: 1.5,
+                                ),
+                              ),
+                              elevation: 0,
+                            ),
+                            onPressed: (_selectedRow != -1) ? () => _inputNumber(n) : null,
+                            child: Text(
+'$n',
+                              style: GoogleFonts.outfit(fontSize: context.scale(16), fontWeight: FontWeight.bold),
+                            ),
                           ),
                         );
-                      },
+                      }).toList(),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                if (_message.isNotEmpty)
-                  Text(
-                    _message,
-                    style: GoogleFonts.outfit(
-                      color: _won ? accentColor : Colors.redAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: context.scale(14),
-                    ),
-                  ),
-                const SizedBox(height: 16),
-                // Number Pad (1 to size)
-                if (!_won) ...[
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.center,
-                    children: List.generate(size, (i) => i + 1).map((n) {
-                      return SizedBox(
-                        width: context.scale(size == 9 ? 42 : 50),
-                        height: context.scale(size == 9 ? 42 : 50),
-                        child: ElevatedButton(
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        TextButton(
+                          onPressed: (_selectedRow != -1) ? _clearCell : null,
+                          child: Text('CLEAR', style: GoogleFonts.outfit(color: context.textSecondary, fontWeight: FontWeight.bold, fontSize: context.scale(14))),
+                        ),
+                        ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: context.bgSurface,
-                            foregroundColor: context.textPrimary,
-                            padding: EdgeInsets.zero,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              side: BorderSide(
-                                color: (_selectedRow != -1) ? accentColor : context.textMuted.withAlpha(50),
-                                width: 1.5,
-                              ),
-                            ),
+                            backgroundColor: accentColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             elevation: 0,
                           ),
-                          onPressed: (_selectedRow != -1) ? () => _inputNumber(n) : null,
-                          child: Text(
-'$n',
-                            style: GoogleFonts.outfit(fontSize: context.scale(16), fontWeight: FontWeight.bold),
-                          ),
+                          onPressed: _checkBoard,
+                          child: Text('CHECK', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
                         ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      TextButton(
-                        onPressed: (_selectedRow != -1) ? _clearCell : null,
-                        child: Text('CLEAR', style: GoogleFonts.outfit(color: context.textSecondary, fontWeight: FontWeight.bold, fontSize: context.scale(14))),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: accentColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          elevation: 0,
-                        ),
-                        onPressed: _checkBoard,
-                        child: Text('CHECK', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
-                      ),
-                    ],
-                  ),
-                ] else
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accentColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
+                      ],
                     ),
-                    onPressed: _nextLevel,
-                    child: Text('Next Level →', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
-                  ),
-                const SizedBox(height: 12),
-              ],
+                  ] else
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      onPressed: _nextLevel,
+                      child: Text('Next Level →', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(14))),
+                    ),
+                  const SizedBox(height: 12),
+                ],
+              ),
             ),
           ),
         ),

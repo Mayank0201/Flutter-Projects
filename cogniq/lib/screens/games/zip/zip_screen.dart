@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -65,6 +66,15 @@ class _ZipScreenState extends State<ZipScreen> {
   late List<ZipLevel> _sortedLevels;
   bool _dragActive = false;
   Offset? _currentDragOffset;
+
+  Timer? _timer;
+  int _secondsLeft = 25;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -214,6 +224,7 @@ class _ZipScreenState extends State<ZipScreen> {
       final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
       if (lastCellWp == _level.maxWaypoint && _path.length == _level.totalCells) {
         _won = true;
+        _timer?.cancel();
         _msg = 'Path complete!';
         _savePersistedLevel(_levelIndex);
         _clearState();
@@ -222,6 +233,54 @@ class _ZipScreenState extends State<ZipScreen> {
         _saveState();
       }
     });
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _secondsLeft = 25;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_won) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        if (_secondsLeft > 1) {
+          _secondsLeft--;
+        } else {
+          _expandGrid();
+        }
+      });
+    });
+  }
+
+  void _expandGrid() {
+    _timer?.cancel();
+    int newIdx = _levelIndex;
+    for (int i = 1; i < _sortedLevels.length; i++) {
+      final candidateIdx = (_levelIndex + i) % _sortedLevels.length;
+      if (_sortedLevels[candidateIdx].totalCells > _level.totalCells) {
+        newIdx = candidateIdx;
+        break;
+      }
+    }
+    if (newIdx == _levelIndex) {
+      newIdx = (_levelIndex + 1) % _sortedLevels.length;
+    }
+    _levelIndex = newIdx;
+    _clearState();
+    _loadLevel();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('⏳ Time\'s up! Grid expanded to ${_level.rows}x${_level.cols} (${_level.totalCells} cells)!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: AppTheme.zipPink,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void _loadLevel([SharedPreferences? prefs]) {
@@ -252,10 +311,14 @@ class _ZipScreenState extends State<ZipScreen> {
           final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
           if (lastCellWp == _level.maxWaypoint && _path.length == _level.totalCells) {
             _won = true;
+            _timer?.cancel();
             _msg = 'Path complete!';
           }
         }
       }
+    }
+    if (!_won) {
+      _startTimer();
     }
   }
 
@@ -380,116 +443,137 @@ class _ZipScreenState extends State<ZipScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text('${_path.length} / ${_level.totalCells} cells',
-            style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12))),
-          const SizedBox(height: 4),
-          if (_msg.isNotEmpty) Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(_msg, style: GoogleFonts.outfit(color: _won ? AppTheme.zipPink : context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center),
-          ),
-          const SizedBox(height: 12),
-          GestureDetector(
-            onPanStart: (d) {
-              if (_won) return;
-              final c = _cellAtLocal(d.localPosition);
-              if (c != null) {
-                if (_path.isEmpty) {
-                  final wp = _level.waypoints[c.$1][c.$2];
-                  if (wp == 1) {
-                    _dragActive = true;
-                    _addCell(c.$1, c.$2);
-                  } else {
-                    _dragActive = false;
-                    setState(() => _msg = 'Start at number 1!');
-                  }
-                } else {
-                  if (_path.contains(c)) {
-                    _dragActive = true;
-                    _truncatePathTo(c);
-                  } else if (_isAdjacent(_path.last, c)) {
-                    _dragActive = true;
-                    _addCell(c.$1, c.$2);
-                  } else {
-                    _dragActive = false;
-                  }
-                }
-              } else {
-                _dragActive = false;
-              }
-              setState(() {
-                _currentDragOffset = d.localPosition;
-              });
-            },
-            onPanUpdate: (d) {
-              if (_won || !_dragActive) return;
-              final c = _cellAtLocal(d.localPosition);
-              if (c != null) {
-                if (_path.contains(c)) {
-                  _truncatePathTo(c);
-                } else {
-                  _addCell(c.$1, c.$2);
-                }
-              }
-              setState(() {
-                _currentDragOffset = d.localPosition;
-              });
-            },
-            onPanEnd: (_) {
-              setState(() {
-                _dragActive = false;
-                _currentDragOffset = null;
-              });
-              if (_won) return;
-              if (_path.isNotEmpty) {
-                final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
-                if (lastCellWp == _level.maxWaypoint) {
-                  if (_path.length == _level.totalCells) {
-                    setState(() {
-                      _won = true;
-                      _msg = 'Path complete!';
-                      _savePersistedLevel(_levelIndex);
-                      _clearState();
-                    });
-                  } else {
-                    setState(() {
-                      _msg = 'Not all cells filled!';
-                    });
-                  }
-                }
-              }
-            },
-            onPanCancel: () {
-              setState(() {
-                _dragActive = false;
-                _currentDragOffset = null;
-              });
-            },
-            child: SizedBox(
-              key: _gridKey, width: sw, height: cellH * _level.rows,
-              child: CustomPaint(
-                painter: _ZipPainter(
-                  level: _level,
-                  path: _path,
-                  cellW: cellW,
-                  cellH: cellH,
-                  won: _won,
-                  cellBgColor: context.bgCard,
-                  gridColor: context.textMuted.withAlpha(70),
-                  pathColor: AppTheme.zipPink,
-                  fillColor: AppTheme.zipPink.withAlpha(35),
-                  visitedWpColor: AppTheme.softSage,
-                  currentDragOffset: _currentDragOffset,
+        child: Center(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('${_path.length} / ${_level.totalCells} cells',
+                  style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12))),
+                const SizedBox(height: 4),
+                if (!_won)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.hourglass_empty, size: 14, color: AppTheme.zipPink.withOpacity(0.8)),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Grid expands in: ${_secondsLeft}s',
+                        style: GoogleFonts.outfit(color: AppTheme.zipPink, fontWeight: FontWeight.bold, fontSize: context.scale(12)),
+                      ),
+                    ],
+                  ),
+                if (!_won) const SizedBox(height: 6),
+                if (_msg.isNotEmpty) Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(_msg, style: GoogleFonts.outfit(color: _won ? AppTheme.zipPink : context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center),
                 ),
-              ),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onPanStart: (d) {
+                    if (_won) return;
+                    final c = _cellAtLocal(d.localPosition);
+                    if (c != null) {
+                      if (_path.isEmpty) {
+                        final wp = _level.waypoints[c.$1][c.$2];
+                        if (wp == 1) {
+                          _dragActive = true;
+                          _addCell(c.$1, c.$2);
+                        } else {
+                          _dragActive = false;
+                          setState(() => _msg = 'Start at number 1!');
+                        }
+                      } else {
+                        if (_path.contains(c)) {
+                          _dragActive = true;
+                          _truncatePathTo(c);
+                        } else if (_isAdjacent(_path.last, c)) {
+                          _dragActive = true;
+                          _addCell(c.$1, c.$2);
+                        } else {
+                          _dragActive = false;
+                        }
+                      }
+                    } else {
+                      _dragActive = false;
+                    }
+                    setState(() {
+                      _currentDragOffset = d.localPosition;
+                    });
+                  },
+                  onPanUpdate: (d) {
+                    if (_won || !_dragActive) return;
+                    final c = _cellAtLocal(d.localPosition);
+                    if (c != null) {
+                      if (_path.contains(c)) {
+                        _truncatePathTo(c);
+                      } else {
+                        _addCell(c.$1, c.$2);
+                      }
+                    }
+                    setState(() {
+                      _currentDragOffset = d.localPosition;
+                    });
+                  },
+                  onPanEnd: (_) {
+                    setState(() {
+                      _dragActive = false;
+                      _currentDragOffset = null;
+                    });
+                    if (_won) return;
+                    if (_path.isNotEmpty) {
+                      final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
+                      if (lastCellWp == _level.maxWaypoint) {
+                        if (_path.length == _level.totalCells) {
+                          setState(() {
+                            _won = true;
+                            _timer?.cancel();
+                            _msg = 'Path complete!';
+                            _savePersistedLevel(_levelIndex);
+                            _clearState();
+                          });
+                        } else {
+                          setState(() {
+                            _msg = 'Not all cells filled!';
+                          });
+                        }
+                      }
+                    }
+                  },
+                  onPanCancel: () {
+                    setState(() {
+                      _dragActive = false;
+                      _currentDragOffset = null;
+                    });
+                  },
+                  child: SizedBox(
+                    key: _gridKey, width: sw, height: cellH * _level.rows,
+                    child: CustomPaint(
+                      painter: _ZipPainter(
+                        level: _level,
+                        path: _path,
+                        cellW: cellW,
+                        cellH: cellH,
+                        won: _won,
+                        cellBgColor: context.bgCard,
+                        gridColor: context.textMuted.withAlpha(70),
+                        pathColor: AppTheme.zipPink,
+                        fillColor: AppTheme.zipPink.withAlpha(35),
+                        visitedWpColor: AppTheme.softSage,
+                        currentDragOffset: _currentDragOffset,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                if (_won) TextButton(onPressed: _nextLevel,
+                  child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.zipPink, fontWeight: FontWeight.w700, fontSize: context.scale(16))))
+                else if (_path.isNotEmpty) TextButton(onPressed: _reset,
+                  child: Text('Reset', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
+              ],
             ),
           ),
-          const SizedBox(height: 20),
-          if (_won) TextButton(onPressed: _nextLevel,
-            child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.zipPink, fontWeight: FontWeight.w700, fontSize: context.scale(16))))
-          else if (_path.isNotEmpty) TextButton(onPressed: _reset,
-            child: Text('Reset', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
-        ]),
+        ),
       ),
     );
   }

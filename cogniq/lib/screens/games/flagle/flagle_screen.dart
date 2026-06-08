@@ -1327,153 +1327,157 @@ class _FlagleScreenState extends State<FlagleScreen> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Guess the country flag',
-                style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(14)),
-              ),
-              const SizedBox(height: 20),
-              // Flag Container
-              Center(
-                child: Container(
-                  width: context.scale(270),
-                  height: context.scale(180),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: context.textMuted.withAlpha(80), width: 2),
-                    borderRadius: BorderRadius.circular(8),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Guess the country flag',
+                    style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(14)),
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Stack(
-                      children: [
-                        // The actual flag
-                        Positioned.fill(child: _level.flagWidget),
-                        // Covering tiles (3 cols, 2 rows) - keyed to avoid flash on transition
-                        Positioned.fill(
-                          key: ValueKey('covers_$_levelIndex'),
-                          child: Column(
-                            children: [
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    Expanded(child: _buildCoverTile(0)),
-                                    Expanded(child: _buildCoverTile(1)),
-                                    Expanded(child: _buildCoverTile(2)),
-                                  ],
-                                ),
+                  const SizedBox(height: 20),
+                  // Flag Container
+                  Center(
+                    child: Container(
+                      width: context.scale(270),
+                      height: context.scale(180),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: context.textMuted.withAlpha(80), width: 2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Stack(
+                          children: [
+                            // The actual flag
+                            Positioned.fill(child: _level.flagWidget),
+                            // Covering tiles (3 cols, 2 rows) - keyed to avoid flash on transition
+                            Positioned.fill(
+                              key: ValueKey('covers_$_levelIndex'),
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Expanded(child: _buildCoverTile(0)),
+                                        Expanded(child: _buildCoverTile(1)),
+                                        Expanded(child: _buildCoverTile(2)),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Expanded(child: _buildCoverTile(3)),
+                                        Expanded(child: _buildCoverTile(4)),
+                                        Expanded(child: _buildCoverTile(5)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    Expanded(child: _buildCoverTile(3)),
-                                    Expanded(child: _buildCoverTile(4)),
-                                    Expanded(child: _buildCoverTile(5)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              if (_message.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Text(
-                    _message,
-                    style: GoogleFonts.outfit(
-                      color: _won ? AppTheme.flagleSky : Colors.redAccent,
-                      fontWeight: FontWeight.w600,
-                      fontSize: context.scale(15),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              Text(
-                'Clues revealed: ${_revealed.where((r) => r).length}/6',
-                style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
-              ),
-              const SizedBox(height: 20),
-              // Choices or Action
-              if (!_gameOver) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _guessController,
-                          style: GoogleFonts.outfit(color: context.textPrimary, fontSize: context.scale(14)),
-                          decoration: InputDecoration(
-                            hintText: 'Type country name...',
-                            hintStyle: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(14)),
-                            filled: true,
-                            fillColor: context.bgCard,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide(color: context.textMuted.withAlpha(40), width: 0.8),
                             ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide(color: AppTheme.flagleSky, width: 0.8),
-                            ),
-                          ),
-                          onSubmitted: _makeGuess,
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.flagleSky,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          elevation: 0,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  if (_message.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        _message,
+                        style: GoogleFonts.outfit(
+                          color: _won ? AppTheme.flagleSky : Colors.redAccent,
+                          fontWeight: FontWeight.w600,
+                          fontSize: context.scale(15),
                         ),
-                        onPressed: () => _makeGuess(_guessController.text),
-                        child: Text(
-                          'Guess',
-                          style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14)),
-                        ),
+                        textAlign: TextAlign.center,
                       ),
-                    ],
+                    ),
+                  Text(
+                    'Clues revealed: ${_revealed.where((r) => r).length}/6',
+                    style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
                   ),
-                ),
-                const SizedBox(height: 15),
-                TextButton.icon(
-                  onPressed: _revealed.every((r) => r) ? null : _revealTile,
-                  icon: Icon(Icons.help_outline, size: context.scale(18), color: context.textMuted),
-                  label: Text(
-                    'Next Clue',
-                    style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(13)),
-                  ),
-                ),
-              ] else ...[
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.flagleSky,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    elevation: 0,
-                  ),
-                  onPressed: _won ? _nextLevel : _reset,
-                  child: Text(
-                    _won ? 'Next Level →' : 'Try Again',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14)),
-                  ),
-                ),
-              ],
-            ],
+                  const SizedBox(height: 20),
+                  // Choices or Action
+                  if (!_gameOver) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _guessController,
+                              style: GoogleFonts.outfit(color: context.textPrimary, fontSize: context.scale(14)),
+                              decoration: InputDecoration(
+                                hintText: 'Type country name...',
+                                hintStyle: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(14)),
+                                filled: true,
+                                fillColor: context.bgCard,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(color: context.textMuted.withAlpha(40), width: 0.8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(color: AppTheme.flagleSky, width: 0.8),
+                                ),
+                              ),
+                              onSubmitted: _makeGuess,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.flagleSky,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              elevation: 0,
+                            ),
+                            onPressed: () => _makeGuess(_guessController.text),
+                            child: Text(
+                              'Guess',
+                              style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                    TextButton.icon(
+                      onPressed: _revealed.every((r) => r) ? null : _revealTile,
+                      icon: Icon(Icons.help_outline, size: context.scale(18), color: context.textMuted),
+                      label: Text(
+                        'Next Clue',
+                        style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(13)),
+                      ),
+                    ),
+                  ] else ...[
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.flagleSky,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      onPressed: _won ? _nextLevel : _reset,
+                      child: Text(
+                        _won ? 'Next Level →' : 'Try Again',
+                        style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

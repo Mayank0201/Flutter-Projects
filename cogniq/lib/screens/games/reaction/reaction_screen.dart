@@ -226,72 +226,75 @@ class _ReactionScreenState extends State<ReactionScreen> {
         behavior: HitTestBehavior.opaque,
         child: SizedBox.expand(
           child: SafeArea(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_phase == _Phase.waiting && !_gameOver) ...[
-                  Icon(Icons.touch_app_outlined, size: context.scale(64), color: context.textMuted),
-                  const SizedBox(height: 20),
-                  Text('Tap to Start', style: GoogleFonts.outfit(fontSize: context.scale(24), fontWeight: FontWeight.w700, color: context.textPrimary)),
-                  const SizedBox(height: 8),
-                  Text('Round ${_round + 1}/5 • Target: ${target}ms avg', style: GoogleFonts.outfit(fontSize: context.scale(13), color: context.textSecondary)),
-                ],
-                if (_phase == _Phase.ready) ...[
-                  Text('Wait...', style: GoogleFonts.outfit(fontSize: context.scale(32), fontWeight: FontWeight.w800, color: Colors.white)),
-                  const SizedBox(height: 8),
-                  Text('Tap when the screen turns GREEN', style: GoogleFonts.outfit(fontSize: context.scale(14), color: Colors.white70)),
-                ],
-                if (_phase == _Phase.go) ...[
-                  Text('TAP!', style: GoogleFonts.outfit(fontSize: context.scale(48), fontWeight: FontWeight.w900, color: Colors.white)),
-                ],
-                if (_phase == _Phase.tooEarly) ...[
-                  Icon(Icons.warning_amber_rounded, size: context.scale(48), color: Colors.white),
-                  const SizedBox(height: 12),
-                  Text('Too Early!', style: GoogleFonts.outfit(fontSize: context.scale(28), fontWeight: FontWeight.w800, color: Colors.white)),
-                  const SizedBox(height: 8),
-                  Text('Wait for green before tapping', style: GoogleFonts.outfit(fontSize: context.scale(14), color: Colors.white70)),
-                ],
-                if (_phase == _Phase.result && !_gameOver) ...[
-                  Text('${_reactionMs}ms', style: GoogleFonts.outfit(fontSize: context.scale(48), fontWeight: FontWeight.w900, color: accent)),
-                  const SizedBox(height: 8),
-                  Text('Round $_round/5 • Tap to continue', style: GoogleFonts.outfit(fontSize: context.scale(14), color: context.textSecondary)),
-                  const SizedBox(height: 16),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: _results.map((ms) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('${ms}ms', style: GoogleFonts.outfit(fontSize: context.scale(12), color: context.textMuted)),
-                  )).toList()),
-                ],
-                if (_gameOver) ...[
-                  Text(
-'${_results.reduce((a, b) => a + b) ~/ _results.length}ms',
-                    style: GoogleFonts.outfit(fontSize: context.scale(48), fontWeight: FontWeight.w900, color: _won ? accent : Colors.redAccent),
-                  ),
-                  const SizedBox(height: 4),
-                  Text('Average of 5 rounds', style: GoogleFonts.outfit(fontSize: context.scale(13), color: context.textSecondary)),
-                  const SizedBox(height: 12),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: _results.map((ms) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('${ms}ms', style: GoogleFonts.outfit(fontSize: context.scale(12), color: context.textMuted)),
-                  )).toList()),
-                  const SizedBox(height: 16),
-                  Text(
-                    _won ?'Under ${target}ms target!':'Target was ${target}ms avg',
-                    style: GoogleFonts.outfit(fontSize: context.scale(16), fontWeight: FontWeight.w600, color: _won ? accent : Colors.redAccent),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (_phase == _Phase.waiting && !_gameOver) ...[
+                    Icon(Icons.touch_app_outlined, size: context.scale(64), color: context.textMuted),
+                    const SizedBox(height: 20),
+                    Text('Tap to Start', style: GoogleFonts.outfit(fontSize: context.scale(24), fontWeight: FontWeight.w700, color: context.textPrimary)),
+                    const SizedBox(height: 8),
+                    Text('Round ${_round + 1}/5 • Target: ${target}ms avg', style: GoogleFonts.outfit(fontSize: context.scale(13), color: context.textSecondary)),
+                  ],
+                  if (_phase == _Phase.ready) ...[
+                    Text('Wait...', style: GoogleFonts.outfit(fontSize: context.scale(32), fontWeight: FontWeight.w800, color: Colors.white)),
+                    const SizedBox(height: 8),
+                    Text('Tap when the screen turns GREEN', style: GoogleFonts.outfit(fontSize: context.scale(14), color: Colors.white70)),
+                  ],
+                  if (_phase == _Phase.go) ...[
+                    Text('TAP!', style: GoogleFonts.outfit(fontSize: context.scale(48), fontWeight: FontWeight.w900, color: Colors.white)),
+                  ],
+                  if (_phase == _Phase.tooEarly) ...[
+                    Icon(Icons.warning_amber_rounded, size: context.scale(48), color: Colors.white),
+                    const SizedBox(height: 12),
+                    Text('Too Early!', style: GoogleFonts.outfit(fontSize: context.scale(28), fontWeight: FontWeight.w800, color: Colors.white)),
+                    const SizedBox(height: 8),
+                    Text('Wait for green before tapping', style: GoogleFonts.outfit(fontSize: context.scale(14), color: Colors.white70)),
+                  ],
+                  if (_phase == _Phase.result && !_gameOver) ...[
+                    Text('${_reactionMs}ms', style: GoogleFonts.outfit(fontSize: context.scale(48), fontWeight: FontWeight.w900, color: accent)),
+                    const SizedBox(height: 8),
+                    Text('Round $_round/5 • Tap to continue', style: GoogleFonts.outfit(fontSize: context.scale(14), color: context.textSecondary)),
+                    const SizedBox(height: 16),
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: _results.map((ms) => Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text('${ms}ms', style: GoogleFonts.outfit(fontSize: context.scale(12), color: context.textMuted)),
+                    )).toList()),
+                  ],
+                  if (_gameOver) ...[
+                    Text(
+                      '${_results.reduce((a, b) => a + b) ~/ _results.length}ms',
+                      style: GoogleFonts.outfit(fontSize: context.scale(48), fontWeight: FontWeight.w900, color: _won ? accent : Colors.redAccent),
                     ),
-                    onPressed: _won ? _nextLevel : _reset,
-                    child: Text(_won ?'Next Level →':'Try Again', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
-                  ),
+                    const SizedBox(height: 4),
+                    Text('Average of 5 rounds', style: GoogleFonts.outfit(fontSize: context.scale(13), color: context.textSecondary)),
+                    const SizedBox(height: 12),
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: _results.map((ms) => Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text('${ms}ms', style: GoogleFonts.outfit(fontSize: context.scale(12), color: context.textMuted)),
+                    )).toList()),
+                    const SizedBox(height: 16),
+                    Text(
+                      _won ? 'Under ${target}ms target!' : 'Target was ${target}ms avg',
+                      style: GoogleFonts.outfit(fontSize: context.scale(16), fontWeight: FontWeight.w600, color: _won ? accent : Colors.redAccent),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      onPressed: _won ? _nextLevel : _reset,
+                      child: Text(_won ? 'Next Level →' : 'Try Again', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

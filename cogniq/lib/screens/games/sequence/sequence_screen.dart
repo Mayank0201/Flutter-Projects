@@ -223,97 +223,101 @@ class _SequenceScreenState extends State<SequenceScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Status
-            Text(
-              _phase == _Phase.idle
-                  ?'Tap Start to begin'
-                  : _phase == _Phase.playing
-                      ?'Watch the sequence...'
-                      : _phase == _Phase.input
-                          ?'Your turn! (${_inputIndex}/${_sequence.length})'
-                          : _won
-                              ?'Perfect!'
-                              :'❌ Wrong tile!',
-              style: GoogleFonts.outfit(
-                fontSize: context.scale(16),
-                fontWeight: FontWeight.w600,
-                color: _won ? accent : _phase == _Phase.wrong ? Colors.redAccent : context.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-'Sequence length: $_seqLen',
-              style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)),
-            ),
-            const SizedBox(height: 24),
-            // 3x3 Grid
-            Center(
-              child: SizedBox(
-                width: context.scale(260),
-                height: context.scale(260),
-                child: GridView.builder(
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
+        child: Center(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Status
+                Text(
+                  _phase == _Phase.idle
+                      ?'Tap Start to begin'
+                      : _phase == _Phase.playing
+                          ?'Watch the sequence...'
+                          : _phase == _Phase.input
+                              ?'Your turn! (${_inputIndex}/${_sequence.length})'
+                              : _won
+                                  ?'Perfect!'
+                                  :'❌ Wrong tile!',
+                  style: GoogleFonts.outfit(
+                    fontSize: context.scale(16),
+                    fontWeight: FontWeight.w600,
+                    color: _won ? accent : _phase == _Phase.wrong ? Colors.redAccent : context.textSecondary,
                   ),
-                  itemCount: _gridSize,
-                  itemBuilder: (ctx, idx) {
-                    final isHighlighted = _activeHighlight == idx;
-                    final baseColor = _tileColors[idx];
-                    return GestureDetector(
-                      onTap: () => _onTileTap(idx),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        decoration: BoxDecoration(
-                          color: isHighlighted ? baseColor : context.bgCard,
-                          borderRadius: BorderRadius.circular(12),
-                          border: isHighlighted
-                              ? Border.all(color: Colors.white, width: 3)
-                              : Border.all(color: context.textMuted.withAlpha(45), width: 1.0),
-                          boxShadow: isHighlighted
-                              ? [BoxShadow(color: baseColor.withAlpha(120), blurRadius: 16, spreadRadius: 2)]
-                              : AppTheme.cardShadow,
-                        ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Sequence length: $_seqLen',
+                  style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)),
+                ),
+                const SizedBox(height: 24),
+                // 3x3 Grid
+                Center(
+                  child: SizedBox(
+                    width: context.scale(260),
+                    height: context.scale(260),
+                    child: GridView.builder(
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
                       ),
-                    );
-                  },
+                      itemCount: _gridSize,
+                      itemBuilder: (ctx, idx) {
+                        final isHighlighted = _activeHighlight == idx;
+                        final baseColor = _tileColors[idx];
+                        return GestureDetector(
+                          onTap: () => _onTileTap(idx),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            decoration: BoxDecoration(
+                              color: isHighlighted ? baseColor : context.bgCard,
+                              borderRadius: BorderRadius.circular(12),
+                              border: isHighlighted
+                                  ? Border.all(color: Colors.white, width: 3)
+                                  : Border.all(color: context.textMuted.withAlpha(45), width: 1.0),
+                              boxShadow: isHighlighted
+                                  ? [BoxShadow(color: baseColor.withAlpha(120), blurRadius: 16, spreadRadius: 2)]
+                                  : AppTheme.cardShadow,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 30),
+                // Action buttons
+                if (_phase == _Phase.idle && !_gameOver)
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    onPressed: _startPlaying,
+                    child: Text('Start', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(16))),
+                  ),
+                if (_gameOver) ...[
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    onPressed: _won ? _nextLevel : _reset,
+                    child: Text(_won ?'Next Level →':'Try Again', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(height: 30),
-            // Action buttons
-            if (_phase == _Phase.idle && !_gameOver)
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  elevation: 0,
-                ),
-                onPressed: _startPlaying,
-                child: Text('Start', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(16))),
-              ),
-            if (_gameOver) ...[
-              const SizedBox(height: 8),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  elevation: 0,
-                ),
-                onPressed: _won ? _nextLevel : _reset,
-                child: Text(_won ?'Next Level →':'Try Again', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );

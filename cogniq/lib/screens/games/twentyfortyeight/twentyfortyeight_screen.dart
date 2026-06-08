@@ -310,117 +310,123 @@ class _TwentyFortyEightScreenState extends State<TwentyFortyEightScreen> with Ti
         ],
       ),
       body: SafeArea(
-        child: GestureDetector(
-          onHorizontalDragEnd: (d) {
-            if (d.primaryVelocity == null) return;
-            if (d.primaryVelocity! < -100) _handleSwipe('left');
-            else if (d.primaryVelocity! > 100) _handleSwipe('right');
-          },
-          onVerticalDragEnd: (d) {
-            if (d.primaryVelocity == null) return;
-            if (d.primaryVelocity! < -100) _handleSwipe('up');
-            else if (d.primaryVelocity! > 100) _handleSwipe('down');
-          },
-          child: Column(
-            children: [
-              // Stats bar
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _StatChip(label:'SCORE', value:'$_score', color: accent),
-                    _StatChip(label:'MOVES', value:'$_moves${level.maxMoves < 999 ?"/${level.maxMoves}":""}', color: context.textSecondary),
-                    _StatChip(label:'TARGET', value:'${level.target}', color: accent),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              // Grid
-              Center(
-                child: Container(
-                  width: context.scale(320),
-                  height: context.scale(320),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: context.isDarkMode ? const Color(0xFF1E1E2C) : const Color(0xFFECECEF),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: context.textMuted.withAlpha(45), width: 1.0),
-                  ),
-                  child: GridView.builder(
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4,
-                      crossAxisSpacing: 6,
-                      mainAxisSpacing: 6,
+        child: Center(
+          child: SingleChildScrollView(
+            child: GestureDetector(
+              onHorizontalDragEnd: (d) {
+                if (d.primaryVelocity == null) return;
+                if (d.primaryVelocity! < -100) _handleSwipe('left');
+                else if (d.primaryVelocity! > 100) _handleSwipe('right');
+              },
+              onVerticalDragEnd: (d) {
+                if (d.primaryVelocity == null) return;
+                if (d.primaryVelocity! < -100) _handleSwipe('up');
+                else if (d.primaryVelocity! > 100) _handleSwipe('down');
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Stats bar
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _StatChip(label:'SCORE', value:'$_score', color: accent),
+                        _StatChip(label:'MOVES', value:'$_moves${level.maxMoves < 999 ?"/${level.maxMoves}":""}', color: context.textSecondary),
+                        _StatChip(label:'TARGET', value:'${level.target}', color: accent),
+                      ],
                     ),
-                    itemCount: 16,
-                    itemBuilder: (ctx, idx) {
-                      final r = idx ~/ 4;
-                      final c = idx % 4;
-                      final val = _grid[r][c];
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        decoration: BoxDecoration(
-                          color: _tileColor(val),
-                          borderRadius: BorderRadius.circular(8),
-                          border: val == 0 
-                              ? Border.all(color: context.textMuted.withAlpha(35), width: 0.8) 
-                              : null,
-                          boxShadow: val == 0 ? AppTheme.cardShadow : null,
-                        ),
-                        child: Center(
-                          child: val > 0
-                              ? Text(
-                                  '$val',
-                                  style: GoogleFonts.outfit(
-                                    fontSize: _fontSize(val),
-                                    fontWeight: FontWeight.w800,
-                                    color: _textColor(val),
-                                  ),
-                                )
-                              : null,
-                        ),
-                      );
-                    },
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  // Grid
+                  Center(
+                    child: Container(
+                      width: context.scale(320),
+                      height: context.scale(320),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: context.isDarkMode ? const Color(0xFF1E1E2C) : const Color(0xFFECECEF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: context.textMuted.withAlpha(45), width: 1.0),
+                      ),
+                      child: GridView.builder(
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          crossAxisSpacing: 6,
+                          mainAxisSpacing: 6,
+                        ),
+                        itemCount: 16,
+                        itemBuilder: (ctx, idx) {
+                          final r = idx ~/ 4;
+                          final c = idx % 4;
+                          final val = _grid[r][c];
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            decoration: BoxDecoration(
+                              color: _tileColor(val),
+                              borderRadius: BorderRadius.circular(8),
+                              border: val == 0 
+                                  ? Border.all(color: context.textMuted.withAlpha(35), width: 0.8) 
+                                  : null,
+                              boxShadow: val == 0 ? AppTheme.cardShadow : null,
+                            ),
+                            child: Center(
+                              child: val > 0
+                                  ? Text(
+                                      '$val',
+                                      style: GoogleFonts.outfit(
+                                        fontSize: _fontSize(val),
+                                        fontWeight: FontWeight.w800,
+                                        color: _textColor(val),
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Game over / win
+                  if (_gameOver) ...[
+                    Text(
+                      _won ?'Target Reached!':'Game Over',
+                      style: GoogleFonts.outfit(
+                        fontSize: context.scale(20),
+                        fontWeight: FontWeight.w700,
+                        color: _won ? accent : Colors.redAccent,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      onPressed: _won ? _nextLevel : _reset,
+                      child: Text(
+                        _won ?'Next Level →':'Try Again',
+                        style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14)),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ] else ...[
+                    Text(
+                      'Swipe to merge tiles',
+                      style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ],
               ),
-              const Spacer(),
-              // Game over / win
-              if (_gameOver) ...[
-                Text(
-                  _won ?'Target Reached!':'Game Over',
-                  style: GoogleFonts.outfit(
-                    fontSize: context.scale(20),
-                    fontWeight: FontWeight.w700,
-                    color: _won ? accent : Colors.redAccent,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    elevation: 0,
-                  ),
-                  onPressed: _won ? _nextLevel : _reset,
-                  child: Text(
-                    _won ?'Next Level →':'Try Again',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14)),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ] else ...[
-                Text(
-'Swipe to merge tiles',
-                  style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)),
-                ),
-                const SizedBox(height: 20),
-              ],
-            ],
+            ),
           ),
         ),
       ),

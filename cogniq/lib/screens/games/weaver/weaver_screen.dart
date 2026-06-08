@@ -8,40 +8,18 @@ import '../../../utils/hint_manager.dart';
 // Each level: [startWord, ...intermediates(optional), endWord]
 // User must type intermediate words that differ by 1 letter
 const List<List<String>> _kLevels = [
-  // Easy (3 letters)
-  ['CAT', 'COT', 'COG', 'DOG'],
-  ['HOT', 'HOP', 'MOP', 'MAP'],
-  ['BOY', 'TOY', 'TOO', 'TWO'],
-  ['BAT', 'CAT', 'COT', 'COG', 'DOG'],
-  ['WET', 'PET', 'POT', 'ROT'],
-  // Medium (4 letters)
+  // 4-letter levels
   ['COLD', 'CORD', 'WORD', 'WARD', 'WARM'],
   ['GAME', 'CAME', 'CAVE', 'LAVE', 'LIVE'],
   ['HEAD', 'HEAT', 'HEAP', 'REAP', 'READ'],
   ['FIRE', 'FARE', 'FATE', 'GATE', 'GAVE'],
   ['WORK', 'WORD', 'WARD', 'WARM', 'WORM'],
-  // Hard (5 letters)
-  ['GREAT', 'GREET', 'GREEN', 'GREED', 'CREED'],
-  ['SHARK', 'SHARE', 'SHORE', 'STORE', 'STONE'],
-  ['CLOCK', 'FLOCK', 'FLICK', 'SLICK', 'SLICE'],
-  ['WATER', 'WAVER', 'SAVER', 'SEVER', 'FEVER'],
-  ['HOUSE', 'MOUSE', 'MOOSE', 'LOOSE', 'GOOSE'],
-  // Expansions
-  ['SUN', 'RUN', 'RAN', 'MAN'],
   ['LATE', 'LANE', 'LINE', 'FINE'],
   ['GATE', 'FATE', 'FACE', 'FACT'],
-  ['PLANT', 'PLANE', 'PLATE', 'SLATE'],
-  ['SHIRT', 'SHIFT', 'SWIFT'],
-  ['BAT', 'CAT', 'HAT', 'HOT'],
-  ['PIN', 'PEN', 'TEN', 'TAN'],
   ['BEAR', 'BEAD', 'HEAD', 'HEAT'],
   ['GATE', 'LATE', 'LANE', 'LINE'],
   ['MORE', 'SORE', 'SOLE', 'SALE'],
   ['WIND', 'WINE', 'LINE', 'FINE'],
-  ['STARE', 'SPARE', 'SPARK', 'STARK'],
-  ['SWEET', 'SHEET', 'SHEEP', 'SLEEP'],
-  ['PRICE', 'PRIDE', 'PRIME', 'CRIME'],
-  ['STEAM', 'STEAL', 'STEEL', 'STEER'],
   ['WOOD', 'FOOD', 'FOOT', 'SOOT', 'BOOT'],
   ['WIND', 'WINE', 'MINE', 'MINT', 'MIST', 'LIST', 'FIST'],
   ['BEER', 'BEAR', 'BEAD', 'HEAD', 'HERD'],
@@ -52,17 +30,38 @@ const List<List<String>> _kLevels = [
   ['WAVE', 'WANE', 'WINE', 'WIND'],
   ['LOCK', 'LOOK', 'BOOK', 'BOOT', 'BOAT'],
   ['GOLD', 'COLD', 'CORD', 'CARD', 'WARD'],
-  // 10 new levels
-  ['POT', 'PAT', 'RAT', 'RAM'],
-  ['SAD', 'MAD', 'MAN', 'PAN'],
-  ['NET', 'NOT', 'HOT', 'HAT'],
   ['SURE', 'PURE', 'PARE', 'PART'],
   ['LION', 'LOON', 'LOOK', 'BOOK'],
   ['MIND', 'MINT', 'MIST', 'MOST'],
+  
+  // 5-letter levels (highly challenging)
+  ['GREAT', 'GREET', 'GREEN', 'GREED', 'CREED'],
+  ['SHARK', 'SHARE', 'SHORE', 'STORE', 'STONE'],
+  ['CLOCK', 'FLOCK', 'FLICK', 'SLICK', 'SLICE'],
+  ['WATER', 'WAVER', 'SAVER', 'SEVER', 'FEVER'],
+  ['HOUSE', 'MOUSE', 'MOOSE', 'LOOSE', 'GOOSE'],
+  ['PLANT', 'PLANE', 'PLATE', 'SLATE'],
+  ['SHIRT', 'SHIFT', 'SWIFT'],
+  ['STARE', 'SPARE', 'SPARK', 'STARK'],
+  ['SWEET', 'SHEET', 'SHEEP', 'SLEEP'],
+  ['PRICE', 'PRIDE', 'PRIME', 'CRIME'],
+  ['STEAM', 'STEAL', 'STEEL', 'STEER'],
   ['SMART', 'START', 'STARE', 'STORE', 'STONE'],
   ['GRASS', 'GLASS', 'CLASS', 'CLASH', 'CRASH'],
   ['TRACK', 'TRICK', 'PRICK', 'PRICE', 'PRIDE'],
   ['FLOUR', 'FLOOR', 'FLOOD', 'BLOOD', 'BROOD', 'BROAD'],
+  
+  // Advanced long chains (Extremely Hard)
+  ['SHARK', 'SHARE', 'SHORE', 'CHORE', 'CHOKE', 'CHEEK', 'CREEK'],
+  ['WHEAT', 'CHEAT', 'CHEAP', 'CHIPS', 'CHINS', 'SHINS', 'SHINE'],
+  ['FLOUR', 'FLOOR', 'FLOOD', 'BLOOD', 'BROOD', 'BROAD', 'BREAD'],
+  ['BLACK', 'SLACK', 'SHACK', 'SHANK', 'SHARK', 'SHARE', 'SHORE', 'CHORE'],
+  ['CLOCK', 'FLOCK', 'FLICK', 'SLICK', 'SLICE', 'SLIDE', 'GLIDE'],
+  ['PLANT', 'PLANE', 'PLATE', 'SLATE', 'SLATS', 'SLITS', 'SPITS'],
+  ['SWEET', 'SHEET', 'SHEEP', 'SLEEP', 'STEEP', 'STEER', 'STEAL'],
+  ['DRAFT', 'CRAFT', 'CRUST', 'TRUST', 'TRUSS', 'TRIPS', 'DRIPS'],
+  ['HEART', 'HEARD', 'BEARD', 'BOARD', 'BOAST', 'BEAST', 'FEAST'],
+  ['TRADE', 'TREAD', 'BREAD', 'BROAD', 'BROOD', 'BLOOD', 'FLOOD'],
 ];
 
 class WeaverScreen extends StatefulWidget {
@@ -187,6 +186,17 @@ class _WeaverScreenState extends State<WeaverScreen> {
     return diffs == 1;
   }
 
+  bool _isValidChainAt(int index) {
+    if (index < 0 || index >= _scrambledIntermediates.length) return false;
+    String prev = _chain.first;
+    for (int i = 0; i <= index; i++) {
+      String current = _scrambledIntermediates[i];
+      if (!_diffByOne(prev, current)) return false;
+      prev = current;
+    }
+    return true;
+  }
+
   bool _checkWin() {
     final fullList = [_chain.first, ..._scrambledIntermediates, _chain.last];
     for (int i = 0; i < fullList.length - 1; i++) {
@@ -242,8 +252,21 @@ class _WeaverScreenState extends State<WeaverScreen> {
   }
 
   Widget _buildEndCard() {
-    final lastIntermediate = _scrambledIntermediates.isNotEmpty ? _scrambledIntermediates.last : _chain.first;
-    final isConnected = _diffByOne(lastIntermediate, _chain.last);
+    bool isConnected = false;
+    if (_scrambledIntermediates.isNotEmpty) {
+      bool allValid = true;
+      for (int i = 0; i < _scrambledIntermediates.length; i++) {
+        if (!_isValidChainAt(i)) {
+          allValid = false;
+          break;
+        }
+      }
+      if (allValid && _diffByOne(_scrambledIntermediates.last, _chain.last)) {
+        isConnected = true;
+      }
+    } else {
+      isConnected = _diffByOne(_chain.first, _chain.last);
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -276,8 +299,7 @@ class _WeaverScreenState extends State<WeaverScreen> {
   }
 
   Widget _buildScrambledItem(String word, int index) {
-    final prevWord = index == 0 ? _chain.first : _scrambledIntermediates[index - 1];
-    final isConnected = _diffByOne(prevWord, word);
+    final isConnected = _isValidChainAt(index);
 
     return ReorderableDragStartListener(
       key: ValueKey(word),

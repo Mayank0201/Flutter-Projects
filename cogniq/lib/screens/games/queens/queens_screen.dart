@@ -728,145 +728,151 @@ class _QueensScreenState extends State<QueensScreen> {
           final maxDim = min(constraints.maxWidth - 40, constraints.maxHeight - 160);
           final cellSize = maxDim / _level.n;
 
-          return SingleChildScrollView(
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const SizedBox(height: 8),
-              Text('Tap: empty → X → Star → empty. Drag to place/erase X marks.\nOne Star per row, column & color.',
-                style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)), textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Column(
-                    key: _gridKey,
-                    mainAxisSize: MainAxisSize.min,
-                    children: List.generate(_level.n, (r) =>
-                      Row(mainAxisSize: MainAxisSize.min,
-                        children: List.generate(_level.n, (c) {
-                          final regionId = _level.regions[r][c];
-                          final state = _cells[r][c];
+          return Center(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 8),
+                  Text('Tap: empty → X → Star → empty. Drag to place/erase X marks.\nOne Star per row, column & color.',
+                    style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)), textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Column(
+                        key: _gridKey,
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(_level.n, (r) =>
+                          Row(mainAxisSize: MainAxisSize.min,
+                            children: List.generate(_level.n, (c) {
+                              final regionId = _level.regions[r][c];
+                              final state = _cells[r][c];
 
-                          final borderColor = context.textPrimary;
-                          final dividerColor = context.textSecondary.withAlpha(60);
+                              final borderColor = context.textPrimary;
+                              final dividerColor = context.textSecondary.withAlpha(60);
 
-                          BorderSide getTopBorder() {
-                            if (r == 0 || _level.regions[r - 1][c] != regionId) {
-                              return BorderSide(color: borderColor, width: 2.5);
-                            }
-                            return BorderSide(color: dividerColor, width: 0.8);
-                          }
-
-                          BorderSide getLeftBorder() {
-                            if (c == 0 || _level.regions[r][c - 1] != regionId) {
-                              return BorderSide(color: borderColor, width: 2.5);
-                            }
-                            return BorderSide(color: dividerColor, width: 0.8);
-                          }
-
-                          BorderSide getRightBorder() {
-                            if (c == _level.n - 1) {
-                              return BorderSide(color: borderColor, width: 2.5);
-                            }
-                            return BorderSide(color: dividerColor, width: 0.8);
-                          }
-
-                          BorderSide getBottomBorder() {
-                            if (r == _level.n - 1) {
-                              return BorderSide(color: borderColor, width: 2.5);
-                            }
-                            return BorderSide(color: dividerColor, width: 0.8);
-                          }
-
-                          return GestureDetector(
-                            onTap: () => _tap(r, c),
-                            onPanStart: (_) => _onDragStart(r, c),
-                            onPanUpdate: (d) {
-                              final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
-                              if (box == null) return;
-                              final localPos = box.globalToLocal(d.globalPosition);
-                              final cellDim = cellSize;
-                              final row = (localPos.dy / cellDim).floor();
-                              final col = (localPos.dx / cellDim).floor();
-                              if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
-                                _onDragUpdate(row, col);
+                              BorderSide getTopBorder() {
+                                if (r == 0 || _level.regions[r - 1][c] != regionId) {
+                                  return BorderSide(color: borderColor, width: 2.5);
+                                }
+                                return BorderSide(color: dividerColor, width: 0.8);
                               }
-                            },
-                            onPanEnd: (_) => _onDragEnd(),
-                            child: Builder(
-                              builder: (context) {
-                                final regionColorsLight = const [
-                                  Color(0xFFFBCFE8), // Pink
-                                  Color(0xFFBFDBFE), // Blue
-                                  Color(0xFFA7F3D0), // Green
-                                  Color(0xFFFDE68A), // Yellow
-                                  Color(0xFFDDD6FE), // Purple
-                                  Color(0xFFFED7AA), // Orange
-                                  Color(0xFF99F6E4), // Teal
-                                  Color(0xFFC7D2FE), // Indigo
-                                  Color(0xFFFECDD3), // Rose
-                                  Color(0xFFE2E8F0), // Slate/Gray
-                                ];
-                                final regionColorsDark = const [
-                                  Color(0xFF6E284E), // Dark Muted Pink
-                                  Color(0xFF1E3A5F), // Dark Muted Blue
-                                  Color(0xFF154C34), // Dark Muted Green
-                                  Color(0xFF614E18), // Dark Muted Yellow
-                                  Color(0xFF3F3066), // Dark Muted Purple
-                                  Color(0xFF613B17), // Dark Muted Orange
-                                  Color(0xFF184A45), // Dark Muted Teal
-                                  Color(0xFF223161), // Dark Muted Indigo
-                                  Color(0xFF63242F), // Dark Muted Rose
-                                  Color(0xFF1E293B), // Dark Muted Slate
-                                ];
-                                final regionColor = context.isDarkMode 
-                                    ? regionColorsDark[regionId % regionColorsDark.length]
-                                    : regionColorsLight[regionId % regionColorsLight.length];
 
-                                return Container(
-                                  width: cellSize, height: cellSize,
-                                  decoration: BoxDecoration(
-                                    color: regionColor,
-                                    border: Border(
-                                      top: getTopBorder(),
-                                      left: getLeftBorder(),
-                                      right: getRightBorder(),
-                                      bottom: getBottomBorder(),
-                                    ),
-                                  ),
-                                  child: Center(child: state == 1
-                                    ? Text('X', style: TextStyle(fontSize: cellSize * 0.38, color: context.isDarkMode ? Colors.white70 : Colors.black87, fontWeight: FontWeight.w900))
-                                    : state == 2
-                                      ? Text('★', style: TextStyle(fontSize: cellSize * 0.52, color: AppTheme.warmAmber, shadows: const [Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))]))
-                                      : null),
-                                );
+                              BorderSide getLeftBorder() {
+                                if (c == 0 || _level.regions[r][c - 1] != regionId) {
+                                  return BorderSide(color: borderColor, width: 2.5);
+                                }
+                                return BorderSide(color: dividerColor, width: 0.8);
                               }
-                            ),
-                          );
-                        }))),
+
+                              BorderSide getRightBorder() {
+                                if (c == _level.n - 1) {
+                                  return BorderSide(color: borderColor, width: 2.5);
+                                }
+                                return BorderSide(color: dividerColor, width: 0.8);
+                              }
+
+                              BorderSide getBottomBorder() {
+                                if (r == _level.n - 1) {
+                                  return BorderSide(color: borderColor, width: 2.5);
+                                }
+                                return BorderSide(color: dividerColor, width: 0.8);
+                              }
+
+                              return GestureDetector(
+                                onTap: () => _tap(r, c),
+                                onPanStart: (_) => _onDragStart(r, c),
+                                onPanUpdate: (d) {
+                                  final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+                                  if (box == null) return;
+                                  final localPos = box.globalToLocal(d.globalPosition);
+                                  final cellDim = cellSize;
+                                  final row = (localPos.dy / cellDim).floor();
+                                  final col = (localPos.dx / cellDim).floor();
+                                  if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
+                                    _onDragUpdate(row, col);
+                                  }
+                                },
+                                onPanEnd: (_) => _onDragEnd(),
+                                child: Builder(
+                                  builder: (context) {
+                                    final regionColorsLight = const [
+                                      Color(0xFFFBCFE8), // Pink
+                                      Color(0xFFBFDBFE), // Blue
+                                      Color(0xFFA7F3D0), // Green
+                                      Color(0xFFFDE68A), // Yellow
+                                      Color(0xFFDDD6FE), // Purple
+                                      Color(0xFFFED7AA), // Orange
+                                      Color(0xFF99F6E4), // Teal
+                                      Color(0xFFC7D2FE), // Indigo
+                                      Color(0xFFFECDD3), // Rose
+                                      Color(0xFFE2E8F0), // Slate/Gray
+                                    ];
+                                    final regionColorsDark = const [
+                                      Color(0xFF6E284E), // Dark Muted Pink
+                                      Color(0xFF1E3A5F), // Dark Muted Blue
+                                      Color(0xFF154C34), // Dark Muted Green
+                                      Color(0xFF614E18), // Dark Muted Yellow
+                                      Color(0xFF3F3066), // Dark Muted Purple
+                                      Color(0xFF613B17), // Dark Muted Orange
+                                      Color(0xFF184A45), // Dark Muted Teal
+                                      Color(0xFF223161), // Dark Muted Indigo
+                                      Color(0xFF63242F), // Dark Muted Rose
+                                      Color(0xFF1E293B), // Dark Muted Slate
+                                    ];
+                                    final regionColor = context.isDarkMode 
+                                        ? regionColorsDark[regionId % regionColorsDark.length]
+                                        : regionColorsLight[regionId % regionColorsLight.length];
+
+                                    return Container(
+                                      width: cellSize, height: cellSize,
+                                      decoration: BoxDecoration(
+                                        color: regionColor,
+                                        border: Border(
+                                          top: getTopBorder(),
+                                          left: getLeftBorder(),
+                                          right: getRightBorder(),
+                                          bottom: getBottomBorder(),
+                                        ),
+                                      ),
+                                      child: Center(child: state == 1
+                                        ? Text('X', style: TextStyle(fontSize: cellSize * 0.38, color: context.isDarkMode ? Colors.white70 : Colors.black87, fontWeight: FontWeight.w900))
+                                        : state == 2
+                                          ? Text('★', style: TextStyle(fontSize: cellSize * 0.52, color: AppTheme.warmAmber, shadows: const [Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))]))
+                                          : null),
+                                    );
+                                  }
+                                ),
+                              );
+                            }))),
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  if (_error.isNotEmpty) Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(_error, style: GoogleFonts.outfit(color: Colors.redAccent, fontSize: context.scale(13)), textAlign: TextAlign.center),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_won) ...[
+                    Text('All stars placed!', style: GoogleFonts.outfit(fontSize: context.scale(17), color: AppTheme.queensOrange, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 10),
+                    TextButton(onPressed: _nextLevel,
+                      child: Text('Next Level →', style: GoogleFonts.outfit(color: AppTheme.queensOrange, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
+                  ] else
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.queensOrange, foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), elevation: 0),
+                      onPressed: _check,
+                      child: Text('Check', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
+                    ),
+                  const SizedBox(height: 12),
+                ],
               ),
-              const SizedBox(height: 12),
-              if (_error.isNotEmpty) Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(_error, style: GoogleFonts.outfit(color: Colors.redAccent, fontSize: context.scale(13)), textAlign: TextAlign.center),
-              ),
-              const SizedBox(height: 8),
-              if (_won) ...[
-                Text('All stars placed!', style: GoogleFonts.outfit(fontSize: context.scale(17), color: AppTheme.queensOrange, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 10),
-                TextButton(onPressed: _nextLevel,
-                  child: Text('Next Level →', style: GoogleFonts.outfit(color: AppTheme.queensOrange, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
-              ] else
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.queensOrange, foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), elevation: 0),
-                  onPressed: _check,
-                  child: Text('Check', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
-                ),
-              const SizedBox(height: 12),
-            ]),
+            ),
           );
         }),
       ),

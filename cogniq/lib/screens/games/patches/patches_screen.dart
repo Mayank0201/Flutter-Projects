@@ -228,70 +228,78 @@ class _ChimpScreenState extends State<ChimpScreen> {
           final cs = min(cellSize, maxCellH);
           final gridW = cs * _gridSize;
 
-          return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            // Status
-            if (!_started && !_won && !_failed)
-              Text('Memorize 1 → $_n, then tap 1 to begin',
-                style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center)
-            else if (_started && !_won && !_failed)
-              Text('Tap 1 → $_n in order',
-                style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)))
-            else
-              Text(_won ?'✓  Level ${_levelIndex+1} cleared!':'✗  Wrong! Try again.',
-                style: GoogleFonts.outfit(fontSize: context.scale(17), fontWeight: FontWeight.w700,
-                  color: _won ? AppTheme.patchesTeal : Colors.redAccent)),
-            const SizedBox(height: 16),
-            // Grid
-            SizedBox(
-              width: gridW,
-              height: cs * _gridSize,
-              child: Column(children: List.generate(_gridSize, (r) =>
-                Row(children: List.generate(_gridSize, (c) {
-                  final num = _numberAt(r, c);
-                  final visible = _isCellVisible(r, c);
-                  final isTapped = num != null && num < _nextToTap && _started;
-                  final isHintHighlighted = _isHintShowing && num == _nextToTap;
-                  final isGlowing = _glowingCells.contains((r, c));
-                  return GestureDetector(
-                    onTap: () => _onTap(r, c),
-                    child: Container(
-                      width: cs - 6, height: cs - 6, margin: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: isTapped
-                            ? Colors.transparent
-                            : (isGlowing
-                                ? AppTheme.patchesTeal.withAlpha(80)
-                                : (isHintHighlighted ? Colors.amber.withOpacity(0.2) : context.bgCard)),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isGlowing
-                              ? AppTheme.patchesTeal
-                              : (isHintHighlighted
-                                  ? Colors.amber
-                                  : (isTapped
-                                      ? context.bgCard.withOpacity(0.1)
-                                      : context.textMuted.withAlpha(75))),
-                          width: (isHintHighlighted || isGlowing) ? 2.5 : 1.2,
-                        ),
-                        boxShadow: isGlowing
-                            ? [BoxShadow(color: AppTheme.patchesTeal.withAlpha(120), blurRadius: 10, spreadRadius: 1)]
-                            : (isTapped ? null : AppTheme.cardShadow),
-                      ),
-                      child: Center(child: visible && num != null
-                        ? Text('$num', style: GoogleFonts.outfit(fontSize: cs * 0.36, fontWeight: FontWeight.w800,
-                            color: AppTheme.patchesTeal))
-                        : null),
-                    ),
-                  );
-                })),
-              )),
+          return Center(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Status
+                  if (!_started && !_won && !_failed)
+                    Text('Memorize 1 → $_n, then tap 1 to begin',
+                      style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center)
+                  else if (_started && !_won && !_failed)
+                    Text('Tap 1 → $_n in order',
+                      style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)))
+                  else
+                    Text(_won ?'✓  Level ${_levelIndex+1} cleared!':'✗  Wrong! Try again.',
+                      style: GoogleFonts.outfit(fontSize: context.scale(17), fontWeight: FontWeight.w700,
+                        color: _won ? AppTheme.patchesTeal : Colors.redAccent)),
+                  const SizedBox(height: 16),
+                  // Grid
+                  SizedBox(
+                    width: gridW,
+                    height: cs * _gridSize,
+                    child: Column(children: List.generate(_gridSize, (r) =>
+                      Row(children: List.generate(_gridSize, (c) {
+                        final num = _numberAt(r, c);
+                        final visible = _isCellVisible(r, c);
+                        final isTapped = num != null && num < _nextToTap && _started;
+                        final isHintHighlighted = _isHintShowing && num == _nextToTap;
+                        final isGlowing = _glowingCells.contains((r, c));
+                        return GestureDetector(
+                          onTap: () => _onTap(r, c),
+                          child: Container(
+                            width: cs - 6, height: cs - 6, margin: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: isTapped
+                                  ? Colors.transparent
+                                  : (isGlowing
+                                      ? AppTheme.patchesTeal.withAlpha(80)
+                                      : (isHintHighlighted ? Colors.amber.withOpacity(0.2) : context.bgCard)),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isGlowing
+                                    ? AppTheme.patchesTeal
+                                    : (isHintHighlighted
+                                        ? Colors.amber
+                                        : (isTapped
+                                            ? context.bgCard.withOpacity(0.1)
+                                            : context.textMuted.withAlpha(75))),
+                                width: (isHintHighlighted || isGlowing) ? 2.5 : 1.2,
+                              ),
+                              boxShadow: isGlowing
+                                  ? [BoxShadow(color: AppTheme.patchesTeal.withAlpha(120), blurRadius: 10, spreadRadius: 1)]
+                                  : (isTapped ? null : AppTheme.cardShadow),
+                            ),
+                            child: Center(child: visible && num != null
+                              ? Text('$num', style: GoogleFonts.outfit(fontSize: cs * 0.36, fontWeight: FontWeight.w800,
+                                  color: AppTheme.patchesTeal))
+                              : null),
+                          ),
+                        );
+                      })),
+                    )),
+                  ),
+                  const SizedBox(height: 24),
+                  if (_won) TextButton(onPressed: _nextLevel,
+                    child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.patchesTeal, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
+                  if (_failed) TextButton(onPressed: _reset,
+                    child: Text('Retry', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
+                ],
+              ),
             ),
-            const SizedBox(height: 24),
-            if (_won) TextButton(onPressed: _nextLevel,
-              child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.patchesTeal, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
-            if (_failed) TextButton(onPressed: _reset,
-              child: Text('Retry', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
-          ]);
+          );
         }),
       ),
     );

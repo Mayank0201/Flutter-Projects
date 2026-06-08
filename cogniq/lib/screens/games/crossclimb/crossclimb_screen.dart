@@ -258,6 +258,48 @@ const List<CrossClimbLevel> _kLevels = [
     clues: ['Writing board of gray stone', 'Flat dish for food', 'Location or setting', 'Freedom from war or quietness', 'Sweet orange fruit with fuzzy skin'],
     answers: ['SLATE', 'PLATE', 'PLACE', 'PEACE', 'PEACH'],
   ),
+  // 6-word Levels (Harder)
+  CrossClimbLevel(
+    clues: ['Ocean predator shark', 'Distribute portion with others', 'Land along the shore', 'A routine household chore', 'Struggling to breathe or restrict air', 'Fleshy side of the face below the eye'],
+    answers: ['SHARK', 'SHARE', 'SHORE', 'CHORE', 'CHOKE', 'CHEEK'],
+  ),
+  CrossClimbLevel(
+    clues: ['Timepiece instrument', 'Group of sheep or birds', 'Quick motion snap', 'Smooth and shiny surface', 'Single portion of cake', 'Move smoothly along a surface'],
+    answers: ['CLOCK', 'FLOCK', 'FLICK', 'SLICK', 'SLICE', 'SLIDE'],
+  ),
+  CrossClimbLevel(
+    clues: ['Sugary tasting candy', 'Fabric piece on a bed', 'Woolly farm animal', 'Rest state of slumber', 'Rising or falling sharply', 'Guide the direction of a car'],
+    answers: ['SWEET', 'SHEET', 'SHEEP', 'SLEEP', 'STEEP', 'STEER'],
+  ),
+  CrossClimbLevel(
+    clues: ['Opposite of white', 'Not tight or loose', 'Roughly built cabin', 'Lower part of a person\'s leg', 'Ocean predator with sharp teeth', 'Distribute portion with others'],
+    answers: ['BLACK', 'SLACK', 'SHACK', 'SHANK', 'SHARK', 'SHARE'],
+  ),
+  CrossClimbLevel(
+    clues: ['Baking powder ingredient', 'Ground surface in a room', 'Overflow of water', 'Red fluid in veins', 'Family of young birds', 'Very wide in extent'],
+    answers: ['FLOUR', 'FLOOR', 'FLOOD', 'BLOOD', 'BROOD', 'BROAD'],
+  ),
+  // 7-word Levels (Extremely Hard)
+  CrossClimbLevel(
+    clues: ['Cereal grass grain', 'Violate rules or act dishonestly', 'Inexpensive or low cost', 'Salty potato snacks', 'Lower parts of the face', 'Front parts of the leg below the knee', 'Glow or emit light'],
+    answers: ['WHEAT', 'CHEAT', 'CHEAP', 'CHIPS', 'CHINS', 'SHINS', 'SHINE'],
+  ),
+  CrossClimbLevel(
+    clues: ['Green leafed living organism', 'Aircraft flying in the sky', 'Flat dish for food', 'Writing chalkboard material', 'Narrow strips of wood', 'Long narrow cuts or openings', 'Ejects saliva from mouth'],
+    answers: ['PLANT', 'PLANE', 'PLATE', 'SLATE', 'SLATS', 'SLITS', 'SPITS'],
+  ),
+  CrossClimbLevel(
+    clues: ['Preliminary sketch or breeze', 'An activity involving skill in making things', 'Hard outer layer of bread', 'Firm belief in reliability', 'Support framework or bracket', 'Journeys or voyages', 'Falls in small drops'],
+    answers: ['DRAFT', 'CRAFT', 'CRUST', 'TRUST', 'TRUSS', 'TRIPS', 'DRIPS'],
+  ),
+  CrossClimbLevel(
+    clues: ['Organ that pumps blood', 'Perceived sound with ears', 'Hair growing on a man\'s face', 'Flat piece of wood', 'Brag or speak with excessive pride', 'Large wild animal', 'A large meal or banquet'],
+    answers: ['HEART', 'HEARD', 'BEARD', 'BOARD', 'BOAST', 'BEAST', 'FEAST'],
+  ),
+  CrossClimbLevel(
+    clues: ['Buying and selling goods', 'Walk or step on something', 'Baked food loaf', 'Very wide or spacious', 'Think deeply about something or family of birds', 'Red fluid in veins', 'Overflow of water'],
+    answers: ['TRADE', 'TREAD', 'BREAD', 'BROAD', 'BROOD', 'BLOOD', 'FLOOD'],
+  ),
 ];
 
 class CrossClimbScreen extends StatefulWidget {
@@ -280,14 +322,15 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
   void initState() {
     super.initState();
     _level = _kLevels[0];
-    _controllers = List.generate(3, (_) => TextEditingController());
-    _focusNodes = List.generate(3, (_) => FocusNode());
+    final numSlots = _level.answers.length - 2;
+    _controllers = List.generate(numSlots, (_) => TextEditingController());
+    _focusNodes = List.generate(numSlots, (_) => FocusNode());
     for (final node in _focusNodes) {
       node.addListener(() {
         if (mounted) setState(() {});
       });
     }
-    _results = List.filled(5, null);
+    _results = List.filled(_level.answers.length, null);
     _initLevel();
   }
 
@@ -369,7 +412,8 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
     setState(() {
       _hintCount = newCount;
       int idx = -1;
-      for (int i = 1; i <= 3; i++) {
+      final numSlots = _level.answers.length - 2;
+      for (int i = 1; i <= numSlots; i++) {
         if (_controllers[i - 1].text.toUpperCase().trim() != _level.answers[i]) {
           idx = i;
           break;
@@ -380,7 +424,7 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
         _results[idx] = true;
 
         bool allCorrect = true;
-        for (int i = 1; i <= 3; i++) {
+        for (int i = 1; i <= numSlots; i++) {
           if (_controllers[i - 1].text.toUpperCase().trim() != _level.answers[i]) {
             allCorrect = false;
           }
@@ -398,35 +442,52 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
 
   void _loadLevel([SharedPreferences? prefs]) {
     _level = _kLevels[_levelIndex % _kLevels.length];
+    final numSlots = _level.answers.length - 2;
+
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
+
+    _controllers = List.generate(numSlots, (_) => TextEditingController());
+    _focusNodes = List.generate(numSlots, (_) => FocusNode());
+    for (final node in _focusNodes) {
+      node.addListener(() {
+        if (mounted) setState(() {});
+      });
+    }
 
     if (prefs != null && prefs.containsKey('crossclimb_slots')) {
       final savedSlots = prefs.getStringList('crossclimb_slots');
-      if (savedSlots != null && savedSlots.length == 3) {
-        for (int i = 0; i < 3; i++) {
+      if (savedSlots != null && savedSlots.length == numSlots) {
+        for (int i = 0; i < numSlots; i++) {
           _controllers[i].text = savedSlots[i];
         }
       } else {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < numSlots; i++) {
           _controllers[i].clear();
         }
       }
       _won = prefs.getBool('crossclimb_won') ?? false;
-      _results = List.filled(5, null);
+      _results = List.filled(_level.answers.length, null);
       return;
     }
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < numSlots; i++) {
       _controllers[i].clear();
     }
-    _results = List.filled(5, null);
+    _results = List.filled(_level.answers.length, null);
     _won = false;
     _clearState();
   }
 
   void _check() {
-    final newResults = List<bool?>.filled(5, null);
+    final newResults = List<bool?>.filled(_level.answers.length, null);
     bool allCorrect = true;
-    for (int i = 1; i <= 3; i++) {
+    final numSlots = _level.answers.length - 2;
+    for (int i = 1; i <= numSlots; i++) {
       final input = _controllers[i - 1].text.toUpperCase().trim();
       final correct = input == _level.answers[i];
       newResults[i] = correct;
@@ -721,14 +782,23 @@ class _CrossClimbScreenState extends State<CrossClimbScreen> {
                 child: Column(
                   children: [
                     _buildBookendRow(0, 'Start Word'),
-                    _buildConnectorLine(_level.answers[0], _controllers[0].text),
-                    _buildSolvingRow(1),
-                    _buildConnectorLine(_controllers[0].text, _controllers[1].text),
-                    _buildSolvingRow(2),
-                    _buildConnectorLine(_controllers[1].text, _controllers[2].text),
-                    _buildSolvingRow(3),
-                    _buildConnectorLine(_controllers[2].text, _level.answers[4]),
-                    _buildBookendRow(4, 'End Word'),
+                    ...List.generate(_level.answers.length - 2, (index) {
+                      final i = index + 1;
+                      final prevWord = i == 1 ? _level.answers[0] : _controllers[i - 2].text;
+                      final currentWord = _controllers[i - 1].text;
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildConnectorLine(prevWord, currentWord),
+                          _buildSolvingRow(i),
+                        ],
+                      );
+                    }),
+                    _buildConnectorLine(
+                      _controllers[_level.answers.length - 3].text,
+                      _level.answers[_level.answers.length - 1],
+                    ),
+                    _buildBookendRow(_level.answers.length - 1, 'End Word'),
                     const SizedBox(height: 24),
                     if (!_won)
                       ElevatedButton(

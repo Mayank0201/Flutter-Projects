@@ -6,9 +6,9 @@ class AppTheme {
   static const Color bgDarkLight       = Color(0xFFF5F4F0); // warm linen
   static const Color bgCardLight       = Color(0xFFFFFFFF); // pure white cards
   static const Color bgSurfaceLight    = Color(0xFFEEECE8); // slightly warm surface
-  static const Color textPrimaryLight   = Color(0xFF2B2926); // warm charcoal
-  static const Color textSecondaryLight = Color(0xFF7A7672); // muted taupe
-  static const Color textMutedLight     = Color(0xFFE2DFDA); // barely-there border
+  static const Color textPrimaryLight   = Color(0xFF1C1A18); // warm dark charcoal
+  static const Color textSecondaryLight = Color(0xFF5A5550); // darker muted taupe
+  static const Color textMutedLight     = Color(0xFF827B75); // readable muted gray
 
   // Dark
   static const Color bgDarkDark       = Color(0xFF1C1A18);
@@ -16,7 +16,7 @@ class AppTheme {
   static const Color bgSurfaceDark    = Color(0xFF252320);
   static const Color textPrimaryDark   = Color(0xFFF0EBE3);
   static const Color textSecondaryDark = Color(0xFF8A847C);
-  static const Color textMutedDark     = Color(0xFF302E2A);
+  static const Color textMutedDark     = Color(0xFF6E6760);
 
   // ── Warm-zen accent palette ─────────────────────────────────────────────────
   // Drawn from the reference image: mauve, warm gold, slate periwinkle, terracotta
