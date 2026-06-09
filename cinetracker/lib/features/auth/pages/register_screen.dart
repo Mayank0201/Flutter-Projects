@@ -27,6 +27,75 @@ class _RegisterScreenState extends State<RegisterScreen> {
     authService = AuthService(apiService);
   }
 
+  void _showVerificationSuccessDialog(String email) {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Force them to read and click OK
+      builder: (context) {
+        final theme = Theme.of(context);
+        final colorScheme = theme.colorScheme;
+
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          icon: Icon(
+            Icons.mark_email_read_rounded,
+            size: 64,
+            color: colorScheme.primary,
+          ),
+          title: const Text(
+            "Verify Your Email",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "We sent a verification link to:",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 15, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                email,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "Please click the link in your email to activate your account before logging in.",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, height: 1.4),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0, left: 16.0, right: 16.0),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(); // Close dialog
+                    Navigator.of(this.context).pop(); // Close register screen (go back to login)
+                  },
+                  child: const Text("Got It, Go to Login"),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void register() async {
     final username = usernameController.text.replaceAll(' ', '');
     final email = emailController.text.trim();
@@ -79,15 +148,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Registration successful! Please check your email to verify your account.",
-          ),
-          duration: Duration(seconds: 5),
-        ),
-      );
-      Navigator.pop(context);
+      _showVerificationSuccessDialog(email);
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
