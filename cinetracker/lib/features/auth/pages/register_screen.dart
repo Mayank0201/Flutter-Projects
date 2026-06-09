@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:cinetracker/core/network/api_service.dart';
 import 'package:cinetracker/core/utils/content_moderator.dart';
+import 'package:cinetracker/core/storage/token_storage.dart';
+import 'package:cinetracker/service/tmdb_service.dart';
+import 'package:cinetracker/provider/wishlist_provider.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../service/auth_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -18,8 +23,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool isLoading = false;
   bool _obscurePassword = true;
 
+  final storage = TokenStorage();
   final apiService = ApiService();
+  final tmdbService = TMDBService();
   late final AuthService authService;
+
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: '961587425846-fvsaooog0c9qpkm6lshfmv6ial2o87ec.apps.googleusercontent.com',
+    scopes: ['email'],
+  );
 
   @override
   void initState() {
@@ -166,6 +178,169 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  Future<bool> _showUsernameSetupDialog(String initialAccessToken, String initialRefreshToken) async {
+    final usernameController = TextEditingController();
+    bool dialogLoading = false;
+    String? errorMessage;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false, // Must set a username
+      builder: (context) {
+        return PopScope(
+          canPop: false,
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final theme = Theme.of(context);
+              
+              return AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                title: const Text("Choose a Username"),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      "Welcome to CineFolio! Please choose a unique username to complete your registration.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: usernameController,
+                      autofocus: true,
+                      enabled: !dialogLoading,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: "Username",
+                        prefixIcon: const Icon(Icons.alternate_email_rounded),
+                        errorText: errorMessage,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: dialogLoading
+                            ? null
+                            : () async {
+                                final username = usernameController.text.trim();
+                                if (username.isEmpty || username.length < 3) {
+                                  setDialogState(() {
+                                    errorMessage = "Username must be at least 3 characters";
+                                  });
+                                  return;
+                                }
+                                setDialogState(() {
+                                  dialogLoading = true;
+                                  errorMessage = null;
+                                });
+                                try {
+                                  final updatedTokens = await authService.updateUsername(username);
+                                  
+                                  apiService.setToken(updatedTokens.accessToken);
+                                  tmdbService.setToken(updatedTokens.accessToken);
+                                  await storage.saveTokens(
+                                    accessToken: updatedTokens.accessToken,
+                                    refreshToken: updatedTokens.refreshToken,
+                                  );
+                                  
+                                  if (!context.mounted) return;
+                                  Navigator.of(context).pop(true); // Close dialog returning true
+                                } catch (e) {
+                                  setDialogState(() {
+                                    dialogLoading = false;
+                                    errorMessage = e is AuthException ? e.message : "Failed to update username";
+                                  });
+                                }
+                              },
+                        child: dialogLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text("Save Username"),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Future<void> loginWithGoogle() async {
+    if (isLoading) return;
+    setState(() => isLoading = true);
+
+    try {
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+      try {
+        await _googleSignIn.disconnect();
+      } catch (_) {}
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        setState(() => isLoading = false);
+        return;
+      }
+
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final String? idToken = googleAuth.idToken;
+
+      if (idToken == null) {
+        throw AuthException("Failed to retrieve Google ID Token");
+      }
+
+      final tokens = await authService.googleLogin(idToken);
+      apiService.setToken(tokens.accessToken);
+      tmdbService.setToken(tokens.accessToken);
+      await storage.saveTokens(
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      );
+
+      if (tokens.isNewUser) {
+        if (!mounted) return;
+        final saved = await _showUsernameSetupDialog(tokens.accessToken, tokens.refreshToken);
+        if (!saved) {
+          apiService.clearToken();
+          tmdbService.clearToken();
+          await storage.clearTokens();
+          return;
+        }
+      }
+
+      if (!mounted) return;
+      await context.read<WishlistProvider>().loadWatchlist();
+
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
+    } catch (e) {
+      debugPrint("Google login error: $e");
+      if (!mounted) return;
+
+      final message = e is AuthException ? e.message : "Google login failed";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
   @override
   void dispose() {
     usernameController.dispose();
@@ -273,6 +448,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                           )
                         : const Text("Create Account"),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Divider(
+                        color: colorScheme.outlineVariant,
+                        thickness: 1,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        "OR",
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Divider(
+                        color: colorScheme.outlineVariant,
+                        thickness: 1,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    onPressed: isLoading ? null : loginWithGoogle,
+                    icon: Image.network(
+                      'https://developers.google.com/identity/images/g-logo.png',
+                      height: 24,
+                      errorBuilder: (context, error, stackTrace) => const Icon(
+                        Icons.g_mobiledata_rounded,
+                        size: 30,
+                      ),
+                    ),
+                    label: const Text("Continue with Google"),
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      side: BorderSide(
+                        color: colorScheme.outline,
+                        width: 1,
+                      ),
+                    ),
                   ),
                 ),
               ],

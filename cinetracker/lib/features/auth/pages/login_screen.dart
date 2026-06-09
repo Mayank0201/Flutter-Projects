@@ -40,103 +40,106 @@ class _LoginScreenState extends State<LoginScreen> {
     authService = AuthService(apiService);
   }
 
-  Future<void> _showUsernameSetupDialog(String initialAccessToken, String initialRefreshToken) async {
+  Future<bool> _showUsernameSetupDialog(String initialAccessToken, String initialRefreshToken) async {
     final usernameController = TextEditingController();
     bool dialogLoading = false;
     String? errorMessage;
 
-    await showDialog(
+    final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false, // Must set a username
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final theme = Theme.of(context);
-            final colorScheme = theme.colorScheme;
-            
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Text("Choose a Username"),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    "Welcome to CineFolio! Please choose a unique username to complete your registration.",
-                    style: TextStyle(fontSize: 14),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: usernameController,
-                    autofocus: true,
-                    enabled: !dialogLoading,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.deny(RegExp(r'\s')),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: "Username",
-                      prefixIcon: const Icon(Icons.alternate_email_rounded),
-                      errorText: errorMessage,
+        return PopScope(
+          canPop: false,
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final theme = Theme.of(context);
+              
+              return AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                title: const Text("Choose a Username"),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      "Welcome to CineFolio! Please choose a unique username to complete your registration.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: usernameController,
+                      autofocus: true,
+                      enabled: !dialogLoading,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: "Username",
+                        prefixIcon: const Icon(Icons.alternate_email_rounded),
+                        errorText: errorMessage,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: dialogLoading
+                            ? null
+                            : () async {
+                                final username = usernameController.text.trim();
+                                if (username.isEmpty || username.length < 3) {
+                                  setDialogState(() {
+                                    errorMessage = "Username must be at least 3 characters";
+                                  });
+                                  return;
+                                }
+                                setDialogState(() {
+                                  dialogLoading = true;
+                                  errorMessage = null;
+                                });
+                                try {
+                                  final updatedTokens = await authService.updateUsername(username);
+                                  
+                                  apiService.setToken(updatedTokens.accessToken);
+                                  tmdbService.setToken(updatedTokens.accessToken);
+                                  await storage.saveTokens(
+                                    accessToken: updatedTokens.accessToken,
+                                    refreshToken: updatedTokens.refreshToken,
+                                  );
+                                  
+                                  if (!context.mounted) return;
+                                  Navigator.of(context).pop(true); // Close dialog returning true
+                                } catch (e) {
+                                  setDialogState(() {
+                                    dialogLoading = false;
+                                    errorMessage = e is AuthException ? e.message : "Failed to update username";
+                                  });
+                                }
+                              },
+                        child: dialogLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text("Save Username"),
+                      ),
                     ),
                   ),
                 ],
-              ),
-              actions: [
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      onPressed: dialogLoading
-                          ? null
-                          : () async {
-                              final username = usernameController.text.trim();
-                              if (username.isEmpty || username.length < 3) {
-                                setDialogState(() {
-                                  errorMessage = "Username must be at least 3 characters";
-                                });
-                                return;
-                              }
-                              setDialogState(() {
-                                dialogLoading = true;
-                                errorMessage = null;
-                              });
-                              try {
-                                final updatedTokens = await authService.updateUsername(username);
-                                
-                                apiService.setToken(updatedTokens.accessToken);
-                                tmdbService.setToken(updatedTokens.accessToken);
-                                await storage.saveTokens(
-                                  accessToken: updatedTokens.accessToken,
-                                  refreshToken: updatedTokens.refreshToken,
-                                );
-                                
-                                if (!context.mounted) return;
-                                Navigator.of(context).pop(); // Close dialog
-                              } catch (e) {
-                                setDialogState(() {
-                                  dialogLoading = false;
-                                  errorMessage = e is AuthException ? e.message : "Failed to update username";
-                                });
-                              }
-                            },
-                      child: dialogLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Text("Save Username"),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+              );
+            },
+          ),
         );
       },
     );
+    return result ?? false;
   }
 
   Future<void> loginWithGoogle() async {
@@ -144,6 +147,12 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+      try {
+        await _googleSignIn.disconnect();
+      } catch (_) {}
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => _isLoading = false);
@@ -167,7 +176,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (tokens.isNewUser) {
         if (!mounted) return;
-        await _showUsernameSetupDialog(tokens.accessToken, tokens.refreshToken);
+        final saved = await _showUsernameSetupDialog(tokens.accessToken, tokens.refreshToken);
+        if (!saved) {
+          apiService.clearToken();
+          tmdbService.clearToken();
+          await storage.clearTokens();
+          return;
+        }
       }
 
       if (!mounted) return;

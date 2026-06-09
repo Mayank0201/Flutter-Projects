@@ -36,7 +36,9 @@ class ApiService {
 
     dio.interceptors.add(InterceptorsWrapper(
       onError: (DioException error, ErrorInterceptorHandler handler) async {
-        if (error.response?.statusCode == 401) {
+        final path = error.requestOptions.path;
+        final isPublicAuth = path.startsWith('/auth/') && path != '/auth/update-username';
+        if (error.response?.statusCode == 401 && !isPublicAuth) {
           try {
             final refreshed = await _refreshAccessToken();
             if (refreshed) {

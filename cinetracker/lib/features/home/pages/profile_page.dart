@@ -14,8 +14,9 @@ import 'package:cinetracker/core/utils/content_moderator.dart';
 import 'wishlist_page.dart';
 import 'challenges_page.dart';
 import 'my_reviews_page.dart';
-import 'movie_reviews_page.dart';
 import '../../../model/review_model.dart';
+import 'review_detail_page.dart';
+import '../widgets/movie_resolver.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -432,16 +433,61 @@ class _ProfilePageState extends State<ProfilePage> {
                   // ── Recent reviews ─────────────────────────────────
                   if (_profile != null) ...[
                     _buildSectionHeader(context, 'Recent Reviews'),
-                    if (_profile!.reviews.where((r) => r.comment != null && r.comment!.isNotEmpty).isNotEmpty) ...[
-                      ..._profile!.reviews
-                          .where((r) => r.comment != null && r.comment!.isNotEmpty)
-                          .take(5)
-                          .map((r) => _OwnRecentReviewItem(review: r)),
+                    if (_profile!.reviews.isNotEmpty) ...[
+                      ...(() {
+                        final commentReviews = _profile!.reviews
+                            .where((r) => r.comment != null && r.comment!.isNotEmpty)
+                            .toList();
+                        if (commentReviews.isNotEmpty) {
+                          return commentReviews.take(5).map<Widget>((r) => _OwnRecentReviewItem(
+                                review: r,
+                                onTap: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ReviewDetailPage(review: r),
+                                    ),
+                                  );
+                                  _loadProfile();
+                                },
+                              ));
+                        } else {
+                          return <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                              child: Text(
+                                'No reviews with comments yet.',
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(color: colorScheme.onSurfaceVariant),
+                              ),
+                            )
+                          ];
+                        }
+                      })(),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const MyReviewsPage(),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.rate_review_outlined),
+                            label: const Text('See All Reviews'),
+                          ),
+                        ),
+                      ),
                     ] else
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                         child: Text(
-                          'No commented reviews yet.',
+                          'No reviews yet.',
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
@@ -733,8 +779,9 @@ Widget _buildBadgeIcon(String badgeName) {
 
 class _OwnRecentReviewItem extends StatelessWidget {
   final Review review;
+  final VoidCallback onTap;
 
-  const _OwnRecentReviewItem({required this.review});
+  const _OwnRecentReviewItem({required this.review, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -750,134 +797,161 @@ class _OwnRecentReviewItem extends StatelessWidget {
       formattedDate = review.createdAt;
     }
 
-    final hasMovieInfo = review.movieTitle != null && review.movieTitle!.isNotEmpty;
+    return MovieResolver(
+      movieId: review.movieId,
+      initialTitle: review.movieTitle,
+      initialPosterUrl: review.moviePosterUrl,
+      initialReleaseYear: review.movieReleaseYear,
+      initialGenre: review.movieGenre,
+      builder: (context, title, posterUrl, releaseYear, genre, isLoading) {
+        final hasPoster = posterUrl != null && posterUrl.isNotEmpty;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-      child: Container(
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: colorScheme.outline.withValues(alpha: 0.12)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          child: Container(
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: colorScheme.outline.withValues(alpha: 0.12)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MovieReviewsPage(
-                      movieId: review.movieId,
-                      movieTitle: review.movieTitle ?? 'Movie',
-                    ),
-                  ),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (hasMovieInfo) ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              review.movieTitle!,
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (formattedDate.isNotEmpty)
-                            Text(
-                              formattedDate,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant
-                                    .withValues(alpha: 0.6),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          if (review.movieReleaseYear != null) ...[
-                            Text(
-                              '${review.movieReleaseYear}',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          if (review.movieGenre != null &&
-                              review.movieGenre!.isNotEmpty)
-                            Expanded(
-                              child: Text(
-                                review.movieGenre!,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                    ],
-                    Row(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ...List.generate(5, (i) {
-                          final filled = review.rating >= i + 1;
-                          return Icon(
-                            filled ? Icons.star_rounded : Icons.star_outline_rounded,
-                            size: 14,
-                            color: filled
-                                ? const Color(0xFFFFB800)
-                                : colorScheme.onSurface.withValues(alpha: 0.2),
-                          );
-                        }),
-                        const SizedBox(width: 6),
-                        Text(
-                          review.rating.toStringAsFixed(1),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.bold,
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: hasPoster
+                              ? Image.network(
+                                  posterUrl,
+                                  width: 60,
+                                  height: 90,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => _buildPosterPlaceholder(colorScheme),
+                                )
+                              : _buildPosterPlaceholder(colorScheme),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      title,
+                                      style: theme.textTheme.titleSmall?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (formattedDate.isNotEmpty)
+                                    Text(
+                                      formattedDate,
+                                      style: theme.textTheme.labelSmall?.copyWith(
+                                        color: colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  if (releaseYear != null) ...[
+                                    Text(
+                                      '$releaseYear',
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  if (genre != null && genre.isNotEmpty)
+                                    Expanded(
+                                      child: Text(
+                                        genre,
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: colorScheme.primary,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  ...List.generate(5, (i) {
+                                    final filled = review.rating >= i + 1;
+                                    return Icon(
+                                      filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                                      size: 14,
+                                      color: filled
+                                          ? const Color(0xFFFFB800)
+                                          : colorScheme.onSurface.withValues(alpha: 0.2),
+                                    );
+                                  }),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    review.rating.toStringAsFixed(1),
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (review.comment != null &&
+                                  review.comment!.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  review.comment!,
+                                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                       ],
                     ),
-                    if (review.comment != null &&
-                        review.comment!.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        review.comment!,
-                        style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPosterPlaceholder(ColorScheme cs) {
+    return Container(
+      width: 60,
+      height: 90,
+      color: cs.surfaceContainerHighest,
+      child: const Icon(Icons.movie_rounded, size: 24),
     );
   }
 }

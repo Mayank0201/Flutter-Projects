@@ -171,7 +171,12 @@ class AuthService {
             dataMap['accessToken']?.toString() ?? dataMap['access_token']?.toString() ?? dataMap['token']?.toString();
         final refreshToken =
             dataMap['refreshToken']?.toString() ?? dataMap['refresh_token']?.toString();
-        final isNewUser = dataMap['isNewUser'] == true;
+        final isNewUser = dataMap['isNewUser'] == true ||
+            dataMap['newUser'] == true ||
+            dataMap['is_new_user'] == true ||
+            dataMap['isNewUser']?.toString() == 'true' ||
+            dataMap['newUser']?.toString() == 'true' ||
+            dataMap['is_new_user']?.toString() == 'true';
 
         if (accessToken != null &&
             accessToken.isNotEmpty &&

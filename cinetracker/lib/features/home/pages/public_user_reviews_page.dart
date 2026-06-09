@@ -1,20 +1,25 @@
 import 'package:flutter/material.dart';
 import '../../../model/review_model.dart';
-import '../../../service/rating_service.dart';
-import 'movie_details_page.dart';
-import 'movie_reviews_page.dart';
+import '../../../service/social_service.dart';
 import 'review_detail_page.dart';
 import '../widgets/movie_resolver.dart';
 
-class MyReviewsPage extends StatefulWidget {
-  const MyReviewsPage({super.key});
+class PublicUserReviewsPage extends StatefulWidget {
+  final int userId;
+  final String username;
+
+  const PublicUserReviewsPage({
+    super.key,
+    required this.userId,
+    required this.username,
+  });
 
   @override
-  State<MyReviewsPage> createState() => _MyReviewsPageState();
+  State<PublicUserReviewsPage> createState() => _PublicUserReviewsPageState();
 }
 
-class _MyReviewsPageState extends State<MyReviewsPage> {
-  final RatingService _ratingService = RatingService();
+class _PublicUserReviewsPageState extends State<PublicUserReviewsPage> {
+  final SocialService _socialService = SocialService();
 
   final List<Review> _reviews = [];
   bool _isLoading = true;
@@ -61,31 +66,18 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
     });
 
     try {
-      while (_reviews.length < _pageSize && _hasMore) {
-        final items = await _ratingService.getMyReviews(
-          page: _page,
-          size: _pageSize,
-        );
-        if (!mounted) return;
-        final filteredItems = items.where((r) => r.comment != null && r.comment!.isNotEmpty).toList();
-        
-        setState(() {
-          _reviews.addAll(filteredItems);
-          _hasMore = items.length == _pageSize;
-          _isLoading = false;
-        });
+      final profile = await _socialService.getUserProfile(
+        widget.userId,
+        page: _page,
+        size: _pageSize,
+      );
+      if (!mounted) return;
 
-        if (_hasMore && filteredItems.length < items.length) {
-          _page++;
-        } else {
-          break;
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        _reviews.addAll(profile.reviews);
+        _hasMore = profile.reviews.length == _pageSize;
+        _isLoading = false;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -98,90 +90,23 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
   Future<void> _loadMore() async {
     setState(() => _isLoadingMore = true);
     try {
-      while (_hasMore) {
-        _page++;
-        final items = await _ratingService.getMyReviews(
-          page: _page,
-          size: _pageSize,
-        );
-        if (!mounted) return;
-        final filteredItems = items.where((r) => r.comment != null && r.comment!.isNotEmpty).toList();
-        
-        setState(() {
-          _reviews.addAll(filteredItems);
-          _hasMore = items.length == _pageSize;
-        });
+      _page++;
+      final profile = await _socialService.getUserProfile(
+        widget.userId,
+        page: _page,
+        size: _pageSize,
+      );
+      if (!mounted) return;
 
-        if (filteredItems.isNotEmpty || !_hasMore) {
-          break;
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _isLoadingMore = false;
-        });
-      }
+      setState(() {
+        _reviews.addAll(profile.reviews);
+        _hasMore = profile.reviews.length == _pageSize;
+        _isLoadingMore = false;
+      });
     } catch (_) {
       _page--;
       if (mounted) setState(() => _isLoadingMore = false);
     }
-  }
-
-  Future<void> _deleteReview(Review review) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Review'),
-        content: const Text('Are you sure you want to delete this review? This will also remove your rating for this movie.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'Delete',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    // Optimistically update UI
-    setState(() {
-      _reviews.removeWhere((r) => r.id == review.id);
-    });
-
-    try {
-      await _ratingService.deleteRating(review.movieId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Review deleted successfully.')),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      // Revert on error
-      _loadReviews(reset: true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not delete review.')),
-      );
-    }
-  }
-
-  void _openMovie(int movieId, String movieTitle) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MovieReviewsPage(
-          movieId: movieId,
-          movieTitle: movieTitle,
-        ),
-      ),
-    );
   }
 
   @override
@@ -191,7 +116,7 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Reviews'),
+        title: Text("${widget.username}'s Reviews"),
       ),
       body: _buildBody(theme, colorScheme),
     );
@@ -240,13 +165,6 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
               'No reviews yet',
               style: theme.textTheme.titleMedium,
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Go rate and review some movies to build your portfolio!',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
           ],
         ),
       );
@@ -270,7 +188,7 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
             );
           }
           final review = _reviews[index];
-          return _MyReviewCard(
+          return _PublicReviewCard(
             review: review,
             onTap: () async {
               await Navigator.push(
@@ -281,7 +199,6 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
               );
               _loadReviews(reset: true);
             },
-            onDelete: () => _deleteReview(review),
           );
         },
       ),
@@ -289,15 +206,13 @@ class _MyReviewsPageState extends State<MyReviewsPage> {
   }
 }
 
-class _MyReviewCard extends StatelessWidget {
+class _PublicReviewCard extends StatelessWidget {
   final Review review;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
 
-  const _MyReviewCard({
+  const _PublicReviewCard({
     required this.review,
     required this.onTap,
-    required this.onDelete,
   });
 
   @override
@@ -364,31 +279,13 @@ class _MyReviewCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    title,
-                                    style: theme.textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: onDelete,
-                                  icon: Icon(
-                                    Icons.delete_outline_rounded,
-                                    size: 20,
-                                    color: colorScheme.error.withValues(alpha: 0.8),
-                                  ),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  visualDensity: VisualDensity.compact,
-                                  tooltip: 'Delete review',
-                                ),
-                              ],
+                            Text(
+                              title,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
                             Row(
