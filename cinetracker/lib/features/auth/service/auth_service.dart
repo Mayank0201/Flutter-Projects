@@ -13,8 +13,9 @@ class AuthException implements Exception {
 class LoginTokens {
   final String accessToken;
   final String refreshToken;
+  final bool isNewUser;
 
-  LoginTokens({required this.accessToken, required this.refreshToken});
+  LoginTokens({required this.accessToken, required this.refreshToken, this.isNewUser = false});
 }
 
 class AuthService {
@@ -170,6 +171,7 @@ class AuthService {
             dataMap['accessToken']?.toString() ?? dataMap['access_token']?.toString() ?? dataMap['token']?.toString();
         final refreshToken =
             dataMap['refreshToken']?.toString() ?? dataMap['refresh_token']?.toString();
+        final isNewUser = dataMap['isNewUser'] == true;
 
         if (accessToken != null &&
             accessToken.isNotEmpty &&
@@ -178,6 +180,7 @@ class AuthService {
           return LoginTokens(
             accessToken: accessToken,
             refreshToken: refreshToken,
+            isNewUser: isNewUser,
           );
         }
       }
@@ -194,6 +197,48 @@ class AuthService {
       throw AuthException(serverMessage ?? "Google login failed. Please try again.");
     } catch (e) {
       throw AuthException("An unexpected error occurred during Google sign in.");
+    }
+  }
+
+  Future<LoginTokens> updateUsername(String newUsername) async {
+    try {
+      final response = await apiService.dio.put(
+        "/auth/update-username",
+        data: {"username": newUsername},
+      );
+
+      final raw = response.data;
+      if (raw is Map<String, dynamic>) {
+        final dataMap = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+        final accessToken =
+            dataMap['accessToken']?.toString() ?? dataMap['access_token']?.toString() ?? dataMap['token']?.toString();
+        final refreshToken =
+            dataMap['refreshToken']?.toString() ?? dataMap['refresh_token']?.toString();
+
+        if (accessToken != null &&
+            accessToken.isNotEmpty &&
+            refreshToken != null &&
+            refreshToken.isNotEmpty) {
+          return LoginTokens(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            isNewUser: false,
+          );
+        }
+      }
+
+      throw AuthException(
+        "Invalid username update response from server",
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String? serverMessage;
+      if (data is Map<String, dynamic>) {
+        serverMessage = data['message']?.toString() ?? data['error']?.toString();
+      }
+      throw AuthException(serverMessage ?? "Failed to update username. Please try again.");
+    } catch (e) {
+      throw AuthException("An unexpected error occurred during username update.");
     }
   }
 }
