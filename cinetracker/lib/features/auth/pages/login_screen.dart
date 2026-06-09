@@ -30,6 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: '961587425846-fvsaooog0c9qpkm6lshfmv6ial2o87ec.apps.googleusercontent.com',
     scopes: ['email'],
   );
 
