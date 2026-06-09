@@ -65,8 +65,8 @@ class Movie {
     String parsedGenre = (json['genre'] ?? '').toString();
     if (parsedGenre.isEmpty && genresRaw is List && genresRaw.isNotEmpty) {
       final names = genresRaw
-          .map((e) {
-            if (e is Map<String, dynamic>) {
+          .map<String>((e) {
+            if (e is Map) {
               return e['name']?.toString() ?? '';
             }
             return e.toString();
@@ -79,8 +79,8 @@ class Movie {
     List<String> parsedCast = [];
     final dynamic castRaw = json['cast'];
     if (castRaw is List) {
-      parsedCast = castRaw.map((e) {
-        if (e is Map<String, dynamic>) {
+      parsedCast = castRaw.map<String>((e) {
+        if (e is Map) {
           return e['name']?.toString() ?? '';
         }
         return e.toString();
@@ -91,7 +91,12 @@ class Movie {
     List<Trailer> parsedTrailers = [];
     final dynamic trailersRaw = json['trailers'];
     if (trailersRaw is List) {
-      parsedTrailers = trailersRaw.map((e) => Trailer.fromJson(e)).toList();
+      parsedTrailers = trailersRaw.map<Trailer>((e) {
+        if (e is Map) {
+          return Trailer.fromJson(Map<String, dynamic>.from(e));
+        }
+        return Trailer.fromJson({});
+      }).toList();
     }
 
     return Movie(

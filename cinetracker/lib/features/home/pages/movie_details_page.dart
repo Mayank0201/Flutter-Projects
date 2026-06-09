@@ -75,10 +75,12 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
         _userRating = summary.userRating;
         isLoading = false;
       });
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint("ERROR LOADING MOVIE DETAILS: $e");
+      debugPrint("STACK TRACE: $stack");
       if (!mounted) return;
       setState(() {
-        errorMessage = "Could not load full details.";
+        errorMessage = "Could not load full details: $e";
         isLoading = false;
       });
     }
