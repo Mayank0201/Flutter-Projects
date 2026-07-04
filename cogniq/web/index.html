@@ -1,6 +1,39 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <script>
+    window.addEventListener('error', function(event) {
+      var errorDiv = document.createElement('div');
+      errorDiv.style.color = 'red';
+      errorDiv.style.padding = '20px';
+      errorDiv.style.background = 'white';
+      errorDiv.style.position = 'fixed';
+      errorDiv.style.top = '0';
+      errorDiv.style.left = '0';
+      errorDiv.style.width = '100%';
+      errorDiv.style.height = '100%';
+      errorDiv.style.overflow = 'auto';
+      errorDiv.style.zIndex = '999999';
+      errorDiv.innerHTML = '<h1>Javascript Error Detected:</h1><pre>' + event.message + '\n' + event.filename + ':' + event.lineno + ':' + event.colno + '\n\n' + (event.error ? event.error.stack : '') + '</pre>';
+      (document.body || document.documentElement).appendChild(errorDiv);
+    });
+
+    window.addEventListener('unhandledrejection', function(event) {
+      var errorDiv = document.createElement('div');
+      errorDiv.style.color = 'red';
+      errorDiv.style.padding = '20px';
+      errorDiv.style.background = 'white';
+      errorDiv.style.position = 'fixed';
+      errorDiv.style.top = '0';
+      errorDiv.style.left = '0';
+      errorDiv.style.width = '100%';
+      errorDiv.style.height = '100%';
+      errorDiv.style.overflow = 'auto';
+      errorDiv.style.zIndex = '999999';
+      errorDiv.innerHTML = '<h1>Unhandled Promise Rejection Detected:</h1><pre>' + (event.reason ? (event.reason.stack || event.reason) : event.reason) + '</pre>';
+      (document.body || document.documentElement).appendChild(errorDiv);
+    });
+  </script>
   <!--
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.

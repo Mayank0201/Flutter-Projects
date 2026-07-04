@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   // ── Zen palette ─────────────────────────────────────────────────────────────
@@ -103,10 +104,13 @@ class AppTheme {
       case 'spellingbee': return warmAmber;
       case 'sudoku':      return deepLavender;
       case 'wordsearch':  return softSage;
-      case 'twentyfortyeight': return terracotta;
+      case 'minesweeper': return terracotta;
       case 'reaction':    return roseGold;
       case 'numbermemory': return slateBlue;
       case 'sequence':    return dustyMauve;
+      case 'oddcolor':    return warmAmber;
+      case 'hue':         return deepLavender;
+      case 'nonogram':    return softSage;
       default:            return textSecondaryLight;
     }
   }
@@ -134,6 +138,15 @@ class AppTheme {
       spreadRadius: 0,
     ),
   ];
+
+  static TextStyle numberStyle({Color? color, double? fontSize, FontWeight? fontWeight, double? letterSpacing}) {
+    return GoogleFonts.spaceGrotesk(
+      color: color,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      letterSpacing: letterSpacing,
+    );
+  }
 }
 
 extension ResponsiveTheme on BuildContext {
@@ -169,9 +182,12 @@ const Map<String, GameColors> kGameColors = {
   'wordle':      GameColors(primary: AppTheme.softSage,      dark: Color(0xFF4B6B4E), emoji: '', name: 'Word Guess',   description: ''),
   'hangman':     GameColors(primary: AppTheme.warmAmber,     dark: Color(0xFF8A6020), emoji: '', name: 'Hangman',      description: ''),
   'weaver':      GameColors(primary: AppTheme.slateBlue,     dark: Color(0xFF3E5A6C), emoji: '', name: 'Word Ladder',  description: ''),
-  'zip':         GameColors(primary: AppTheme.roseGold,     dark: Color(0xFF9E5D54), emoji: '⚡', name: 'Zip',         description: ''),
+  'zip':         GameColors(primary: AppTheme.roseGold,     dark: Color(0xFF9E5D54), emoji: '⚡', name: 'Grid Path',   description: ''),
   'crossclimb':  GameColors(primary: AppTheme.dustyMauve,   dark: Color(0xFF5E4860), emoji: '', name: 'Word Climb',   description: ''),
   'queens':      GameColors(primary: AppTheme.deepLavender, dark: Color(0xFF4A4278), emoji: '♛', name: 'Star Battle',  description: ''),
   'chimp':       GameColors(primary: AppTheme.terracotta,   dark: Color(0xFF6E4838), emoji: '', name: 'Chimp Test',   description: ''),
   'connections': GameColors(primary: AppTheme.dustyMauve,   dark: Color(0xFF5E4860), emoji: '', name: 'Categories',   description: ''),
+  'oddcolor':    GameColors(primary: AppTheme.warmAmber,     dark: Color(0xFF8A6020), emoji: '🎨', name: 'Odd Color Out', description: ''),
+  'hue':         GameColors(primary: AppTheme.deepLavender, dark: Color(0xFF4A4278), emoji: '🌈', name: 'Spectrum',    description: ''),
+  'nonogram':    GameColors(primary: AppTheme.softSage,      dark: Color(0xFF4B6B4E), emoji: '🧩', name: 'Nonogram',      description: 'Fill grid cells to match row and column clues'),
 };

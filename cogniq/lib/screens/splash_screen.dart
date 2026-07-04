@@ -1,6 +1,7 @@
-import'package:flutter/material.dart';
-import'package:google_fonts/google_fonts.dart';
-import'../theme/app_theme.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import '../theme/app_theme.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -8,47 +9,73 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _fade;
-
+class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
-    _ctrl.forward();
-    Future.delayed(const Duration(milliseconds: 2000), () {
-      if (mounted) { Navigator.pushReplacementNamed(context,'/home'); }
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
     });
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
-
-  @override
   Widget build(BuildContext context) {
+    final logoColor = AppTheme.dustyMauve;
+    
     return Scaffold(
       backgroundColor: context.bgDark,
-      body: FadeTransition(
-        opacity: _fade,
-        child: Center(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: Image.asset(
-                'assets/icon/app_icon.png',
-                width: context.scale(100),
-                height: context.scale(100),
-              ),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+
+            
+            // Staggered letters for the title 'CogniQ'
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: 'CogniQ'.split('').asMap().entries.map((entry) {
+                final idx = entry.key;
+                final char = entry.value;
+                return Text(
+                  char,
+                  style: GoogleFonts.outfit(
+                    fontSize: context.scale(42),
+                    fontWeight: FontWeight.w800,
+                    color: char == 'Q' ? logoColor : context.textPrimary,
+                    letterSpacing: -1,
+                  ),
+                )
+                    .animate()
+                    .fadeIn(
+                      delay: (300 + idx * 80).ms,
+                      duration: 400.ms,
+                    )
+                    .slideY(
+                      begin: 0.4,
+                      end: 0,
+                      duration: 400.ms,
+                      curve: Curves.easeOutBack,
+                    );
+              }).toList(),
             ),
-            const SizedBox(height: 20),
-            Text('CogniQ',
-              style: GoogleFonts.outfit(fontSize: context.scale(40), fontWeight: FontWeight.w800, color: context.textPrimary, letterSpacing: -1)),
-            const SizedBox(height: 8),
-            Text('Play. Think. Win.',
-              style: GoogleFonts.outfit(fontSize: context.scale(15), color: context.textMuted, letterSpacing: 1.5)),
-          ]),
+            const SizedBox(height: 12),
+            
+            // Subtitle with a soft slide-up and fade-in
+            Text(
+              'Play. Think. Win.',
+              style: GoogleFonts.outfit(
+                fontSize: context.scale(15),
+                fontWeight: FontWeight.w500,
+                color: context.textMuted,
+                letterSpacing: 2.0,
+              ),
+            )
+                .animate()
+                .fadeIn(delay: 900.ms, duration: 600.ms)
+                .slideY(begin: 0.3, end: 0, duration: 600.ms, curve: Curves.easeOut),
+          ],
         ),
       ),
     );

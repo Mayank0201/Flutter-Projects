@@ -1,0 +1,963 @@
+import 'dart:math';
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../utils/rules_helper.dart';
+import '../../../theme/app_theme.dart';
+import '../../../utils/hint_manager.dart';
+import '../../../utils/audio_manager.dart';
+import '../../../theme/settings_manager.dart';
+import '../../../widgets/auto_next_countdown.dart';
+import '../../../widgets/animated_level_indicator.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
+
+class ZipLevel {
+  final int rows, cols;
+  final List<List<int>> waypoints;
+  const ZipLevel({required this.rows, required this.cols, required this.waypoints});
+  int get maxWaypoint { int m = 0; for (var r in waypoints) { for (var v in r) { if (v > m) { m = v; } } } return m; }
+  int get wallCount { int count = 0; for (var r in waypoints) { for (var v in r) { if (v == -1) { count++; } } } return count; }
+  int get totalCells => rows * cols;
+  int get totalCellsToVisit => rows * cols - wallCount;
+}
+class GridPathScreen extends StatefulWidget {
+  const GridPathScreen({super.key});
+  @override
+  State<GridPathScreen> createState() => _GridPathScreenState();
+}
+
+class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProviderStateMixin {
+  int _levelIndex = 0;
+  late ZipLevel _level;
+  final List<(int, int)> _path = [];
+  int _nextWaypoint = 1;
+  bool _won = false;
+  String _msg = 'Drag through every cell — hit numbers in order';
+  final GlobalKey _gridKey = GlobalKey();
+
+  int _hintCount = 0;
+  bool _dragActive = false;
+  late AnimationController _rippleController;
+  bool _isDailyMode = false;
+  String _dailyModifierType = '';
+  List<(int, int)>? _solution;
+  bool get _isReversePath => _isDailyMode && _dailyModifierType == 'mirror';
+  bool _hideGridPathElements = false;
+  Timer? _blindStepsTimer;
+
+  @override
+  void dispose() {
+    _rippleController.dispose();
+    _blindStepsTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _rippleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+
+    _level = _getDynamicLevel(0);
+    _initLevel();
+  }
+
+  Future<void> _initLevel() async {
+    _hintCount = await HintManager.getHints('zip');
+    final prefs = await SharedPreferences.getInstance();
+    _isDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    if (_isDailyMode) {
+      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+    }
+    final savedLevel = prefs.getInt('level_zip') ?? 0;
+    if (mounted) {
+      setState(() {
+        _levelIndex = savedLevel;
+        _loadLevel(prefs);
+      });
+    }
+  }
+
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pathStrings = _path.map((p) => '${p.$1},${p.$2}').toList();
+    await prefs.setStringList('zip_path_${_levelIndex}', pathStrings);
+  }
+
+  Future<void> _clearState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('zip_path_${_levelIndex}');
+  }
+
+  Future<void> _savePersistedLevel(int lvl) async {
+    if (_isDailyMode) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('level_zip', lvl);
+    final earned = await HintManager.onLevelCleared('zip');
+    final newCount = await HintManager.getHints('zip');
+    setState(() {
+      _hintCount = newCount;
+    });
+    if (earned && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.accentFor('zip'),
+        ),
+      );
+    }
+  }
+
+  List<(int, int)>? _solveZip(ZipLevel level) {
+    int startR = -1, startC = -1;
+    for (int r = 0; r < level.rows; r++) {
+      for (int c = 0; c < level.cols; c++) {
+        if (level.waypoints[r][c] == 1) {
+          startR = r; startC = c;
+        }
+      }
+    }
+    if (startR == -1) return null;
+
+    List<(int, int)> path = [(startR, startC)];
+    Set<String> visited = {'$startR,$startC'};
+
+    bool dfs(int r, int c, int nextWp) {
+      if (path.length == level.totalCellsToVisit) {
+        final lastWp = level.waypoints[path.last.$1][path.last.$2];
+        return lastWp == level.maxWaypoint;
+      }
+
+      final dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+      for (final dir in dirs) {
+        final nr = r + dir.$1;
+        final nc = c + dir.$2;
+        if (nr >= 0 && nr < level.rows && nc >= 0 && nc < level.cols) {
+          final key = '$nr,$nc';
+          if (!visited.contains(key)) {
+            final wp = level.waypoints[nr][nc];
+            if (wp == -1) continue;
+            if (wp > 0 && wp != nextWp) continue;
+            
+            visited.add(key);
+            path.add((nr, nc));
+            
+            if (dfs(nr, nc, wp > 0 ? nextWp + 1 : nextWp)) {
+              return true;
+            }
+            
+            path.removeLast();
+            visited.remove(key);
+          }
+        }
+      }
+      return false;
+    }
+
+    if (dfs(startR, startC, 2)) {
+      return path;
+    }
+    return null;
+  }
+
+  Future<void> _useHint() async {
+    if (_won || _hintCount <= 0) return;
+    final rawSolution = _solveZip(_level);
+    if (rawSolution == null || rawSolution.isEmpty) return;
+    final List<(int, int)> solution = _isReversePath ? rawSolution.reversed.toList() : rawSolution;
+
+    bool matches = true;
+    if (_path.length > solution.length) {
+      matches = false;
+    } else {
+      for (int i = 0; i < _path.length; i++) {
+        if (_path[i].$1 != solution[i].$1 || _path[i].$2 != solution[i].$2) {
+          matches = false;
+          break;
+        }
+      }
+    }
+
+    await HintManager.useHint('zip');
+    final newCount = await HintManager.getHints('zip');
+
+    setState(() {
+      _hintCount = newCount;
+      if (!matches || _path.isEmpty) {
+        _path.clear();
+        _path.add(solution[0]);
+        if (solution.length > 1) {
+          _path.add(solution[1]);
+        }
+      } else {
+        _path.add(solution[_path.length]);
+      }
+
+      _nextWaypoint = _isReversePath ? _level.maxWaypoint : 1;
+      for (var p in _path) {
+        final wp = _level.waypoints[p.$1][p.$2];
+        if (wp == _nextWaypoint) {
+          if (_isReversePath) {
+            _nextWaypoint--;
+          } else {
+            _nextWaypoint++;
+          }
+        }
+      }
+
+      final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
+      final targetLastWp = _isReversePath ? 1 : _level.maxWaypoint;
+      if (lastCellWp == targetLastWp && _path.length == _level.totalCellsToVisit) {
+        _won = true;
+        _msg = 'Path complete!';
+        AudioManager.playSuccess();
+        settingsNotifier.hapticError(); // equivalent to heavyImpact
+        _savePersistedLevel(_levelIndex + 1);
+        _clearState();
+      } else {
+        _msg = 'Hint added to path!';
+        AudioManager.playClick();
+        settingsNotifier.hapticTap(); // equivalent to lightImpact
+        _saveState();
+      }
+    });
+  }
+
+  ZipLevel _getDynamicLevel(int levelIndex) {
+    final int waypointCount = levelIndex + 2;
+    int gridSize = 3;
+    while ((gridSize * gridSize) ~/ 2 < waypointCount) {
+      gridSize++;
+    }
+    final int rows = gridSize;
+    final int cols = gridSize;
+    final int pathLength = rows * cols;
+    final rand = Random(levelIndex);
+
+    List<(int, int)>? path;
+    int totalSteps = 0;
+
+    int countUnvisitedNeighbors(int r, int c, Set<String> visited) {
+      int count = 0;
+      final dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+      for (final dir in dirs) {
+        final nr = r + dir.$1;
+        final nc = c + dir.$2;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          if (!visited.contains('$nr,$nc')) {
+            count++;
+          }
+        }
+      }
+      return count;
+    }
+
+    for (int attempt = 0; attempt < 10; attempt++) {
+      final startR = rand.nextInt(rows);
+      final startC = rand.nextInt(cols);
+      final currentPath = <(int, int)>[(startR, startC)];
+      final visited = <String>{'$startR,$startC'};
+      totalSteps = 0;
+
+      bool dfs(int r, int c) {
+        totalSteps++;
+        if (totalSteps > 2000) return false;
+        if (currentPath.length == pathLength) {
+          return true;
+        }
+
+        final dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]..shuffle(rand);
+        dirs.sort((a, b) {
+          final nra = r + a.$1;
+          final nca = c + a.$2;
+          final nrb = r + b.$1;
+          final ncb = c + b.$2;
+
+          final countA = (nra >= 0 && nra < rows && nca >= 0 && nca < cols && !visited.contains('$nra,$nca'))
+              ? countUnvisitedNeighbors(nra, nca, visited)
+              : 999;
+          final countB = (nrb >= 0 && nrb < rows && ncb >= 0 && ncb < cols && !visited.contains('$nrb,$ncb'))
+              ? countUnvisitedNeighbors(nrb, ncb, visited)
+              : 999;
+          return countA.compareTo(countB);
+        });
+
+        for (final dir in dirs) {
+          final nr = r + dir.$1;
+          final nc = c + dir.$2;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            final key = '$nr,$nc';
+            if (!visited.contains(key)) {
+              visited.add(key);
+              currentPath.add((nr, nc));
+              if (dfs(nr, nc)) return true;
+              currentPath.removeLast();
+              visited.remove(key);
+              if (totalSteps > 2000) return false;
+            }
+          }
+        }
+        return false;
+      }
+
+      if (dfs(startR, startC)) {
+        path = currentPath;
+        break;
+      }
+    }
+
+    if (path == null) {
+      path = [];
+      for (int r = 0; r < rows; r++) {
+        if (r % 2 == 0) {
+          for (int c = 0; c < cols; c++) {
+            path.add((r, c));
+          }
+        } else {
+          for (int c = cols - 1; c >= 0; c--) {
+            path.add((r, c));
+          }
+        }
+      }
+      path = path.take(pathLength).toList();
+    }
+
+    // Set all cells initially to 0 (free tile)
+    final waypoints = List.generate(rows, (_) => List.filled(cols, 0));
+    final int pathLen = path.length;
+    for (int i = 0; i < waypointCount; i++) {
+      final int pathIndex = (i * (pathLen - 1) / (waypointCount - 1)).round();
+      final cell = path[pathIndex];
+      waypoints[cell.$1][cell.$2] = i + 1;
+    }
+
+    return ZipLevel(rows: rows, cols: cols, waypoints: waypoints);
+  }
+
+  void _loadLevel([SharedPreferences? prefs]) {
+    _level = _getDynamicLevel(_levelIndex);
+    _solution = _solveZip(_level);
+    _path.clear();
+    _nextWaypoint = _isReversePath ? _level.maxWaypoint : 1;
+    _won = false;
+    _msg = _isReversePath
+        ? 'Reverse Path! Drag through every cell — hit numbers from max down to 1'
+        : 'Drag through every cell — hit numbers in order';
+    
+    if (prefs != null) {
+      final pathStrings = prefs.getStringList('zip_path_${_levelIndex}');
+      if (pathStrings != null && pathStrings.isNotEmpty) {
+        for (final s in pathStrings) {
+          final parts = s.split(',');
+          if (parts.length == 2) {
+            final r = int.tryParse(parts[0]);
+            final c = int.tryParse(parts[1]);
+            if (r != null && c != null) {
+              _path.add((r, c));
+              final wp = _level.waypoints[r][c];
+              if (wp == _nextWaypoint) {
+                if (_isReversePath) {
+                  _nextWaypoint--;
+                } else {
+                  _nextWaypoint++;
+                }
+              }
+            }
+          }
+        }
+        if (_path.isNotEmpty) {
+          final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
+          final targetLastWp = _isReversePath ? 1 : _level.maxWaypoint;
+          if (lastCellWp == targetLastWp && _path.length == _level.totalCellsToVisit) {
+            _won = true;
+            _msg = 'Path complete!';
+          }
+        }
+      }
+    }
+
+    _blindStepsTimer?.cancel();
+    _hideGridPathElements = false;
+    if (_isDailyMode && _dailyModifierType == 'minimal') {
+      _blindStepsTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted) {
+          setState(() {
+            _hideGridPathElements = true;
+          });
+        }
+      });
+    }
+  }
+
+  void _reset() {
+    _clearState();
+    setState(() => _loadLevel());
+  }
+
+  bool _inPath(int r, int c) => _path.any((p) => p.$1 == r && p.$2 == c);
+  bool _isAdjacent((int,int) a, (int,int) b) => (a.$1-b.$1).abs() + (a.$2-b.$2).abs() == 1;
+
+  void _truncatePathTo((int, int) cell) {
+    final idx = _path.indexOf(cell);
+    if (idx == -1 || idx == _path.length - 1) return;
+    setState(() {
+      _path.removeRange(idx + 1, _path.length);
+      _nextWaypoint = _isReversePath ? _level.maxWaypoint : 1;
+      for (var p in _path) {
+        final wp = _level.waypoints[p.$1][p.$2];
+        if (wp == _nextWaypoint) {
+          if (_isReversePath) {
+            _nextWaypoint--;
+          } else {
+            _nextWaypoint++;
+          }
+        }
+      }
+      _msg = 'Dragging...';
+      _saveState();
+    });
+  }
+
+  void _addCell(int r, int c) {
+    if (_won) return;
+    if (r < 0 || r >= _level.rows || c < 0 || c >= _level.cols) return;
+
+    final wp = _level.waypoints[r][c];
+    if (wp == -1) return; // Ignore wall cells
+
+    if (_path.isEmpty) {
+      final targetStartWp = _isReversePath ? _level.maxWaypoint : 1;
+      if (wp != targetStartWp) return;
+    }
+
+    if (_inPath(r, c)) return;
+    if (_path.isNotEmpty && !_isAdjacent(_path.last, (r, c))) return;
+
+    if (_path.isNotEmpty) {
+      final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
+      final targetLastWp = _isReversePath ? 1 : _level.maxWaypoint;
+      if (lastCellWp == targetLastWp) return;
+    }
+
+    final bool isCorrectWaypoint = wp <= 0 || wp == _nextWaypoint;
+    if (!isCorrectWaypoint) {
+      AudioManager.playFail();
+      settingsNotifier.hapticSuccess(); // mediumImpact feedback
+      setState(() {
+        _msg = 'Go in number order';
+      });
+      return;
+    }
+
+    if (_path.isEmpty) {
+      AudioManager.playClick();
+    }
+    settingsNotifier.hapticTap(); // equivalent to lightImpact
+    setState(() {
+      if (wp > 0 && wp == _nextWaypoint) {
+        if (_isReversePath) {
+          _nextWaypoint--;
+        } else {
+          _nextWaypoint++;
+        }
+      }
+      _path.add((r, c));
+      _rippleController.forward(from: 0.0);
+      _msg = 'Dragging...';
+      _saveState();
+    });
+    _checkWin();
+  }
+
+  void _checkWin() {
+    if (_won) return;
+    if (_path.isNotEmpty) {
+      final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
+      final targetLastWp = _isReversePath ? 1 : _level.maxWaypoint;
+      if (lastCellWp == targetLastWp) {
+        if (_path.length == _level.totalCellsToVisit) {
+          setState(() {
+            _won = true;
+            _msg = 'Path complete!';
+            AudioManager.playSuccess();
+            settingsNotifier.hapticError(); // heavyImpact
+            _savePersistedLevel(_levelIndex + 1);
+            _clearState();
+          });
+        } else {
+          setState(() {
+            _msg = 'Not all cells filled!';
+          });
+        }
+      }
+    }
+  }
+
+  (int,int)? _cellAtLocal(Offset local) {
+    final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    final cw = box.size.width / _level.cols;
+    final ch = box.size.height / _level.rows;
+    final col = (local.dx / cw).floor();
+    final row = (local.dy / ch).floor();
+    if (row < 0 || row >= _level.rows || col < 0 || col >= _level.cols) return null;
+    return (row, col);
+  }
+
+  void _nextLevel() {
+    if (!_won) return;
+    if (_isDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
+
+    _clearState();
+    setState(() {
+      _levelIndex = _levelIndex + 1;
+      _loadLevel();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sw = context.screenWidth - 40;
+    final cellW = sw / _level.cols;
+    final cellH = cellW;
+
+    return Scaffold(
+      backgroundColor: context.bgDark,
+      appBar: AppBar(
+        backgroundColor: context.bgDark, foregroundColor: context.textPrimary,
+        title: Text('Grid Path', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: _hintCount > 0 && !_won ? _useHint : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.help_outline, size: 20),
+            color: context.textMuted,
+            onPressed: () => RulesHelper.showRulesBottomSheet(context, 'zip', 'Grid Path'),
+          ),
+          IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: _isDailyMode
+                ? Text(
+                    'Daily Challenge',
+                    style: GoogleFonts.outfit(
+                      color: AppTheme.zipPink,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : AnimatedLevelIndicator(
+                    level: _levelIndex + 1,
+                    accentColor: AppTheme.zipPink,
+                  ),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                  if (_isDailyMode)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                      color: Colors.amber.withOpacity(0.15),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.star, color: Colors.amber, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isReversePath ? 'DAILY CHALLENGE: REVERSE PATH MODE' : 'DAILY CHALLENGE',
+                            style: GoogleFonts.outfit(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Text('${_path.length} / ${_level.totalCellsToVisit} cells',
+                    style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12))),
+                  const SizedBox(height: 4),
+                  if (_msg.isNotEmpty) Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(_msg, style: GoogleFonts.outfit(color: _won ? AppTheme.zipPink : context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center),
+                  ),
+                  const SizedBox(height: 12),
+                  Builder(
+                    builder: (context) {
+                      Widget gridWidget = RepaintBoundary(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapUp: (d) {
+                            if (_won) return;
+                            final c = _cellAtLocal(d.localPosition);
+                            if (c != null) {
+                              final r = c.$1;
+                              final col = c.$2;
+                              if (_path.isEmpty) {
+                                final wp = _level.waypoints[r][col];
+                                final targetStartWp = _isReversePath ? _level.maxWaypoint : 1;
+                                if (wp == targetStartWp) {
+                                  _addCell(r, col);
+                                } else {
+                                  AudioManager.playFail();
+                                  settingsNotifier.hapticSuccess(); // mediumImpact
+                                  setState(() => _msg = _isReversePath ? 'Start at number $targetStartWp!' : 'Start at number 1!');
+                                }
+                              } else {
+                                if (_path.contains(c)) {
+                                  _truncatePathTo(c);
+                                } else {
+                                  final last = _path.last;
+                                  final int stepR = (r - last.$1).sign;
+                                  final int stepC = (col - last.$2).sign;
+
+                                  if ((stepR == 0 && stepC != 0) || (stepR != 0 && stepC == 0)) {
+                                    int currR = last.$1;
+                                    int currC = last.$2;
+                                    while (currR != r || currC != col) {
+                                      currR += stepR;
+                                      currC += stepC;
+                                      _addCell(currR, currC);
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          onPanStart: (d) {
+                            if (_won) return;
+                            final c = _cellAtLocal(d.localPosition);
+                            if (c != null) {
+                              if (_path.isEmpty) {
+                                final wp = _level.waypoints[c.$1][c.$2];
+                                final targetStartWp = _isReversePath ? _level.maxWaypoint : 1;
+                                if (wp == targetStartWp) {
+                                  _dragActive = true;
+                                  _addCell(c.$1, c.$2);
+                                } else {
+                                  _dragActive = false;
+                                  AudioManager.playFail();
+                                  settingsNotifier.hapticSuccess(); // mediumImpact
+                                  setState(() => _msg = _isReversePath ? 'Start at number $targetStartWp!' : 'Start at number 1!');
+                                }
+                              } else {
+                                if (c == _path.last) {
+                                  _dragActive = true;
+                                } else if (_isAdjacent(_path.last, c) && !_path.contains(c)) {
+                                  _dragActive = true;
+                                  _addCell(c.$1, c.$2);
+                                } else {
+                                  _dragActive = false;
+                                }
+                              }
+                            } else {
+                              _dragActive = false;
+                            }
+                          },
+                          onPanUpdate: (d) {
+                            if (_won || !_dragActive) return;
+                            final c = _cellAtLocal(d.localPosition);
+                            if (c != null) {
+                              if (_path.contains(c)) {
+                                if (_path.length >= 2 && _path[_path.length - 2] == c) {
+                                  _truncatePathTo(c);
+                                }
+                              } else {
+                                _addCell(c.$1, c.$2);
+                              }
+                            }
+                          },
+                          onPanEnd: (_) {
+                            setState(() {
+                              _dragActive = false;
+                            });
+                            _checkWin();
+                          },
+                          onPanCancel: () {
+                            setState(() {
+                              _dragActive = false;
+                            });
+                          },
+                          child: SizedBox(
+                            key: _gridKey, width: sw, height: cellH * _level.rows,
+                            child: CustomPaint(
+                              painter: _ZipPainter(
+                                  level: _level,
+                                  path: _path,
+                                  solution: _solution,
+                                  cellW: cellW,
+                                  cellH: cellH,
+                                  won: _won,
+                                  cellBgColor: context.bgCard,
+                                  gridColor: context.textMuted.withAlpha(70),
+                                  pathColor: AppTheme.zipPink,
+                                  fillColor: AppTheme.zipPink.withAlpha(35),
+                                  visitedWpColor: AppTheme.softSage,
+                                  rippleAnimation: _rippleController,
+                                  modifierType: _dailyModifierType,
+                                  hideWaypoints: _hideGridPathElements,
+                                ),
+                            ),
+                          ),
+                        ),
+                      );
+
+                      if (_isDailyMode && _dailyModifierType == 'mirror') {
+                        gridWidget = Transform(
+                          transform: Matrix4.identity()..scale(-1.0, 1.0),
+                          alignment: Alignment.center,
+                          child: gridWidget,
+                        );
+                      }
+                      return gridWidget;
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  if (_won && !_isDailyMode)
+                    AutoNextCountdown(
+                      onNext: _nextLevel,
+                      accentColor: AppTheme.zipPink,
+                    ),
+                  if (_path.isNotEmpty && !_won) TextButton(onPressed: _reset,
+                    child: Text('Reset', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      if (_won && _isDailyMode)
+            Positioned.fill(
+              child: ChallengeClearedOverlay(
+                accentColor: AppTheme.zipPink,
+                onComplete: () {
+                  Navigator.pop(context, true);
+                },
+              ),
+            ),
+        ],
+      ),
+      );
+  }
+}
+
+class _ZipPainter extends CustomPainter {
+  final ZipLevel level;
+  final List<(int, int)> path;
+  final List<(int, int)>? solution;
+  final double cellW, cellH;
+  final bool won;
+  final Color cellBgColor;
+  final Color gridColor;
+  final Color pathColor;
+  final Color fillColor;
+  final Color visitedWpColor;
+  final Animation<double> rippleAnimation;
+  final String modifierType;
+  final bool hideWaypoints;
+
+  _ZipPainter({
+    required this.level,
+    required this.path,
+    this.solution,
+    required this.cellW,
+    required this.cellH,
+    required this.won,
+    required this.cellBgColor,
+    required this.gridColor,
+    required this.pathColor,
+    required this.fillColor,
+    required this.visitedWpColor,
+    required this.rippleAnimation,
+    required this.modifierType,
+    required this.hideWaypoints,
+  }) : super(repaint: rippleAnimation);
+
+  Offset _ctr(int r, int c) => Offset(c * cellW + cellW / 2, r * cellH + cellH / 2);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rippleProgress = rippleAnimation.value;
+    final isRetro = modifierType == 'retro';
+    final bgPaint = Paint()..color = cellBgColor..style = PaintingStyle.fill;
+    final border = Paint()
+      ..color = isRetro ? gridColor.withAlpha(15) : gridColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = isRetro ? 0.8 : 1.2;
+    final filled = Paint()..color = fillColor..style = PaintingStyle.fill;
+    final linePaint = Paint()
+      ..color = pathColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = cellW * 0.26
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    for (int r = 0; r < level.rows; r++) {
+      for (int c = 0; c < level.cols; c++) {
+        final wp = level.waypoints[r][c];
+        final rect = Rect.fromLTWH(c * cellW + 3, r * cellH + 3, cellW - 6, cellH - 6);
+        final rr = RRect.fromRectAndRadius(rect, Radius.circular(isRetro ? 2 : 8));
+        
+        if (wp == -1) {
+          final wallBgPaint = Paint()..color = gridColor.withAlpha(25)..style = PaintingStyle.fill;
+          canvas.drawRRect(rr, wallBgPaint);
+          
+          final wallBorder = Paint()..color = gridColor.withAlpha(isRetro ? 10 : 45)..style = PaintingStyle.stroke..strokeWidth = 1.0;
+          canvas.drawRRect(rr, wallBorder);
+          
+          final crossPaint = Paint()..color = gridColor.withAlpha(isRetro ? 15 : 35)..style = PaintingStyle.stroke..strokeWidth = 1.5;
+          final cx = rect.center.dx;
+          final cy = rect.center.dy;
+          final size = cellW * 0.15;
+          canvas.drawLine(Offset(cx - size, cy - size), Offset(cx + size, cy + size), crossPaint);
+          canvas.drawLine(Offset(cx + size, cy - size), Offset(cx - size, cy + size), crossPaint);
+        } else {
+          if (isRetro) {
+            Color baseColor = cellBgColor;
+            final isSolutionCell = solution != null && solution!.contains((r, c));
+            if (isSolutionCell) {
+              baseColor = Color.lerp(cellBgColor, Colors.black, 0.08) ?? cellBgColor;
+            }
+            (int, int)? targetCell;
+            if (solution != null && solution!.isNotEmpty) {
+              final idx = path.length;
+              if (idx < solution!.length) {
+                targetCell = solution![idx];
+              } else {
+                targetCell = solution!.last;
+              }
+            }
+            int dist = 999;
+            if (targetCell != null) {
+              dist = (r - targetCell.$1).abs() + (c - targetCell.$2).abs();
+            }
+            final factor = (1.0 - dist * 0.25).clamp(0.0, 1.0);
+            final retroColor = Color.lerp(baseColor, pathColor.withAlpha(150), factor) ?? baseColor;
+            canvas.drawRRect(rr, Paint()..color = retroColor..style = PaintingStyle.fill);
+          } else {
+            canvas.drawRRect(rr, bgPaint);
+          }
+
+          if (path.any((p) => p.$1 == r && p.$2 == c)) {
+            canvas.drawRRect(rr, filled);
+          }
+          canvas.drawRRect(rr, border);
+        }
+      }
+    }
+    if (path.length > 1) {
+      final lp = Path()..moveTo(_ctr(path[0].$1, path[0].$2).dx, _ctr(path[0].$1, path[0].$2).dy);
+      for (int i = 1; i < path.length; i++) {
+        lp.lineTo(_ctr(path[i].$1, path[i].$2).dx, _ctr(path[i].$1, path[i].$2).dy);
+      }
+      canvas.drawPath(lp, linePaint);
+    }
+
+    for (int r = 0; r < level.rows; r++) {
+      for (int c = 0; c < level.cols; c++) {
+        final wp = level.waypoints[r][c];
+        if (wp > 0) {
+          if (isRetro && wp > 1) continue;
+          final visited = path.any((p) => p.$1 == r && p.$2 == c);
+          if (hideWaypoints && !visited) continue;
+          final center = _ctr(r, c);
+          if (visited) {
+            canvas.drawCircle(center, cellW * 0.28, Paint()..color = pathColor..style = PaintingStyle.fill);
+            final tp = TextPainter(
+              text: TextSpan(
+                text: '$wp',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: cellW * 0.26,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: isRetro ? 'Courier' : null,
+                ),
+              ),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
+          } else {
+            canvas.drawCircle(center, cellW * 0.28, Paint()..color = pathColor..style = PaintingStyle.stroke..strokeWidth = 2.5);
+            final tp = TextPainter(
+              text: TextSpan(
+                text: '$wp',
+                style: TextStyle(
+                  color: pathColor,
+                  fontSize: cellW * 0.26,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: isRetro ? 'Courier' : null,
+                ),
+              ),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
+          }
+        }
+      }
+    }
+
+    // Draw ripple effect around the last point in path if path is not empty and ripple is active
+    if (path.isNotEmpty && rippleProgress < 1.0) {
+      final lastCell = path.last;
+      final center = _ctr(lastCell.$1, lastCell.$2);
+      final double startRadius = cellW * 0.35;
+      final double endRadius = cellW * 0.85;
+      final double currentRadius = startRadius + (endRadius - startRadius) * rippleProgress;
+      final double opacity = 0.6 * (1.0 - rippleProgress);
+      final ripplePaint = Paint()
+        ..color = pathColor.withOpacity(opacity)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.5;
+      canvas.drawCircle(center, currentRadius, ripplePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ZipPainter old) =>
+      old.path.length != path.length ||
+      old.won != won ||
+      old.gridColor != gridColor ||
+      old.fillColor != fillColor ||
+      old.cellBgColor != cellBgColor ||
+      old.pathColor != pathColor ||
+      old.visitedWpColor != visitedWpColor ||
+      old.modifierType != modifierType;
+}

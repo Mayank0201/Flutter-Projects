@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light Mode (Muji / NYT Games) -->
+    <color name="widget_bg">#F7F4EE</color>
+    <color name="widget_card_bg">#EFEAE2</color>
+    <color name="widget_text_primary">#2C2C2C</color>
+    <color name="widget_text_secondary">#6B6B6B</color>
+    <color name="widget_accent">#7D8C6D</color>
+    <color name="widget_border">#E0DCD3</color>
+    <color name="launch_background">#F5F4F0</color>
+    <color name="ic_launcher_background">#F5F4F0</color>
+</resources>

@@ -5,17 +5,18 @@ import'package:shared_preferences/shared_preferences.dart';
 import'../../../utils/rules_helper.dart';
 import'../../../theme/app_theme.dart';
 import'../../../utils/hint_manager.dart';
-
+import'../../../utils/audio_manager.dart';
+import'../../../widgets/challenge_cleared_overlay.dart';
 // Chimp Test: numbers appear, tap 1 to hide them, then tap in order from memory.
 // Grid and number count grow each level.
 
-class ChimpScreen extends StatefulWidget {
-  const ChimpScreen({super.key});
+class ChimpTestScreen extends StatefulWidget {
+  const ChimpTestScreen({super.key});
   @override
-  State<ChimpScreen> createState() => _ChimpScreenState();
+  State<ChimpTestScreen> createState() => _ChimpTestScreenState();
 }
 
-class _ChimpScreenState extends State<ChimpScreen> {
+class _ChimpTestScreenState extends State<ChimpTestScreen> {
   // Level config: (gridSize, numCount)
   static const List<(int, int)> _levels = [
     (3, 4), (3, 5), (3, 6),
@@ -41,6 +42,11 @@ class _ChimpScreenState extends State<ChimpScreen> {
   bool _failed = false;
   final Set<(int, int)> _glowingCells = {};
 
+  bool _playDailyMode = false;
+  String _dailyModifierType = '';
+  int _correctTapCount = 0;
+  bool _chaosShuffleDone = false;
+
   bool _isHintShowing = false;
   int _hintCount = 0;
 
@@ -54,7 +60,14 @@ class _ChimpScreenState extends State<ChimpScreen> {
   Future<void> _loadPersistedLevel() async {
     _hintCount = await HintManager.getHints('chimp');
     final prefs = await SharedPreferences.getInstance();
+    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    if (_playDailyMode) {
+      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+    } else {
+      _dailyModifierType = '';
+    }
     final savedLevel = prefs.getInt('level_chimp') ?? 0;
+
     if (mounted) {
       setState(() {
         _levelIndex = savedLevel;
@@ -64,6 +77,7 @@ class _ChimpScreenState extends State<ChimpScreen> {
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
+    if (_playDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('level_chimp', lvl);
     final earned = await HintManager.onLevelCleared('chimp');
@@ -101,12 +115,26 @@ class _ChimpScreenState extends State<ChimpScreen> {
     });
   }
 
+  (int, int) _getChimpConfig(int index) {
+    if (index < _levels.length) {
+      return _levels[index];
+    }
+    final extra = index - _levels.length;
+    final gridSize = (9 + extra ~/ 5).clamp(9, 12);
+    final maxCells = gridSize * gridSize;
+    final numCount = (60 + extra * 2).clamp(60, (maxCells * 0.75).toInt());
+    return (gridSize, numCount);
+  }
+
   void _loadLevel() {
-    final cfg = _levels[_levelIndex % _levels.length];
+    final cfg = _getChimpConfig(_levelIndex);
     _gridSize = cfg.$1; _n = cfg.$2;
     _positions = _randomPositions();
     _started = false;
     _nextToTap = 1; _won = false; _failed = false;
+    _correctTapCount = 0;
+    _chaosShuffleDone = false;
+    _glowingCells.clear();
   }
 
   Map<int,(int,int)> _randomPositions() {
@@ -141,25 +169,99 @@ class _ChimpScreenState extends State<ChimpScreen> {
       }
     });
 
-    if (num == null) { if (_started) { setState(() => _failed = true); } return; }
+    if (num == null) {
+      if (_started) {
+        AudioManager.playFail();
+        setState(() => _failed = true);
+      }
+      return;
+    }
 
     if (!_started && num == 1) {
       // First tap of 1: hide all numbers except already-tapped
-      setState(() { _started = true; _nextToTap = 2; });
+      AudioManager.playClick();
+      setState(() {
+        _started = true;
+        _nextToTap = 2;
+        _correctTapCount = 1;
+        _applyDailyPositionModifier();
+      });
       return;
     }
-    if (!_started) { setState(() => _failed = true); return; } // must tap 1 first
+    if (!_started) {
+      AudioManager.playFail();
+      setState(() => _failed = true);
+      return;
+    } // must tap 1 first
 
     if (num == _nextToTap) {
       setState(() {
         _nextToTap++;
+        _correctTapCount++;
         if (_nextToTap > _n) {
           _won = true;
-          _savePersistedLevel(_levelIndex);
+          AudioManager.playSuccess();
+          _savePersistedLevel(_levelIndex + 1);
+        } else {
+          _applyDailyPositionModifier();
+          AudioManager.playClick();
         }
       });
     } else {
+      AudioManager.playFail();
       setState(() => _failed = true);
+    }
+  }
+
+  void _applyDailyPositionModifier() {
+    if (!_playDailyMode) return;
+    if (_dailyModifierType == 'chaos' &&
+        _correctTapCount >= 3 &&
+        !_chaosShuffleDone) {
+      _shuffleUntappedNumbers();
+      _chaosShuffleDone = true;
+    } else if (_dailyModifierType == 'gravity') {
+      _sinkUntappedNumbers();
+    }
+  }
+
+  void _shuffleUntappedNumbers() {
+    final rng = Random();
+    final remainingNumbers = _positions.keys
+        .where((num) => num >= _nextToTap)
+        .toList()
+      ..shuffle(rng);
+    final remainingCells = _positions.entries
+        .where((entry) => entry.key >= _nextToTap)
+        .map((entry) => entry.value)
+        .toList()
+      ..shuffle(rng);
+
+    for (int i = 0; i < remainingNumbers.length; i++) {
+      _positions[remainingNumbers[i]] = remainingCells[i];
+    }
+  }
+
+  void _sinkUntappedNumbers() {
+    final occupiedByTapped = _positions.entries
+        .where((entry) => entry.key < _nextToTap)
+        .map((entry) => entry.value)
+        .toSet();
+    final remaining = _positions.entries
+        .where((entry) => entry.key >= _nextToTap)
+        .toList()
+      ..sort((a, b) => b.value.$1.compareTo(a.value.$1));
+
+    final occupied = <(int, int)>{...occupiedByTapped};
+    for (final entry in remaining) {
+      var row = entry.value.$1;
+      final col = entry.value.$2;
+      while (row + 1 < _gridSize && !occupied.contains((row + 1, col))) {
+        row++;
+      }
+      final newPos = (row, col);
+      _positions[entry.key] = newPos;
+      occupied.add(newPos);
     }
   }
 
@@ -172,10 +274,15 @@ class _ChimpScreenState extends State<ChimpScreen> {
   }
 
   void _nextLevel() {
+    if (!_won) return;
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
+
     setState(() {
-      _levelIndex = (_levelIndex + 1) % _levels.length;
+      _levelIndex = _levelIndex + 1;
       _loadLevel();
-      _savePersistedLevel(_levelIndex);
     });
   }
 
@@ -216,91 +323,156 @@ class _ChimpScreenState extends State<ChimpScreen> {
           ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
           Padding(padding: const EdgeInsets.only(right: 12),
-            child: Center(child: Text('Level ${_levelIndex + 1}', style: GoogleFonts.outfit(color: AppTheme.patchesTeal, fontSize: context.scale(13))))),
+            child: Center(child: Text(_playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}', style: AppTheme.numberStyle(color: AppTheme.patchesTeal, fontSize: context.scale(13))))),
         ],
       ),
-      body: SafeArea(
-        child: LayoutBuilder(builder: (ctx, constraints) {
-          final available = constraints.maxWidth - 40;
-          final cellSize = available / _gridSize;
-          // Clamp cell size so grid doesn't overflow vertically
-          final maxCellH = (constraints.maxHeight - 130) / _gridSize;
-          final cs = min(cellSize, maxCellH);
-          final gridW = cs * _gridSize;
+      body: Stack(
+        children: [
+          SafeArea(
+            child: LayoutBuilder(builder: (ctx, constraints) {
+              final available = constraints.maxWidth - 40;
+              final cellSize = available / _gridSize;
+              // Clamp cell size so grid doesn't overflow vertically
+              final maxCellH = (constraints.maxHeight - 130) / _gridSize;
+              final cs = min(cellSize, maxCellH);
+              final gridW = cs * _gridSize;
 
-          return Center(
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Status
-                  if (!_started && !_won && !_failed)
-                    Text('Memorize 1 → $_n, then tap 1 to begin',
-                      style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center)
-                  else if (_started && !_won && !_failed)
-                    Text('Tap 1 → $_n in order',
-                      style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)))
-                  else
-                    Text(_won ?'✓  Level ${_levelIndex+1} cleared!':'✗  Wrong! Try again.',
-                      style: GoogleFonts.outfit(fontSize: context.scale(17), fontWeight: FontWeight.w700,
-                        color: _won ? AppTheme.patchesTeal : Colors.redAccent)),
-                  const SizedBox(height: 16),
-                  // Grid
-                  SizedBox(
-                    width: gridW,
-                    height: cs * _gridSize,
-                    child: Column(children: List.generate(_gridSize, (r) =>
-                      Row(children: List.generate(_gridSize, (c) {
-                        final num = _numberAt(r, c);
-                        final visible = _isCellVisible(r, c);
-                        final isTapped = num != null && num < _nextToTap && _started;
-                        final isHintHighlighted = _isHintShowing && num == _nextToTap;
-                        final isGlowing = _glowingCells.contains((r, c));
-                        return GestureDetector(
-                          onTap: () => _onTap(r, c),
-                          child: Container(
-                            width: cs - 6, height: cs - 6, margin: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              color: isTapped
-                                  ? Colors.transparent
-                                  : (isGlowing
-                                      ? AppTheme.patchesTeal.withAlpha(80)
-                                      : (isHintHighlighted ? Colors.amber.withOpacity(0.2) : context.bgCard)),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isGlowing
-                                    ? AppTheme.patchesTeal
-                                    : (isHintHighlighted
-                                        ? Colors.amber
-                                        : (isTapped
-                                            ? context.bgCard.withOpacity(0.1)
-                                            : context.textMuted.withAlpha(75))),
-                                width: (isHintHighlighted || isGlowing) ? 2.5 : 1.2,
-                              ),
-                              boxShadow: isGlowing
-                                  ? [BoxShadow(color: AppTheme.patchesTeal.withAlpha(120), blurRadius: 10, spreadRadius: 1)]
-                                  : (isTapped ? null : AppTheme.cardShadow),
-                            ),
-                            child: Center(child: visible && num != null
-                              ? Text('$num', style: GoogleFonts.outfit(fontSize: cs * 0.36, fontWeight: FontWeight.w800,
-                                  color: AppTheme.patchesTeal))
-                              : null),
-                          ),
-                        );
-                      })),
-                    )),
+              return Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Status
+                      if (!_started && !_won && !_failed)
+                        Text('Memorize 1 → $_n, then tap 1 to begin',
+                          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center)
+                      else if (_started && !_won && !_failed)
+                        Text('Tap 1 → $_n in order',
+                          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)))
+                      else
+                        Text(_won ? (_playDailyMode ? '✓  Cleared!' : '✓  Level ${_levelIndex+1} cleared!') : '✗  Wrong! Try again.',
+                          style: GoogleFonts.outfit(fontSize: context.scale(17), fontWeight: FontWeight.w700,
+                            color: _won ? AppTheme.patchesTeal : Colors.redAccent)),
+                      const SizedBox(height: 16),
+                      // Grid
+                      SizedBox(
+                        width: gridW,
+                        height: cs * _gridSize,
+                        child: Stack(
+                          children: [
+                            // Background Grid
+                            ...List.generate(_gridSize, (r) =>
+                              List.generate(_gridSize, (c) {
+                                return Positioned(
+                                  left: c * cs,
+                                  top: r * cs,
+                                  width: cs,
+                                  height: cs,
+                                  child: Container(
+                                    margin: const EdgeInsets.all(3),
+                                    decoration: BoxDecoration(
+                                      color: context.bgCard,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: context.textMuted.withAlpha(75),
+                                        width: 1.2,
+                                      ),
+                                      boxShadow: AppTheme.cardShadow,
+                                    ),
+                                  ),
+                                );
+                              })
+                            ).expand((x) => x).toList(),
+                            // Number Cells (Animated)
+                            ..._positions.entries.map((entry) {
+                              final num = entry.key;
+                              final r = entry.value.$1;
+                              final c = entry.value.$2;
+                              final visible = _isCellVisible(r, c);
+                              final isTapped = num < _nextToTap && _started;
+                              final isHintHighlighted = _isHintShowing && num == _nextToTap;
+                              final isGlowing = _glowingCells.contains((r, c));
+
+                              return AnimatedPositioned(
+                                key: ValueKey('patch_$num'),
+                                duration: const Duration(milliseconds: 800),
+                                curve: Curves.fastOutSlowIn,
+                                left: c * cs,
+                                top: r * cs,
+                                width: cs,
+                                height: cs,
+                                child: GestureDetector(
+                                  onTap: () => _onTap(r, c),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 150),
+                                    width: cs - 6,
+                                    height: cs - 6,
+                                    margin: const EdgeInsets.all(3),
+                                    decoration: BoxDecoration(
+                                      color: isTapped
+                                          ? Colors.transparent
+                                          : (isGlowing
+                                              ? AppTheme.patchesTeal.withAlpha(80)
+                                              : (isHintHighlighted ? Colors.amber.withOpacity(0.2) : context.bgCard)),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: isGlowing
+                                            ? AppTheme.patchesTeal
+                                            : (isHintHighlighted
+                                                ? Colors.amber
+                                                : (isTapped
+                                                    ? Colors.transparent
+                                                    : context.textMuted.withAlpha(75))),
+                                        width: (isHintHighlighted || isGlowing) ? 2.5 : 1.2,
+                                      ),
+                                      boxShadow: isGlowing
+                                          ? [BoxShadow(color: AppTheme.patchesTeal.withAlpha(120), blurRadius: 10, spreadRadius: 1)]
+                                          : (isTapped ? null : AppTheme.cardShadow),
+                                    ),
+                                    child: Center(
+                                      child: AnimatedSwitcher(
+                                        duration: const Duration(milliseconds: 150),
+                                        transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+                                        child: visible && !isTapped
+                                            ? Text(
+                                                '$num',
+                                                key: ValueKey('num_$num'),
+                                                style: GoogleFonts.outfit(
+                                                  fontSize: cs * 0.36,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppTheme.patchesTeal,
+                                                ),
+                                              )
+                                            : const SizedBox(key: ValueKey('empty')),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      if (_won && !_playDailyMode) TextButton(onPressed: _nextLevel,
+                        child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.patchesTeal, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
+                      if (_failed) TextButton(onPressed: _reset,
+                        child: Text('Retry', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
+                    ],
                   ),
-                  const SizedBox(height: 24),
-                  if (_won) TextButton(onPressed: _nextLevel,
-                    child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.patchesTeal, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
-                  if (_failed) TextButton(onPressed: _reset,
-                    child: Text('Retry', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
-                ],
-              ),
+                ),
+              );
+            }),
+          ),
+          if (_won && _playDailyMode)
+            ChallengeClearedOverlay(
+              accentColor: AppTheme.patchesTeal,
+              onComplete: () {
+                Navigator.pop(context, true);
+              },
             ),
-          );
-        }),
+        ],
       ),
     );
   }

@@ -1,10 +1,17 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import '../../../theme/settings_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../utils/rules_helper.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/audio_manager.dart';
+import '../../../widgets/auto_next_countdown.dart';
+import '../game_completed_screen.dart';
+import '../../../widgets/loss_overlay.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
 
 const List<String> _kGameWords = [
   // Easy (length 4-6)
@@ -35,11 +42,19 @@ class _HangmanScreenState extends State<HangmanScreen> {
   late String _word;
   late Set<String> _guessed;
   int _wrong = 0;
-  static const int _maxWrong = 6;
+  int get _maxWrong {
+    if (_playDailyMode && _dailyModifierType == 'whisper') return 3;
+    if (_levelIndex < 100) return 6;
+    if (_levelIndex < 200) return 5;
+    return 4;
+  }
   bool _gameOver = false;
   bool _won = false;
 
   int _hintCount = 0;
+  bool _playDailyMode = false;
+  String _dailyModifierType = '';
+  String _failedWord = '';
 
   @override
   void initState() {
@@ -53,13 +68,110 @@ class _HangmanScreenState extends State<HangmanScreen> {
   Future<void> _initLevel() async {
     _hintCount = await HintManager.getHints('hangman');
     final prefs = await SharedPreferences.getInstance();
+    _failedWord = prefs.getString('failed_hangman_word') ?? '';
+    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    if (_playDailyMode) {
+      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+    }
+
     final savedLevel = prefs.getInt('level_hangman') ?? 0;
+    if (savedLevel >= _kGameWords.length && !_playDailyMode) {
+      if (mounted) {
+        GameCompletedScreen.show(
+          context,
+          gameName: 'Hangman',
+          prefKey: 'level_hangman',
+          routeName: '/hangman',
+        );
+      }
+      return;
+    }
     if (mounted) {
       setState(() {
-        _levelIndex = savedLevel % _kGameWords.length;
+        _levelIndex = savedLevel;
         _loadLevel(prefs);
       });
     }
+
+    if (_playDailyMode) {
+      Future.delayed(Duration.zero, () async {
+        if (!mounted) return;
+        final savedStateStr = prefs.getString('daily_hangman_state');
+        if (savedStateStr != null) {
+          try {
+            final data = jsonDecode(savedStateStr);
+            if (data['levelIndex'] == _levelIndex) {
+              final continueGame = await showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: context.bgCard,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(color: context.textMuted.withAlpha(40)),
+                  ),
+                  title: Text(
+                    'Continue Game?',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
+                  ),
+                  content: Text(
+                    'You have an ongoing game. Do you want to continue?',
+                    style: GoogleFonts.outfit(color: context.textSecondary),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: Text('New Game', style: GoogleFonts.outfit(color: context.textMuted)),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: Text('Continue', style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+                    ),
+                  ],
+                ),
+              );
+              if (continueGame == true && mounted) {
+                setState(() {
+                  _word = data['word'];
+                  _guessed = List<String>.from(data['guessed']).toSet();
+                  _wrong = data['wrong'];
+                  _won = data['won'];
+                  _gameOver = data['gameOver'];
+                });
+              } else {
+                await _clearDailyState();
+                if (mounted) {
+                  setState(() {
+                    _loadLevel(null, true);
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _saveDailyState() async {
+    if (!_playDailyMode || _won) return;
+    final prefs = await SharedPreferences.getInstance();
+    final state = {
+      'levelIndex': _levelIndex,
+      'word': _word,
+      'guessed': _guessed.toList(),
+      'wrong': _wrong,
+      'won': _won,
+      'gameOver': _gameOver,
+    };
+    await prefs.setString('daily_hangman_state', jsonEncode(state));
+  }
+
+  Future<void> _clearDailyState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('daily_hangman_state');
   }
 
   Future<void> _saveState() async {
@@ -81,6 +193,7 @@ class _HangmanScreenState extends State<HangmanScreen> {
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
+    if (_playDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('level_hangman', lvl);
     final earned = await HintManager.onLevelCleared('hangman');
@@ -137,15 +250,38 @@ class _HangmanScreenState extends State<HangmanScreen> {
       }
     }
     _word = _pickWordForLevel(_levelIndex);
+    if (_word == _failedWord) {
+      int attempts = 0;
+      while (_word == _failedWord && attempts < 10) {
+        _word = _pickWordForLevel(_levelIndex);
+        attempts++;
+      }
+    }
     _guessed = {};
     _wrong = 0;
     _gameOver = false;
     _won = false;
     _clearState();
+
+    if (_playDailyMode && _dailyModifierType == 'whisper') {
+      final vowels = {'A', 'E', 'I', 'O', 'U'};
+      for (final letter in _word.split('')) {
+        if (vowels.contains(letter)) {
+          _guessed.add(letter);
+        }
+      }
+    }
   }
 
   void _reset() {
     _clearState();
+    if (_playDailyMode) {
+      _clearDailyState();
+    }
+    if (_gameOver && !_won) {
+      _failedWord = _word;
+      SharedPreferences.getInstance().then((p) => p.setString('failed_hangman_word', _word));
+    }
     setState(() => _loadLevel(null, true));
   }
 
@@ -153,24 +289,58 @@ class _HangmanScreenState extends State<HangmanScreen> {
     if (_gameOver || _guessed.contains(letter)) return;
     setState(() {
       _guessed.add(letter);
-      if (!_word.contains(letter)) {
+      bool correct = _word.contains(letter);
+      if (!correct) {
         _wrong++;
-        if (_wrong >= _maxWrong) { _gameOver = true; }
+        if (_wrong >= _maxWrong) {
+          _gameOver = true;
+          _failedWord = _word;
+          SharedPreferences.getInstance().then((p) => p.setString('failed_hangman_word', _word));
+          AudioManager.playFail();
+        } else {
+          AudioManager.playFail();
+        }
       }
       if (_word.split('').every(_guessed.contains)) {
         _gameOver = true;
         _won = true;
-        _savePersistedLevel(_levelIndex);
+        AudioManager.playSuccess();
+        _savePersistedLevel(_levelIndex + 1);
+        _failedWord = '';
+        SharedPreferences.getInstance().then((p) => p.remove('failed_hangman_word'));
+      } else if (correct) {
+        AudioManager.playClick();
       }
       _saveState();
+
+      if (_playDailyMode) {
+        if (_won || _gameOver) {
+          _clearDailyState();
+        } else {
+          _saveDailyState();
+        }
+      }
     });
   }
 
   void _nextLevel() {
+    if (!_won) return;
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
+    if (_levelIndex >= _kGameWords.length - 1) {
+      GameCompletedScreen.show(
+        context,
+        gameName: 'Hangman',
+        prefKey: 'level_hangman',
+        routeName: '/hangman',
+      );
+      return;
+    }
     _clearState();
     setState(() {
-      _levelIndex = (_levelIndex + 1) % _kGameWords.length;
-      _savePersistedLevel(_levelIndex);
+      _levelIndex = _levelIndex + 1;
       _loadLevel(null, true);
     });
   }
@@ -214,56 +384,94 @@ class _HangmanScreenState extends State<HangmanScreen> {
           ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
           Padding(padding: const EdgeInsets.only(right: 12),
-            child: Center(child: Text('Level ${_levelIndex + 1}', style: GoogleFonts.outfit(color: accentColor, fontSize: context.scale(13))))),
+            child: Center(child: Text(_playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}', style: AppTheme.numberStyle(color: accentColor, fontSize: context.scale(13))))),
         ],
       ),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Drawing + word side-by-side — compact top section
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                    CustomPaint(size: Size(context.scale(130), context.scale(140)), painter: _HangmanPainter(_wrong, accentColor)),
-                    Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(displayWord, style: GoogleFonts.outfit(fontSize: context.scale(20), fontWeight: FontWeight.w700, color: context.textPrimary, letterSpacing: 3)),
-                      const SizedBox(height: 8),
-                      Row(children: List.generate(6, (i) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3),
-                        child: Icon(i < _wrong ? Icons.close : Icons.favorite_outline, size: 15,
-                          color: i < _wrong ? Colors.redAccent : context.textMuted),
-                      ))),
-                    ]),
-                  ]),
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+                child: Builder(
+                  builder: (context) {
+                    Widget hangmanContent = Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // Drawing + word side-by-side — compact top section
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                            CustomPaint(size: Size(context.scale(130), context.scale(140)), painter: _HangmanPainter(_wrong, accentColor)),
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                              Text(displayWord, style: GoogleFonts.outfit(fontSize: context.scale(20), fontWeight: FontWeight.w700, color: context.textPrimary, letterSpacing: 3)),
+                              const SizedBox(height: 8),
+                              Row(children: List.generate(_maxWrong, (i) => Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 3),
+                                child: Icon(i < _wrong ? Icons.close : Icons.favorite_outline, size: 15,
+                                  color: i < _wrong ? Colors.redAccent : context.textMuted),
+                              ))),
+                            ]),
+                          ]),
+                        ),
+                        if (_gameOver && _won && !_playDailyMode) ...[
+                          Text(
+                            'Correct! The word was $_word',
+                            style: GoogleFonts.outfit(fontSize: context.scale(15), fontWeight: FontWeight.w700,
+                              color: accentColor),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          AutoNextCountdown(
+                            onNext: _nextLevel,
+                            accentColor: accentColor,
+                          ),
+                        ],
+                        const SizedBox(height: 4),
+                        // Keyboard directly below
+                        if (!_gameOver) _buildKeyboard(context, accentColor),
+                        const SizedBox(height: 8),
+                      ],
+                    );
+
+                    if (_playDailyMode && _dailyModifierType == 'mirror') {
+                      hangmanContent = Transform(
+                        transform: Matrix4.identity()..scale(-1.0, 1.0),
+                        alignment: Alignment.center,
+                        child: hangmanContent,
+                      );
+                    }
+                    return hangmanContent;
+                  },
                 ),
-                if (_gameOver) ...[
-                  Text(
-                    _won ? 'Correct! The word was $_word' : 'The word was: $_word',
-                    style: GoogleFonts.outfit(fontSize: context.scale(15), fontWeight: FontWeight.w700,
-                      color: _won ? accentColor : Colors.redAccent),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  if (_won)
-                    TextButton(onPressed: _nextLevel,
-                      child: Text('Next Level →', style: GoogleFonts.outfit(color: accentColor, fontWeight: FontWeight.w700, fontSize: context.scale(15))))
-                  else
-                    TextButton(onPressed: _reset,
-                      child: Text('Try Again', style: GoogleFonts.outfit(color: accentColor, fontWeight: FontWeight.w700, fontSize: context.scale(15)))),
-                ],
-                const SizedBox(height: 4),
-                // Keyboard directly below
-                if (!_gameOver) _buildKeyboard(context, accentColor),
-                const SizedBox(height: 8),
-              ],
+              ),
             ),
-          ),
+            if (_gameOver && _won && _playDailyMode)
+              Positioned.fill(
+                child: ChallengeClearedOverlay(
+                  accentColor: accentColor,
+                  onComplete: () {
+                    Navigator.pop(context, true);
+                  },
+                ),
+              ),
+          ],
         ),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: _gameOver && !_won
+          ? LossOverlay(
+              onTryAgain: _reset,
+              subtitle: 'Failed on level ${_levelIndex + 1}.',
+              accentColor: accentColor,
+              extraContent: [
+                const SizedBox(height: 12),
+                Text('The word was:', style: GoogleFonts.outfit(fontSize: 13, color: context.textMuted)),
+                const SizedBox(height: 4),
+                Text(_word, style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: context.textPrimary, letterSpacing: 2)),
+              ],
+            )
+          : null,
     );
   }
 

@@ -24,7 +24,7 @@ class RulesHelper {
     
 'wordbuilder':'• Form words using the provided letters.\n\n• Each word must use at least 3 letters.\n\n• Form as many words as you can to hit the target count.',
     
-'memory':'• Flip cards to find matching pairs.\n\n• Memorize card positions to solve the grid in the fewest moves.',
+'memory':'• Tap on a free tile to move it to the tray.\n\n• A tile is free if it has no tile on top, and has at least one free side (left or right).\n\n• Matching pairs in the tray are automatically removed.\n\n• Clear the board to win. Do not let the tray fill up!',
     
 'spellingbee':'• Construct words using letters from the honeycomb grid.\n\n• Every word must contain the center letter at least once.',
     
@@ -32,13 +32,19 @@ class RulesHelper {
     
 'wordsearch':'• Find the target words hidden inside the grid.\n\n• Words can run horizontally, vertically, or diagonally.',
     
-'twentyfortyeight':'• Swipe to slide tiles across the grid.\n\n• Same-valued tiles merge into one when they collide.\n\n• Merge tiles to hit the level target score within move limits.',
+'minesweeper':'• Locate and flag all hidden mines on the grid without detonating them.\n\n• Tap a cell to reveal it. If it contains a mine, you explode and lose!\n\n• If a cell is safe, it reveals a number showing how many mines are adjacent to it.\n\n• Long-press or toggle Flag mode to place a flag on suspected mine cells.\n\n• Reveal all safe cells to clear the level. Grid size and mines increase at higher levels.',
     
 'reaction':'• Tap the screen as fast as you can when the red background turns green.\n\n• Avoid tapping too early!',
     
 'numbermemory':'• Memorize the sequence of digits shown on the screen.\n\n• Recall and submit the correct number.\n\n• The sequence gets 1 digit longer each round.',
     
 'sequence':'• Watch the pattern of flashing tiles.\n\n• Tap the tiles in the exact same sequence.\n\n• Each round adds one more flash.',
+    
+'oddcolor':'• Find the single grid cell that has a slightly different color shade.\n\n• The game gets progressively harder with larger grids and subtle color differences.\n\n• Tap correctly to advance; if you tap the wrong cell, a new color grid with the same difficulty will form.',
+    
+'hue':'• Arrange the scrambled color tiles to form a continuous color gradient.\n\n• Corner tiles marked with a black dot are locked in place and cannot be moved.\n\n• Drag and swap tiles to complete the spectrum.',
+    
+'nonogram':'• Fill in grid cells to match the row and column number clues.\n\n• Each number in a clue represents a group of consecutive filled cells (e.g. "1 2" means a group of 1 cell, then at least one empty space, then a group of 2 cells).\n\n• Switch between Paint mode (to fill cells) and X mode (to mark cells that must be empty).\n\n• The game auto-checks when the correct cells are filled.',
   };
 
   static void showRulesBottomSheet(BuildContext context, String gameId, String gameName) {

@@ -1,15 +1,21 @@
-import'package:flutter/material.dart';
-import'package:flutter/services.dart';
-import'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:home_widget/home_widget.dart';
+import '../utils/audio_manager.dart';
 
 class SettingsNotifier extends ChangeNotifier {
-  static const String _hapticKey ='settings_haptic';
-  static const String _soundKey ='settings_sound';
-  static const String _fontScaleKey ='settings_font_scale';
+  static const String _hapticKey = 'settings_haptic';
+  static const String _soundKey = 'settings_sound';
+  static const String _musicKey = 'settings_music';
+  static const String _fontScaleKey = 'settings_font_scale';
+  static const String _adsRemovedKey = 'settings_ads_removed';
 
   bool _hapticEnabled = true;
   bool _soundEnabled = true;
+  bool _musicEnabled = true;
   double _fontScale = 1.0; // 0.85, 1.0, 1.15
+  bool _adsRemoved = false;
 
   SettingsNotifier() {
     _load();
@@ -17,14 +23,29 @@ class SettingsNotifier extends ChangeNotifier {
 
   bool get hapticEnabled => _hapticEnabled;
   bool get soundEnabled => _soundEnabled;
+  bool get musicEnabled => _musicEnabled;
   double get fontScale => _fontScale;
+  bool get adsRemoved => _adsRemoved;
+  // Auto-next-level is now always on — no longer a user setting.
+  bool get autoNextLevel => true;
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     _hapticEnabled = prefs.getBool(_hapticKey) ?? true;
     _soundEnabled = prefs.getBool(_soundKey) ?? true;
+    _musicEnabled = prefs.getBool(_musicKey) ?? true;
     _fontScale = prefs.getDouble(_fontScaleKey) ?? 1.0;
+    _adsRemoved = prefs.getBool(_adsRemovedKey) ?? false;
     notifyListeners();
+    AudioManager.updateMusicSetting(_musicEnabled);
+    AudioManager.updateVolume();
+  }
+
+  Future<void> setAdsRemoved(bool val) async {
+    _adsRemoved = val;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_adsRemovedKey, val);
   }
 
   Future<void> setHaptic(bool val) async {
@@ -39,6 +60,17 @@ class SettingsNotifier extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_soundKey, val);
+    if (!val) {
+      AudioManager.stopSfx();
+    }
+  }
+
+  Future<void> setMusic(bool val) async {
+    _musicEnabled = val;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_musicKey, val);
+    AudioManager.updateMusicSetting(val);
   }
 
   Future<void> setFontScale(double val) async {
@@ -48,25 +80,50 @@ class SettingsNotifier extends ChangeNotifier {
     await prefs.setDouble(_fontScaleKey, val);
   }
 
-  /// Call this on correct answers, button taps, etc.
+  // Helper methods for haptics
   void hapticTap() {
-    if (_hapticEnabled) HapticFeedback.lightImpact();
+    if (_soundEnabled) HapticFeedback.lightImpact();
   }
 
   void hapticSuccess() {
-    if (_hapticEnabled) HapticFeedback.mediumImpact();
+    if (_soundEnabled) HapticFeedback.mediumImpact();
   }
 
   void hapticError() {
-    if (_hapticEnabled) HapticFeedback.heavyImpact();
+    if (_soundEnabled) HapticFeedback.heavyImpact();
   }
 
   Future<void> resetAllProgress() async {
     final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys().where((k) => k.startsWith('level_') || k.startsWith('daily_'));
+    final keys = prefs.getKeys().where((k) =>
+        k.startsWith('level_') ||
+        k.startsWith('daily_') ||
+        k.startsWith('cleared_count_') ||
+        k.startsWith('hints_') ||
+        k.startsWith('streak_') ||
+        k == 'global_level_cleared_count' ||
+        k == 'daily_streak' ||
+        k == 'daily_last_completed_date'
+    ).toList();
+
     for (final key in keys) {
       await prefs.remove(key);
     }
+
+    try {
+      await HomeWidget.saveWidgetData('daily_streak', 0);
+      await HomeWidget.saveWidgetData('total_solved', 0);
+      await HomeWidget.saveWidgetData('favorite_game', 'Categories');
+      await HomeWidget.saveWidgetData('todays_puzzle_name', 'Puzzle');
+      await HomeWidget.saveWidgetData('todays_puzzle_desc', 'Train your mind');
+      await HomeWidget.updateWidget(
+        name: 'StreakWidgetProvider',
+        androidName: 'StreakWidgetProvider',
+        qualifiedAndroidName: 'com.mayank.cogniq.StreakWidgetProvider',
+      );
+    } catch (_) {}
+
+    notifyListeners();
   }
 }
 

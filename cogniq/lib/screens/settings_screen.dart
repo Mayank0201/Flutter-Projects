@@ -1,9 +1,12 @@
-import'package:flutter/material.dart';
-import'package:google_fonts/google_fonts.dart';
-import'package:shared_preferences/shared_preferences.dart';
-import'../theme/app_theme.dart';
-import'../theme/settings_manager.dart';
-import'../theme/theme_manager.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../models/game_info.dart';
+import '../theme/app_theme.dart';
+import '../theme/settings_manager.dart';
+import '../theme/theme_manager.dart';
+import '../utils/ad_manager.dart';
+import '../utils/hint_manager.dart';
+import '../utils/purchase_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -73,31 +76,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
               const SizedBox(height: 24),
-              // Feedback Section
-              _SectionHeader(title:'Feedback'),
+              // Sound & Gameplay Section
+              _SectionHeader(title:'Sound & Gameplay'),
               const SizedBox(height: 8),
               _SettingsCard(
                 children: [
-                  _SettingsTile(
-                    icon: Icons.vibration,
-                    title:'Haptic Feedback',
-                    subtitle:'Vibrate on interactions',
-                    trailing: Switch.adaptive(
-                      value: settingsNotifier.hapticEnabled,
-                      onChanged: (val) => settingsNotifier.setHaptic(val),
-                      activeColor: AppTheme.wordleGreen,
-                    ),
-                  ),
-                  _Divider(),
+                  // Removed Mute All and Sound Level
                   _SettingsTile(
                     icon: Icons.volume_up_outlined,
-                    title:'Sound Effects',
+                    title: 'SFX (loss, win, and tile tapping)',
                     subtitle:'Tap and win sounds',
                     trailing: Switch.adaptive(
                       value: settingsNotifier.soundEnabled,
                       onChanged: (val) => settingsNotifier.setSound(val),
                       activeColor: AppTheme.wordleGreen,
                     ),
+                  ),
+                   _Divider(),
+                  _SettingsTile(
+                    icon: Icons.music_note_outlined,
+                    title: 'Bg music',
+                    subtitle:'Looping ambient background pads',
+                    trailing: Switch.adaptive(
+                      value: settingsNotifier.musicEnabled,
+                      onChanged: (val) => settingsNotifier.setMusic(val),
+                      activeColor: AppTheme.wordleGreen,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              // Premium & Ads Section
+              _SectionHeader(title: 'Premium & Ads'),
+              const SizedBox(height: 8),
+              _SettingsCard(
+                children: [
+                  _SettingsTile(
+                    icon: Icons.star_border_outlined,
+                    title: 'Go Premium',
+                    subtitle: settingsNotifier.adsRemoved
+                        ? 'Premium ad-free is active!'
+                        : 'Unlock lifetime ad-free experience',
+                    onTap: settingsNotifier.adsRemoved
+                        ? null
+                        : () {
+                            final messenger = ScaffoldMessenger.of(context);
+                            PurchaseManager.buyAdFree(
+                              onStoreUnavailable: () {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('App Store/Play Store is currently unavailable.', style: GoogleFonts.outfit()),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                              },
+                              onProductNotFound: () {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('Premium product ID not found. Verify console configuration.', style: GoogleFonts.outfit()),
+                                    backgroundColor: Colors.amber[800],
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                  ),
+                  _Divider(),
+                  _SettingsTile(
+                    icon: Icons.restore_outlined,
+                    title: 'Restore Purchase',
+                    subtitle: 'Restore premium status from App/Play store',
+                    onTap: () {
+                      final messenger = ScaffoldMessenger.of(context);
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text('Restoring purchases...', style: GoogleFonts.outfit()),
+                          backgroundColor: Colors.grey[800],
+                          duration: const Duration(seconds: 1),
+                        ),
+                      );
+                      PurchaseManager.restorePurchases(
+                        onRestoreFinished: (success) {
+                          if (success) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Restore process finished.', style: GoogleFonts.outfit()),
+                                backgroundColor: AppTheme.wordleGreen,
+                              ),
+                            );
+                          } else {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Restore failed or store unavailable.', style: GoogleFonts.outfit()),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                          }
+                        },
+                      );
+                    },
+                  ),
+                  _Divider(),
+                  _SettingsTile(
+                    icon: Icons.play_circle_outline,
+                    title: 'Earn Free Hints',
+                    subtitle: AdManager.isRewardedAdReady()
+                        ? 'Rewarded video ready'
+                        : 'Watch video to get +2 hints',
+                    onTap: () => _showEarnHintsDialog(context),
                   ),
                 ],
               ),
@@ -158,21 +244,136 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               await settingsNotifier.resetAllProgress();
               if (ctx.mounted) Navigator.pop(ctx);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('All progress has been reset', style: GoogleFonts.outfit()),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-              }
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text('All progress has been reset', style: GoogleFonts.outfit()),
+                  backgroundColor: Colors.redAccent,
+                ),
+              );
             },
             child: Text('Reset', style: GoogleFonts.outfit(color: Colors.redAccent, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
+    );
+  }
+
+  void _showEarnHintsDialog(BuildContext context) {
+    String selectedGameId = kAllGames.first.id;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Text(
+                'Earn Free Hints',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select the game you want to add 2 hints to:',
+                    style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: context.bgDark,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: context.textMuted.withAlpha(50)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedGameId,
+                        isExpanded: true,
+                        dropdownColor: context.bgCard,
+                        icon: Icon(Icons.arrow_drop_down, color: context.textSecondary),
+                        items: kAllGames.map((game) {
+                          return DropdownMenuItem<String>(
+                            value: game.id,
+                            child: Text(
+                              game.name,
+                              style: GoogleFonts.outfit(color: context.textPrimary, fontSize: 14),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              selectedGameId = val;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.outfit(color: context.textMuted, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.wordleGreen,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                   onPressed: () {
+                    Navigator.pop(ctx);
+                    final messenger = ScaffoldMessenger.of(context);
+                    AdManager.showRewardedAd(
+                      onRewardGranted: (amount) async {
+                        await HintManager.addHints(selectedGameId, amount);
+                        final gameName = kAllGames.firstWhere((g) => g.id == selectedGameId).name;
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Earned $amount hints for $gameName!',
+                              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                            ),
+                            backgroundColor: AppTheme.wordleGreen,
+                          ),
+                        );
+                      },
+                      onAdNotReady: () {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Rewarded ad is loading. Please try again in a moment.',
+                              style: GoogleFonts.outfit(),
+                            ),
+                            backgroundColor: Colors.amber[800],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                  child: Text(
+                    'Watch Video',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
