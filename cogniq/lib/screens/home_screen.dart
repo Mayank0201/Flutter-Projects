@@ -15,7 +15,11 @@ import '../utils/recently_played_manager.dart';
 import 'package:home_widget/home_widget.dart';
 import '../utils/daily_challenge_manager.dart';
 import 'daily_screen.dart';
+import 'beta/beta_games_screen.dart';
+import '../utils/challenge_reminder_helper.dart';
 // import 'daily_challenge_test_screen.dart';
+import '../utils/activity_tracker.dart';
+import '../utils/notification_manager.dart';
 
 const Map<String, IconData> _gameIcons = {
   'wordle': Icons.grid_4x4_outlined,
@@ -38,16 +42,15 @@ const Map<String, IconData> _gameIcons = {
   'sequence': Icons.pattern_outlined,
   'oddcolor': Icons.palette_outlined,
   'hue': Icons.color_lens_outlined,
+  'pattern_lock': Icons.lock_outline,
+  'colour_link': Icons.link_outlined,
+  'color_flood': Icons.water_drop_outlined,
+  'circuit_guide': Icons.electrical_services_outlined,
 };
 
 const Map<String, List<String>> _categories = {
   'All': [],
   'Word': [
-    'wordle',
-    'hangman',
-    'weaver',
-    'crossclimb',
-    'wordbuilder',
     'spellingbee',
     'wordsearch',
   ],
@@ -59,10 +62,16 @@ const Map<String, List<String>> _categories = {
     'minesweeper',
     'oddcolor',
     'hue',
-    'flagle',
     'nonogram',
+    'colour_link',
+    'color_flood',
+    'block_escape',
+    'circuit_guide',
   ],
-  'Memory': ['chimp', 'memory', 'sequence', 'numbermemory'],
+  'Memory': [
+    'chimp',
+    'pattern_lock',
+  ],
 };
 
 class HomeScreen extends StatefulWidget {
@@ -72,7 +81,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _ctrl;
   String _activeCategory = 'All';
   int _dailyStreak = 0;
@@ -88,6 +97,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -99,10 +109,124 @@ class _HomeScreenState extends State<HomeScreen>
 
     _loadDailyChallengeInfo();
     settingsNotifier.addListener(_onSettingsChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ChallengeReminderHelper.checkAndShowReminder(context);
+      NotificationManager.requestPermissions();
+      NotificationManager.updateDailyChallengeReminder();
+      NotificationManager.updateInactivityReminders();
+      NotificationManager.scheduleInstallTestNotification();
+      _checkAndShowDailyChallengePopup();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      NotificationManager.updateInactivityReminders();
+    }
+  }
+
+  Future<void> _checkAndShowDailyChallengePopup() async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool hasSeen = prefs.getBool('shown_daily_challenge_popup_v1') ?? false;
+    if (!hasSeen) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          final activeColor = AppTheme.dustyMauve;
+          return AlertDialog(
+            backgroundColor: context.bgCard,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: activeColor.withAlpha(20),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.bolt_rounded,
+                    color: activeColor,
+                    size: 40,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  "Today's Daily Challenge",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.outfit(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: context.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Check out today's daily challenges! Train your brain to keep your streak going.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    color: context.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+            actionsAlignment: MainAxisAlignment.spaceEvenly,
+            actionsPadding: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: Text(
+                  "Not Now",
+                  style: GoogleFonts.outfit(
+                    color: context.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  setState(() {
+                    _currentTab = 1;
+                    _loadDailyChallengeInfo();
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: activeColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+                child: Text(
+                  "Take Me There",
+                  style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+      await prefs.setBool('shown_daily_challenge_popup_v1', true);
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     settingsNotifier.removeListener(_onSettingsChanged);
     _ctrl.dispose();
@@ -264,12 +388,12 @@ class _HomeScreenState extends State<HomeScreen>
                       Icons.person,
                       'Profile',
                     ),
-                    /* _buildNavItem(
-                      4,
-                      Icons.bug_report_outlined,
-                      Icons.bug_report,
-                      'Beta',
-                    ), */
+                    // _buildNavItem(
+                    //   4,
+                    //   Icons.bug_report_outlined,
+                    //   Icons.bug_report,
+                    //   'Beta',
+                    // ),
                   ],
                 ),
               ],
@@ -349,7 +473,7 @@ class _HomeScreenState extends State<HomeScreen>
       case 3:
         return const _ProfileTab();
       case 4:
-        return const SizedBox.shrink();
+        return const BetaGamesScreen();
       default:
         return _buildHomeTab();
     }
@@ -363,7 +487,7 @@ class _HomeScreenState extends State<HomeScreen>
       final matchesSearch =
           _searchQuery.isEmpty ||
           g.name.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
+      return matchesCategory && matchesSearch && !g.isStashed;
     }).toList();
 
     return Column(
@@ -802,6 +926,7 @@ class _RecentGameCardState extends State<_RecentGameCard> {
         setState(() => _pressed = false);
         AudioManager.fadeOutMusic();
         RecentlyPlayedManager.addGame(widget.game.id);
+        ActivityTracker.trackGamePlay(widget.game.id);
         Navigator.pushNamed(context, widget.game.routeName).then((_) {
           AudioManager.fadeInMusic();
           widget.onRefresh();
@@ -929,6 +1054,7 @@ class _GameCardState extends State<_GameCard> {
         setState(() => _pressed = false);
         AudioManager.fadeOutMusic();
         RecentlyPlayedManager.addGame(widget.game.id);
+        ActivityTracker.trackGamePlay(widget.game.id);
         Navigator.pushNamed(context, widget.game.routeName).then((_) {
           AudioManager.fadeInMusic();
           _loadProgress();
@@ -1073,7 +1199,7 @@ class _StatsTabState extends State<_StatsTab> {
             boxShadow: AppTheme.cardShadow,
           ),
           child: Column(
-            children: kAllGames.map((g) {
+            children: kAllGames.where((g) => !g.isStashed).map((g) {
               final lvl = _levels[g.id] ?? 1;
               final strk = _streaks[g.id] ?? 0;
               final accent = AppTheme.accentFor(g.id);

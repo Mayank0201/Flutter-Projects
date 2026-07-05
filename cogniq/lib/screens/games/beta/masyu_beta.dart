@@ -13,6 +13,16 @@ class MasyuBetaScreen extends StatefulWidget {
 }
 
 class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
+  // Shared coordinate math: single source of truth for node centres.
+  // Board is 280x280, 4x4 nodes -> spacing 70, origin 35 keeps it centred
+  // (35 + 3*70 = 245, and 280 - 245 = 35). Hit detection AND painting both
+  // use _nodeCenter so drag segments align exactly to the visible dots/pearls.
+  static const double kOrigin = 35.0;
+  static const double kSpacing = 70.0;
+
+  Offset _nodeCenter(int idx) =>
+      Offset(kOrigin + (idx % 4) * kSpacing, kOrigin + (idx ~/ 4) * kSpacing);
+
   int _currentLevel = 0;
   bool _isSuccess = false;
   List<int> _grid = List.filled(16, 0); // 0: empty, 1: white, 2: black
@@ -84,9 +94,7 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
 
   int _getClosestCell(Offset localPos) {
     for (int idx = 0; idx < 16; idx++) {
-      double cx = 35.0 + (idx % 4) * 70.0;
-      double cy = 35.0 + (idx ~/ 4) * 70.0;
-      double dist = (localPos - Offset(cx, cy)).distance;
+      double dist = (localPos - _nodeCenter(idx)).distance;
       if (dist < 24.0) {
         return idx;
       }
@@ -101,9 +109,7 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
       settingsNotifier.hapticTap();
       _dragStartCell = idx;
       _dragPath = [idx];
-      double cx = 35.0 + (idx % 4) * 70.0;
-      double cy = 35.0 + (idx ~/ 4) * 70.0;
-      _dragPositionNotifier.value = Offset(cx, cy);
+      _dragPositionNotifier.value = _nodeCenter(idx);
     }
   }
 
@@ -145,10 +151,13 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
 
   void _onPanEnd(DragEndDetails d) {
     if (_isSuccess || _dragStartCell == -1) return;
+    // Silently finish the drag. Validation (and any toast) only happens when
+    // the player presses the Check button — never during a drag.
     _dragPositionNotifier.value = null;
     _dragStartCell = -1;
-    _dragPath = [];
-    _checkSolution();
+    setState(() {
+      _dragPath = [];
+    });
   }
 
   Future<void> _onLevelCleared() async {
@@ -427,27 +436,44 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
                                     size: const Size(280, 280),
                                     painter: MasyuPainter(
                                       edges: edges,
-                                      activeEdges: _activeEdges,
-                                      grid: _grid,
-                                      lineColor: Colors.amber.shade600,
-                                      dragPath: _dragPath,
+                                      // Pass copies so the painter's oldDelegate
+                                      // holds a distinct snapshot and shouldRepaint
+                                      // can compare content correctly.
+                                      activeEdges: Map<String, bool>.from(_activeEdges),
+                                      grid: List<int>.from(_grid),
+                                      lineColor: AppTheme.dustyMauve,
+                                      dragPath: List<int>.from(_dragPath),
                                       dragPositionNotifier: _dragPositionNotifier,
                                     ),
                                   ),
                                   for (int i = 0; i < 16; i++)
                                     Positioned(
-                                      left: 35.0 + (i % 4) * 70.0 - 15.0,
-                                      top: 35.0 + (i ~/ 4) * 70.0 - 15.0,
+                                      // 30x30 box centred on the node, then the
+                                      // pearl/dot is centred inside it -> exact
+                                      // alignment regardless of child size.
+                                      left: _nodeCenter(i).dx - 15.0,
+                                      top: _nodeCenter(i).dy - 15.0,
+                                      width: 30,
+                                      height: 30,
                                       child: IgnorePointer(
                                         child: Center(
                                           child: _grid[i] > 0
                                               ? Container(
                                                   width: 24, height: 24,
                                                   decoration: BoxDecoration(
-                                                    color: _grid[i] == 1 ? Colors.white : Colors.black,
+                                                    // White pearl = hollow ring;
+                                                    // black pearl = filled dark disc.
+                                                    color: _grid[i] == 1
+                                                        ? Colors.transparent
+                                                        : const Color(0xFF1A1714),
                                                     shape: BoxShape.circle,
-                                                    border: Border.all(color: Colors.grey.shade400, width: 2),
-                                                    boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 2, offset: Offset(0, 1))],
+                                                    border: Border.all(
+                                                      color: _grid[i] == 1
+                                                          ? Colors.white
+                                                          : Colors.white70,
+                                                      width: 3,
+                                                    ),
+                                                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(0, 1))],
                                                   ),
                                                 )
                                               : Container(
@@ -465,6 +491,22 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
                             ),
                           ),
                         ),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(top: 16),
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: context.textMuted.withAlpha(20)),
+                          ),
+                          child: Text(
+                            '💡 Rule Details:\n'
+                            '• Draw one single closed loop through cell centers.\n'
+                            '• The loop must turn on every black pearl and go straight through both its neighbors.\n'
+                            '• The loop must go straight through every white pearl and turn in at least one adjacent cell.',
+                            style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -475,6 +517,12 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: context.bgCard, foregroundColor: context.textPrimary),
                       onPressed: _loadLevel, icon: const Icon(Icons.refresh), label: const Text('Reset'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve, foregroundColor: Colors.white),
+                      onPressed: _isSuccess ? null : _checkSolution,
+                      icon: const Icon(Icons.check),
+                      label: const Text('Check'),
                     ),
                   ],
                 ),
@@ -528,16 +576,21 @@ class MasyuPainter extends CustomPainter {
     required this.dragPositionNotifier,
   }) : super(repaint: dragPositionNotifier);
 
+  // IDENTICAL to _MasyuBetaScreenState._nodeCenter so painted segments align
+  // exactly with hit detection and the pearl/dot widgets.
+  static const double kOrigin = 35.0;
+  static const double kSpacing = 70.0;
+  Offset _nodeCenter(int idx) =>
+      Offset(kOrigin + (idx % 4) * kSpacing, kOrigin + (idx ~/ 4) * kSpacing);
+
   @override
   void paint(Canvas canvas, Size size) {
     // 1. Draw Grid Lines Helper dots
     final dotPaint = Paint()
       ..color = Colors.grey.shade900
       ..strokeWidth = 1;
-    for (int i = 0; i < 4; i++) {
-      for (int j = 0; j < 4; j++) {
-        canvas.drawCircle(Offset(35.0 + j * 70.0, 35.0 + i * 70.0), 1.5, dotPaint);
-      }
+    for (int i = 0; i < 16; i++) {
+      canvas.drawCircle(_nodeCenter(i), 1.5, dotPaint);
     }
 
     // 2. Draw active loop edges
@@ -545,6 +598,7 @@ class MasyuPainter extends CustomPainter {
       ..color = lineColor
       ..strokeWidth = 6
       ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
     for (var edge in edges) {
@@ -553,35 +607,27 @@ class MasyuPainter extends CustomPainter {
       String key = u < v ? '$u-$v' : '$v-$u';
       bool isActive = activeEdges[key] ?? false;
       if (isActive) {
-        double x1 = 35.0 + (u % 4) * 70.0;
-        double y1 = 35.0 + (u ~/ 4) * 70.0;
-        double x2 = 35.0 + (v % 4) * 70.0;
-        double y2 = 35.0 + (v ~/ 4) * 70.0;
-        canvas.drawLine(Offset(x1, y1), Offset(x2, y2), paint);
+        canvas.drawLine(_nodeCenter(u), _nodeCenter(v), paint);
       }
     }
 
     // 3. Draw live line from last drag cell center to pointer
     final dragOffset = dragPositionNotifier.value;
     if (dragOffset != null && dragPath.isNotEmpty) {
-      int last = dragPath.last;
-      double x1 = 35.0 + (last % 4) * 70.0;
-      double y1 = 35.0 + (last ~/ 4) * 70.0;
       final livePaint = Paint()
         ..color = lineColor.withOpacity(0.5)
         ..strokeWidth = 6
         ..strokeCap = StrokeCap.round
         ..style = PaintingStyle.stroke;
-      canvas.drawLine(Offset(x1, y1), dragOffset, livePaint);
+      canvas.drawLine(_nodeCenter(dragPath.last), dragOffset, livePaint);
     }
   }
 
   @override
   bool shouldRepaint(covariant MasyuPainter oldDelegate) {
-    return oldDelegate.activeEdges != activeEdges ||
+    return !mapEquals(oldDelegate.activeEdges, activeEdges) ||
         !listEquals(oldDelegate.grid, grid) ||
         oldDelegate.lineColor != lineColor ||
-        !listEquals(oldDelegate.dragPath, dragPath) ||
-        oldDelegate.dragPositionNotifier != dragPositionNotifier;
+        !listEquals(oldDelegate.dragPath, dragPath);
   }
 }

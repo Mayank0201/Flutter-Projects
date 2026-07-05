@@ -109,6 +109,9 @@ class _BuzzerBetaScreenState extends State<BuzzerBetaScreen> with SingleTickerPr
             ));
             setState(() {
               _elapsed = 0.0;
+              // Reset the hint aid on a loss so retrying the same level
+              // starts with the hint OFF until pressed again.
+              _hintActive = false;
             });
           }
         }
@@ -189,6 +192,20 @@ class _BuzzerBetaScreenState extends State<BuzzerBetaScreen> with SingleTickerPr
                                 ),
                               ),
                             ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(top: 16),
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: context.textMuted.withAlpha(20)),
+                          ),
+                          child: Text(
+                            '💡 Tap to start the buzzer, then tap again to stop it after exactly the target seconds. Land within 0.35s of the target to clear the level — no visible timer, so count in your head. The Hint shows a live timer, but it turns OFF again after a loss.',
+                            style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ],

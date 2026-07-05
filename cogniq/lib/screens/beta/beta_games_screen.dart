@@ -11,21 +11,19 @@ import '../games/beta/kenken_beta.dart';
 import '../games/beta/sumplete_beta.dart';
 import '../games/beta/light_up_beta.dart';
 import '../games/beta/nurikabe_beta.dart';
-import '../games/beta/color_flood_beta.dart';
 import '../games/beta/cipher_decoder_beta.dart';
 import '../games/beta/chess_puzzles_beta.dart';
-import '../games/beta/numberlink_beta.dart';
 import '../games/beta/hashi_beta.dart';
 import '../games/beta/masyu_beta.dart';
 import '../games/beta/slitherlink_beta.dart';
-import '../games/beta/circuit_guide_beta.dart';
-import '../games/beta/rush_hour_beta.dart';
 import '../games/beta/sliding_tile_beta.dart';
 import '../games/beta/math_sprint_beta.dart';
 import '../games/beta/mental_math_blocks_beta.dart';
 import '../games/beta/map_memory_beta.dart';
-import '../games/beta/pattern_lock_beta.dart';
 import '../games/beta/buzzer_beta.dart';
+import '../games/categories/categories_screen.dart';
+import '../games/beta/rush_hour_beta.dart';
+import '../games/beta/word_salad_beta.dart';
 
 class BetaGameInfo {
   final String id;
@@ -150,14 +148,6 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         builder: const NurikabeBetaScreen(),
       ),
       BetaGameInfo(
-        id: 'colorflood',
-        name: 'Color Flood',
-        description: 'Flood fill the entire board to one color under a move limit.',
-        category: 'Logic Grids',
-        icon: Icons.brush_outlined,
-        builder: const ColorFloodBetaScreen(),
-      ),
-      BetaGameInfo(
         id: 'cipher',
         name: 'Cipher Decoder',
         description: 'Decode the hidden quote using a substitution cipher mapping.',
@@ -175,14 +165,6 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
       ),
 
       // --- PATHS & LOOPS ---
-      BetaGameInfo(
-        id: 'numberlink',
-        name: 'Numberlink',
-        description: 'Connect matching colored endpoints with non-crossing paths.',
-        category: 'Paths & Loops',
-        icon: Icons.gesture_outlined,
-        builder: const NumberlinkBetaScreen(),
-      ),
       BetaGameInfo(
         id: 'hashi',
         name: 'Hashi (Bridges)',
@@ -206,24 +188,6 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         category: 'Paths & Loops',
         icon: Icons.grid_3x3_outlined,
         builder: const SlitherlinkBetaScreen(),
-      ),
-      BetaGameInfo(
-        id: 'circuit',
-        name: 'Circuit Guide',
-        description: 'Rotate wire nodes to guide electricity from source to target.',
-        category: 'Paths & Loops',
-        icon: Icons.electrical_services_outlined,
-        builder: const CircuitGuideBetaScreen(),
-      ),
-
-      // --- MOVEMENT & SLIDING ---
-      BetaGameInfo(
-        id: 'rushhour',
-        name: 'Block Escape',
-        description: 'Slide blocking vehicles to let the target escape.',
-        category: 'Movement & Sliding',
-        icon: Icons.directions_car_outlined,
-        builder: const RushHourBetaScreen(),
       ),
       BetaGameInfo(
         id: 'slidingtile',
@@ -261,20 +225,36 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         builder: const MapMemoryBetaScreen(),
       ),
       BetaGameInfo(
-        id: 'patternlock',
-        name: 'Pattern Lock',
-        description: 'Recreate a shown sequence pattern on a dot grid from memory.',
-        category: 'Memory & Reflex',
-        icon: Icons.grid_goldenratio_outlined,
-        builder: const PatternLockBetaScreen(),
-      ),
-      BetaGameInfo(
         id: 'buzzer',
         name: 'Buzzer',
         description: 'Estimate the exact passage of target seconds.',
         category: 'Memory & Reflex',
         icon: Icons.notifications_active_outlined,
         builder: const BuzzerBetaScreen(),
+      ),
+      BetaGameInfo(
+        id: 'connections',
+        name: 'Categories',
+        description: 'Group 16 words into 4 categories.',
+        category: 'Word & Vocabulary',
+        icon: Icons.hub_outlined,
+        builder: const CategoriesScreen(),
+      ),
+      BetaGameInfo(
+        id: 'block_escape',
+        name: 'Block Escape',
+        description: 'Slide blocks to escape the red block.',
+        category: 'Movement & Sliding',
+        icon: Icons.door_sliding_outlined,
+        builder: const RushHourBetaScreen(),
+      ),
+      BetaGameInfo(
+        id: 'word_salad',
+        name: 'Word Salad',
+        description: 'Unscramble letters to find words in target categories.',
+        category: 'Word & Vocabulary',
+        icon: Icons.restaurant_menu_outlined,
+        builder: const WordSaladBetaScreen(),
       ),
     ];
   }
@@ -295,7 +275,7 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
       grouped.putIfAbsent(game.category, () => []).add(game);
     }
 
-    final categories = ['Logic Grids', 'Paths & Loops', 'Movement & Sliding', 'Math & Calculation', 'Memory & Reflex'];
+    final categories = ['Logic Grids', 'Paths & Loops', 'Movement & Sliding', 'Math & Calculation', 'Memory & Reflex', 'Word & Vocabulary'];
 
     return Scaffold(
       backgroundColor: context.bgDark,

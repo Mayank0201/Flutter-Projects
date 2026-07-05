@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/ad_manager.dart';
+import '../../../utils/audio_manager.dart';
 
 class RushHourBetaScreen extends StatefulWidget {
   const RushHourBetaScreen({super.key});
@@ -28,22 +32,28 @@ class Vehicle {
     required this.color,
   });
 
-  List<int> getOccupiedCells() {
+  List<int> getOccupiedCells(int gridSize) {
     List<int> cells = [];
     for (int i = 0; i < len; i++) {
       if (isVertical) {
-        cells.add((row + i) * 4 + col);
+        cells.add((row + i) * gridSize + col);
       } else {
-        cells.add(row * 4 + (col + i));
+        cells.add(row * gridSize + (col + i));
       }
     }
     return cells;
+  }
+
+  Color getDisplayColor() {
+    if (id == 'red') return Colors.redAccent;
+    return len == 2 ? Colors.green.shade400 : Colors.blue.shade400;
   }
 }
 
 class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
+  bool _playDailyMode = false;
   List<Vehicle> _vehicles = [];
 
   // Drag states
@@ -52,127 +62,218 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
   int _vehicleStartRow = 0;
   int _vehicleStartCol = 0;
 
+  int get _gridSize {
+    if (_currentLevel < 5) return 4;
+    if (_currentLevel < 10) return 5;
+    return 6;
+  }
+
+  int get _exitRow {
+    final size = _gridSize;
+    return size ~/ 2 - (size % 2 == 0 ? 1 : 0);
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadLevel();
+    _initLevelState();
+  }
+
+  Future<void> _initLevelState() async {
+    final prefs = await SharedPreferences.getInstance();
+    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    final savedLvl = prefs.getInt('level_block_escape') ?? 0;
+    if (mounted) {
+      setState(() {
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _loadLevel();
+      });
+    }
   }
 
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
-      if (_currentLevel == 0) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'h1', row: 3, col: 1, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 1) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'v2', row: 1, col: 3, len: 2, isVertical: true, color: Colors.orange),
-          Vehicle(id: 'h1', row: 3, col: 0, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 2) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'v2', row: 2, col: 0, len: 2, isVertical: true, color: Colors.orange),
-          Vehicle(id: 'h1', row: 3, col: 1, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 3) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.purple),
-          Vehicle(id: 'h1', row: 3, col: 1, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 4) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'v2', row: 2, col: 3, len: 2, isVertical: true, color: Colors.teal),
-          Vehicle(id: 'h1', row: 0, col: 0, len: 2, isVertical: false, color: Colors.orange),
-          Vehicle(id: 'h2', row: 3, col: 0, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 5) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'h1', row: 3, col: 1, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 6) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'v2', row: 1, col: 3, len: 2, isVertical: true, color: Colors.orange),
-          Vehicle(id: 'h1', row: 3, col: 0, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 7) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'v2', row: 2, col: 0, len: 2, isVertical: true, color: Colors.orange),
-          Vehicle(id: 'h1', row: 3, col: 1, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else if (_currentLevel == 8) {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.purple),
-          Vehicle(id: 'h1', row: 3, col: 1, len: 2, isVertical: false, color: Colors.green),
-        ];
-      } else {
-        _vehicles = [
-          Vehicle(id: 'red', row: 1, col: 0, len: 2, isVertical: false, color: Colors.red),
-          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.blue),
-          Vehicle(id: 'v2', row: 2, col: 3, len: 2, isVertical: true, color: Colors.teal),
-          Vehicle(id: 'h1', row: 0, col: 0, len: 2, isVertical: false, color: Colors.orange),
-          Vehicle(id: 'h2', row: 3, col: 0, len: 2, isVertical: false, color: Colors.green),
-        ];
-      }
+      _generateProceduralLevel();
     });
   }
 
-  bool _isCellEmpty(int r, int c, String currentVehicleId) {
-    if (r < 0 || r >= 4 || c < 0 || c >= 4) return false;
-    for (var v in _vehicles) {
-      if (v.id == currentVehicleId) continue;
-      for (int cell in v.getOccupiedCells()) {
-        if (cell == r * 4 + c) return false;
+  void _generateProceduralLevel() {
+    final size = _gridSize;
+    final er = _exitRow;
+    
+    // Seeded Random for consistent levels
+    final rng = Random(_currentLevel * 37 + 101);
+    
+    int minMoves = 2 + (_currentLevel ~/ 2);
+    minMoves = minMoves.clamp(2, 12);
+    
+    List<Vehicle>? bestVehicles;
+    int bestMoves = -1;
+
+    int attempts = 0;
+    final maxAttempts = _currentLevel < 15 ? 150 : 40;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      final List<Vehicle> testVehicles = [
+        Vehicle(id: 'red', row: er, col: 0, len: 2, isVertical: false, color: Colors.redAccent),
+      ];
+      
+      int vehicleCount = 2 + (size == 4 ? 2 : (size == 5 ? 4 : 6));
+      vehicleCount += rng.nextInt(2);
+
+      for (int i = 0; i < vehicleCount; i++) {
+        bool isVert = rng.nextBool();
+        int len = rng.nextDouble() > 0.8 ? 3 : 2;
+        
+        for (int tries = 0; tries < 30; tries++) {
+          int r = rng.nextInt(size);
+          int c = rng.nextInt(size);
+          
+          if (isVert) {
+            if (r + len > size) continue;
+          } else {
+            if (c + len > size) continue;
+            if (r == er) continue; // Don't block exit row
+          }
+          
+          final temp = Vehicle(id: 'v$i', row: r, col: c, len: len, isVertical: isVert, color: Colors.blue);
+          bool overlaps = false;
+          
+          for (var existing in testVehicles) {
+            final occupied1 = existing.getOccupiedCells(size);
+            final occupied2 = temp.getOccupiedCells(size);
+            if (occupied1.any((cell) => occupied2.contains(cell))) {
+              overlaps = true;
+              break;
+            }
+          }
+          
+          if (!overlaps) {
+            testVehicles.add(temp);
+            break;
+          }
+        }
+      }
+      
+      // Solve
+      int solutionMoves = _solve(testVehicles, size, er);
+      if (solutionMoves >= minMoves) {
+        _vehicles = testVehicles;
+        return;
+      }
+
+      if (solutionMoves > bestMoves) {
+        bestMoves = solutionMoves;
+        bestVehicles = testVehicles;
       }
     }
-    return true;
+    
+    // Fallback to the best solvable board generated during attempts
+    if (bestVehicles != null && bestMoves > 0) {
+      _vehicles = bestVehicles;
+      return;
+    }
+
+    // Hard fallback static level if no solvable layouts were generated
+    _vehicles = [
+      Vehicle(id: 'red', row: er, col: 0, len: 2, isVertical: false, color: Colors.redAccent),
+      Vehicle(id: 'v0', row: 0, col: 2, len: 2, isVertical: true, color: Colors.green),
+      if (size > 4) Vehicle(id: 'v1', row: er + 1, col: 1, len: 2, isVertical: false, color: Colors.blue),
+    ];
   }
 
-  // Check if path is empty between original column and target column
-  bool _canSlideToCol(Vehicle v, int targetCol) {
-    if (targetCol < 0 || targetCol + v.len > 4) return false;
-    int step = targetCol > v.col ? 1 : -1;
-    int curr = v.col;
-    while (curr != targetCol) {
-      curr += step;
-      // If moving right, check front of vehicle. If left, check back of vehicle
-      int checkCol = step == 1 ? curr + v.len - 1 : curr;
-      if (!_isCellEmpty(v.row, checkCol, v.id)) {
-        return false;
-      }
+  int _solve(List<Vehicle> initialVehicles, int size, int exitRow) {
+    String stateKey(List<Vehicle> list) {
+      return list.map((v) => "${v.row},${v.col}").join(";");
     }
-    return true;
-  }
 
-  // Check if path is empty between original row and target row
-  bool _canSlideToRow(Vehicle v, int targetRow) {
-    if (targetRow < 0 || targetRow + v.len > 4) return false;
-    int step = targetRow > v.row ? 1 : -1;
-    int curr = v.row;
-    while (curr != targetRow) {
-      curr += step;
-      int checkRow = step == 1 ? curr + v.len - 1 : curr;
-      if (!_isCellEmpty(checkRow, v.col, v.id)) {
-        return false;
+    bool isSolvedState(List<Vehicle> list) {
+      final red = list[0]; // Red is always at index 0
+      return red.col == size - red.len;
+    }
+
+    bool vehiclesOverlap(Vehicle a, Vehicle b) {
+      if (a.isVertical && b.isVertical) {
+        if (a.col != b.col) return false;
+        return a.row < b.row + b.len && b.row < a.row + a.len;
+      } else if (!a.isVertical && !b.isVertical) {
+        if (a.row != b.row) return false;
+        return a.col < b.col + b.len && b.col < a.col + a.len;
+      } else {
+        final vert = a.isVertical ? a : b;
+        final horiz = a.isVertical ? b : a;
+        return (vert.col >= horiz.col && vert.col < horiz.col + horiz.len) &&
+               (horiz.row >= vert.row && horiz.row < vert.row + vert.len);
       }
     }
-    return true;
+
+    final startKey = stateKey(initialVehicles);
+    final Set<String> visited = {startKey};
+    final List<(List<Vehicle>, int)> queue = [(initialVehicles, 0)];
+
+    int maxBfsAttempts = 3000; 
+    int bfsTries = 0;
+    int head = 0;
+
+    while (head < queue.length && bfsTries < maxBfsAttempts) {
+      bfsTries++;
+      final (current, moves) = queue[head++];
+
+      if (isSolvedState(current)) {
+        return moves;
+      }
+
+      for (int i = 0; i < current.length; i++) {
+        final v = current[i];
+        
+        final directions = [-1, 1];
+        for (int step in directions) {
+          int k = 1;
+          while (true) {
+            int newRow = v.isVertical ? v.row + step * k : v.row;
+            int newCol = v.isVertical ? v.col : v.col + step * k;
+
+            if (newRow < 0 || newRow + (v.isVertical ? v.len : 1) > size ||
+                newCol < 0 || newCol + (v.isVertical ? 1 : v.len) > size) {
+              break;
+            }
+
+            final nextVehicles = List<Vehicle>.generate(current.length, (idx) {
+              final x = current[idx];
+              if (idx == i) {
+                return Vehicle(id: x.id, row: newRow, col: newCol, len: x.len, isVertical: x.isVertical, color: x.color);
+              }
+              return x; // Reuse existing reference
+            });
+
+            bool overlaps = false;
+            final activeVehicle = nextVehicles[i];
+
+            for (int j = 0; j < nextVehicles.length; j++) {
+              if (i == j) continue;
+              if (vehiclesOverlap(activeVehicle, nextVehicles[j])) {
+                overlaps = true;
+                break;
+              }
+            }
+
+            if (overlaps) {
+              break; 
+            }
+
+            final nKey = stateKey(nextVehicles);
+            if (!visited.contains(nKey)) {
+              visited.add(nKey);
+              queue.add((nextVehicles, moves + 1));
+            }
+            k++;
+          }
+        }
+      }
+    }
+    return -1; // Unsolvable in BFS limits
   }
 
   void _onDragStart(DragStartDetails details, Vehicle v) {
@@ -183,100 +284,128 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
     _vehicleStartCol = v.col;
   }
 
-  void _onDragUpdate(DragUpdateDetails details, Vehicle v, double cellSize) {
+  void _onDragUpdate(DragUpdateDetails details, Vehicle v, double cs) {
     if (_isSuccess) return;
+    final size = _gridSize;
+
     double dx = details.globalPosition.dx - _dragStartX;
     double dy = details.globalPosition.dy - _dragStartY;
 
-    if (v.isVertical) {
-      int deltaRow = (dy / cellSize).round();
-      int targetRow = _vehicleStartRow + deltaRow;
-      targetRow = targetRow.clamp(0, 4 - v.len);
-      if (_canSlideToRow(v, targetRow)) {
-        if (v.row != targetRow) {
-          settingsNotifier.hapticTap();
-          setState(() {
-            v.row = targetRow;
-          });
+    setState(() {
+      if (v.isVertical) {
+        int cellDiff = (dy / cs).round();
+        int targetRow = (_vehicleStartRow + cellDiff).clamp(0, size - v.len);
+        if (_isMoveValid(v, targetRow, v.col)) {
+          v.row = targetRow;
+        }
+      } else {
+        int cellDiff = (dx / cs).round();
+        int maxCol = (v.id == 'red') ? size - v.len : size - v.len;
+        int targetCol = (_vehicleStartCol + cellDiff).clamp(0, maxCol);
+        if (_isMoveValid(v, v.row, targetCol)) {
+          v.col = targetCol;
         }
       }
-    } else {
-      int deltaCol = (dx / cellSize).round();
-      int targetCol = _vehicleStartCol + deltaCol;
-      targetCol = targetCol.clamp(0, 4 - v.len);
-      if (_canSlideToCol(v, targetCol)) {
-        if (v.col != targetCol) {
-          settingsNotifier.hapticTap();
-          setState(() {
-            v.col = targetCol;
-          });
-        }
+    });
+  }
+
+  bool _isMoveValid(Vehicle v, int tr, int tc) {
+    final size = _gridSize;
+    final temp = Vehicle(id: v.id, row: tr, col: tc, len: v.len, isVertical: v.isVertical, color: v.color);
+    final occupied = temp.getOccupiedCells(size);
+
+    for (var other in _vehicles) {
+      if (other.id == v.id) continue;
+      final otherOccupied = other.getOccupiedCells(size);
+      if (occupied.any((cell) => otherOccupied.contains(cell))) {
+        return false;
       }
     }
+    return true;
   }
 
   void _onDragEnd(Vehicle v) {
-    if (_isSuccess) return;
-    // Check win condition
-    final redCar = _vehicles.firstWhere((veh) => veh.id == 'red');
-    if (redCar.row == 1 && redCar.col == 2) {
-      _onLevelCleared();
-    }
-  }
+    final size = _gridSize;
 
-  void _showHint() {
     setState(() {
-      if (_currentLevel == 0 || _currentLevel == 5) {
-        _vehicles.firstWhere((v) => v.id == 'red').col = 2;
-        _vehicles.firstWhere((v) => v.id == 'v1').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'h1').col = 0;
-      } else if (_currentLevel == 1 || _currentLevel == 6) {
-        _vehicles.firstWhere((v) => v.id == 'red').col = 2;
-        _vehicles.firstWhere((v) => v.id == 'v1').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'v2').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'h1').col = 0;
-      } else if (_currentLevel == 2 || _currentLevel == 7) {
-        _vehicles.firstWhere((v) => v.id == 'red').col = 2;
-        _vehicles.firstWhere((v) => v.id == 'v1').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'v2').row = 0;
-        _vehicles.firstWhere((v) => v.id == 'h1').col = 0;
-      } else if (_currentLevel == 3 || _currentLevel == 8) {
-        _vehicles.firstWhere((v) => v.id == 'red').col = 2;
-        _vehicles.firstWhere((v) => v.id == 'v1').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'h1').col = 0;
-      } else {
-        _vehicles.firstWhere((v) => v.id == 'red').col = 2;
-        _vehicles.firstWhere((v) => v.id == 'v1').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'v2').row = 2;
-        _vehicles.firstWhere((v) => v.id == 'h1').col = 0;
-        _vehicles.firstWhere((v) => v.id == 'h2').col = 0;
+      if (v.id == 'red' && v.col == size - v.len) {
+        // Red block reached exit! Slide completely out of board
+        AudioManager.playClick();
+        _isSuccess = true;
+        _onLevelCleared();
       }
-      _onLevelCleared();
     });
   }
 
   Future<void> _onLevelCleared() async {
+    AudioManager.playSuccess();
+    settingsNotifier.hapticSuccess();
+
     final prefs = await SharedPreferences.getInstance();
-    int highest = prefs.getInt('beta_level_rushhour') ?? 0;
+    final key = 'level_block_escape';
+    int highest = prefs.getInt(key) ?? 0;
     if (_currentLevel + 1 > highest) {
-      await prefs.setInt('beta_level_rushhour', _currentLevel + 1);
+      await prefs.setInt(key, _currentLevel + 1);
     }
+
+    int newLevel = _currentLevel + 1;
+    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
+      AdManager.showInterstitialAd();
+    }
+
     setState(() => _isSuccess = true);
   }
 
   void _nextLevel() {
-    if (_currentLevel < 9) {
-      setState(() {
-        _currentLevel++;
-        _loadLevel();
-      });
-    } else {
-      Navigator.pop(context);
-    }
+    setState(() {
+      _currentLevel++;
+      _loadLevel();
+    });
+  }
+
+  void _showHint() {
+    settingsNotifier.hapticTap();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Hint: Move the long vertical blocks first to unlock the horizontal ones!'),
+    ));
+  }
+
+  void _showRules() {
+    settingsNotifier.hapticTap();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: context.textMuted.withAlpha(40)),
+        ),
+        title: Text(
+          'How to Play',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
+        ),
+        content: Text(
+          '• Slide blocks along their length.\n• Blocks cannot overlap or rotate.\n• Clear a path so the red block can exit on the right.',
+          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Got it',
+              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
+            ),
+          )
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = _gridSize;
+    final er = _exitRow;
+    
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
@@ -284,20 +413,34 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Rules',
+            onPressed: _showRules,
+          ),
+          IconButton(
             icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: Center(child: Text('Level ${_currentLevel + 1}/10', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),
+            child: Center(
+              child: Text(
+                'Level ${_currentLevel + 1}', 
+                style: AppTheme.numberStyle(
+                  color: AppTheme.dustyMauve, 
+                  fontSize: 14, 
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
         ],
       ),
       body: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
               children: [
                 Expanded(
@@ -305,27 +448,32 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Slide blocking vehicles out of the way. Slide the RED car to the right exit.', style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), textAlign: TextAlign.center),
+                        Text(
+                          'Slide blocks out of the way. Slide the RED block to the right exit.', 
+                          style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), 
+                          textAlign: TextAlign.center
+                        ),
                         const SizedBox(height: 24),
-                        // Layout container with exit indicator
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             RepaintBoundary(
                               child: Container(
                                 width: 240, height: 240,
-                                decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
+                                decoration: BoxDecoration(
+                                  color: context.bgCard, 
+                                  borderRadius: BorderRadius.circular(16), 
+                                  border: Border.all(color: context.textMuted.withAlpha(40)),
+                                ),
                                 child: LayoutBuilder(
                                   builder: (context, constraints) {
-                                    double cs = constraints.maxWidth / 4;
+                                    double cs = constraints.maxWidth / size;
                                     return Stack(
                                       children: [
-                                        // Grid lines background
-                                        for (int i = 1; i < 4; i++) ...[
-                                          Positioned(left: i * cs, top: 0, bottom: 0, child: Container(width: 1, color: Colors.grey.shade900)),
-                                          Positioned(top: i * cs, left: 0, right: 0, child: Container(height: 1, color: Colors.grey.shade900)),
+                                        for (int i = 1; i < size; i++) ...[
+                                          Positioned(left: i * cs, top: 0, bottom: 0, child: Container(width: 1, color: Colors.grey.shade900.withOpacity(0.3))),
+                                          Positioned(top: i * cs, left: 0, right: 0, child: Container(height: 1, color: Colors.grey.shade900.withOpacity(0.3))),
                                         ],
-                                        // Vehicles
                                         for (var v in _vehicles)
                                           Positioned(
                                             left: v.col * cs,
@@ -339,16 +487,9 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
                                               child: Container(
                                                 margin: const EdgeInsets.all(3),
                                                 decoration: BoxDecoration(
-                                                  color: v.color,
+                                                  color: v.getDisplayColor(),
                                                   borderRadius: BorderRadius.circular(12),
                                                   boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
-                                                ),
-                                                child: Center(
-                                                  child: Icon(
-                                                    v.id == 'red' ? Icons.star : Icons.directions_car,
-                                                    color: Colors.white,
-                                                    size: 24,
-                                                  ),
                                                 ),
                                               ),
                                             ),
@@ -359,59 +500,59 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
                                 ),
                               ),
                             ),
-                            // Exit gate arrow
                             Container(
                               width: 30, height: 240,
                               alignment: Alignment.center,
-                              child: const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.start,
                                 children: [
-                                  SizedBox(height: 60), // Skip row 0
-                                  Icon(Icons.arrow_forward, color: Colors.green, size: 24),
-                                  SizedBox(height: 120), // Skip rows 2 and 3
+                                  SizedBox(height: er * (240 / size) + (240 / size - 24) / 2),
+                                  const Icon(Icons.arrow_forward, color: Colors.green, size: 24),
                                 ],
                               ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 36),
                       ],
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: context.bgCard, foregroundColor: context.textPrimary),
-                      onPressed: _loadLevel, icon: const Icon(Icons.refresh), label: const Text('Reset'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (_isSuccess)
-            Container(
-              color: Colors.black.withOpacity(0.6),
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                if (!_isSuccess)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                      const SizedBox(height: 16),
-                      Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
-                      AutoNextCountdown(
-                        onNext: _nextLevel,
-                        accentColor: AppTheme.dustyMauve,
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.bgCard,
+                          foregroundColor: context.textPrimary,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: context.textMuted.withAlpha(40)),
+                          ),
+                        ),
+                        onPressed: _loadLevel,
+                        icon: const Icon(Icons.refresh),
+                        label: Text('Reset Board', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
-                ),
+                if (_isSuccess && !_playDailyMode)
+                  AutoNextCountdown(
+                    onNext: _nextLevel,
+                    accentColor: AppTheme.dustyMauve,
+                  ),
+              ],
+            ),
+          ),
+          if (_isSuccess && _playDailyMode)
+            Positioned.fill(
+              child: ChallengeClearedOverlay(
+                accentColor: AppTheme.dustyMauve,
+                onComplete: () {
+                  Navigator.pop(context, true);
+                },
               ),
             ),
         ],

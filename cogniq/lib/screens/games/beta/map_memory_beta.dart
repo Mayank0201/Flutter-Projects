@@ -140,6 +140,19 @@ class _MapMemoryBetaScreenState extends State<MapMemoryBetaScreen> {
                     ),
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(20)),
+                  ),
+                  child: Text(
+                    '💡 Rule Details:\n• Study the map and its labels briefly.\n• Then recall the correct location from memory.\n• Look for landmarks to anchor your memory.',
+                    style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                  ),
+                ),
               ],
             ),
           ),

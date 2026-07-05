@@ -262,7 +262,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showEarnHintsDialog(BuildContext context) {
-    String selectedGameId = kAllGames.first.id;
+    String selectedGameId = kAllGames.firstWhere((g) => !g.isStashed).id;
     showDialog(
       context: context,
       builder: (ctx) {
@@ -297,7 +297,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         isExpanded: true,
                         dropdownColor: context.bgCard,
                         icon: Icon(Icons.arrow_drop_down, color: context.textSecondary),
-                        items: kAllGames.map((game) {
+                        items: kAllGames.where((g) => !g.isStashed).map((game) {
                           return DropdownMenuItem<String>(
                             value: game.id,
                             child: Text(

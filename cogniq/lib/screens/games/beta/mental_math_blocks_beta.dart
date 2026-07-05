@@ -154,6 +154,20 @@ class _MentalMathBlocksBetaScreenState extends State<MentalMathBlocksBetaScreen>
                   ),
                 ),
 
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(20)),
+                  ),
+                  child: Text(
+                    '💡 Rule Details:\n• Blocks with numbers fall down the board.\n• Combine them to reach the target value.\n• Act fast before the blocks pile up.',
+                    style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [

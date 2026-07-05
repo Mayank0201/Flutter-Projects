@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
-import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 
 class NurikabeBetaScreen extends StatefulWidget {
@@ -293,6 +292,20 @@ class _NurikabeBetaScreenState extends State<NurikabeBetaScreen> {
                     ),
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(20)),
+                  ),
+                  child: Text(
+                    '💡 Rule Details:\n• Each number is an island with exactly that many cells.\n• Islands don\'t touch each other horizontally or vertically.\n• The remaining water forms one connected sea.\n• No 2x2 block of water is allowed.',
+                    style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [

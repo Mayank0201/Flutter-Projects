@@ -68,13 +68,13 @@ const List<NonogramLevel> _kLevels = [
     ],
   ),
   NonogramLevel(
-    name: 'Checkmark',
+    name: 'Pyramid',
     grid: [
-      [0, 0, 0, 0, 1],
-      [0, 0, 0, 1, 0],
-      [1, 0, 1, 0, 0],
-      [0, 1, 0, 0, 0],
-      [0, 0, 0, 0, 0],
+      [0, 0, 1, 0, 0],
+      [0, 1, 1, 1, 0],
+      [1, 1, 1, 1, 1],
+      [1, 1, 1, 1, 1],
+      [1, 1, 1, 1, 1],
     ],
   ),
   NonogramLevel(

@@ -298,6 +298,20 @@ class _FutoshikiBetaScreenState extends State<FutoshikiBetaScreen> {
                     ),
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(20)),
+                  ),
+                  child: Text(
+                    '💡 Rule Details:\n• Fill the grid so each row and column has each number once.\n• Satisfy all the < and > inequality signs between cells.',
+                    style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [

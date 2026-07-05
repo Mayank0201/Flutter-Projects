@@ -166,6 +166,152 @@ class _SumpleteBetaScreenState extends State<SumpleteBetaScreen> {
     }
   }
 
+  int _rowSum(int r) {
+    int s = 0;
+    for (int j = 0; j < 3; j++) {
+      if (_keep[r * 3 + j]) s += _grid[r * 3 + j];
+    }
+    return s;
+  }
+
+  int _colSum(int c) {
+    int s = 0;
+    for (int i = 0; i < 3; i++) {
+      if (_keep[i * 3 + c]) s += _grid[i * 3 + c];
+    }
+    return s;
+  }
+
+  Widget _buildCell(int gridIdx, double size) {
+    final bool isKept = _keep[gridIdx];
+    return GestureDetector(
+      onTap: () {
+        settingsNotifier.hapticTap();
+        setState(() => _keep[gridIdx] = !_keep[gridIdx]);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: isKept ? context.bgSurface : context.bgDark,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isKept ? AppTheme.dustyMauve.withAlpha(150) : context.textMuted.withAlpha(30),
+            width: isKept ? 1.6 : 1,
+          ),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (!isKept)
+              Icon(Icons.close_rounded, size: size * 0.72, color: context.textMuted.withAlpha(45)),
+            Text(
+              '${_grid[gridIdx]}',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: size * 0.4,
+                fontWeight: FontWeight.bold,
+                color: isKept ? context.textPrimary : context.textMuted.withAlpha(120),
+                decoration: isKept ? null : TextDecoration.lineThrough,
+                decorationColor: context.textMuted.withAlpha(160),
+                decorationThickness: 2.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTargetTile(int current, int target, double size) {
+    final bool satisfied = current == target;
+    final Color accent = satisfied ? AppTheme.softSage : AppTheme.dustyMauve;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: satisfied ? AppTheme.softSage.withAlpha(38) : AppTheme.dustyMauve.withAlpha(18),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '$target',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: size * 0.36,
+              fontWeight: FontWeight.bold,
+              color: accent,
+            ),
+          ),
+          Text(
+            '$current',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: size * 0.2,
+              fontWeight: FontWeight.w600,
+              color: satisfied ? AppTheme.softSage : context.textMuted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBoard() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const int dim = 3;
+        const double gap = 8;
+        const double pad = 14;
+        double boardW = constraints.maxWidth;
+        if (boardW > 360) boardW = 360;
+        // Inner width available for tiles, after the board's own padding.
+        double inner = boardW - pad * 2;
+        double cell = (inner - gap * dim) / (dim + 1);
+        if (cell < 44) cell = 44;
+
+        return RepaintBoundary(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: context.bgCard,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: context.textMuted.withAlpha(30)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (int r = 0; r < dim; r++) ...[
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (int c = 0; c < dim; c++) ...[
+                        _buildCell(r * dim + c, cell),
+                        const SizedBox(width: gap),
+                      ],
+                      _buildTargetTile(_rowSum(r), _rowTargets[r], cell),
+                    ],
+                  ),
+                  const SizedBox(height: gap),
+                ],
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (int c = 0; c < dim; c++) ...[
+                      _buildTargetTile(_colSum(c), _colTargets[c], cell),
+                      const SizedBox(width: gap),
+                    ],
+                    SizedBox(width: cell),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -197,57 +343,35 @@ class _SumpleteBetaScreenState extends State<SumpleteBetaScreen> {
             child: Column(
               children: [
                 Expanded(
-                  child: Center(
+                  child: SingleChildScrollView(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Tap numbers to delete them so the remaining numbers in each row and col sum to the target.', style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), textAlign: TextAlign.center),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Cross out numbers so the remaining ones in each row and column add up to the targets.',
+                          style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
+                          textAlign: TextAlign.center,
+                        ),
                         const SizedBox(height: 24),
+                        _buildBoard(),
                         Container(
-                          width: 320, height: 320,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
-                          child: GridView.builder(
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 4),
-                            itemCount: 16,
-                            itemBuilder: (context, idx) {
-                              int r = idx ~/ 4;
-                              int c = idx % 4;
-                              if (r == 3 && c == 3) return const SizedBox.shrink();
-                              if (r == 3) {
-                                return Center(child: Text('${_colTargets[c]}', style: GoogleFonts.spaceGrotesk(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve)));
-                              }
-                              if (c == 3) {
-                                return Center(child: Text('${_rowTargets[r]}', style: GoogleFonts.spaceGrotesk(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve)));
-                              }
-                              int gridIdx = r * 3 + c;
-                              bool isKept = _keep[gridIdx];
-                              return GestureDetector(
-                                onTap: () => setState(() => _keep[gridIdx] = !_keep[gridIdx]),
-                                child: Container(
-                                  margin: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: isKept ? context.bgSurface : context.bgDark,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: isKept ? AppTheme.dustyMauve : Colors.grey.shade900),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '${_grid[gridIdx]}',
-                                      style: GoogleFonts.spaceGrotesk(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: isKept ? context.textPrimary : context.textMuted.withOpacity(0.3),
-                                        decoration: isKept ? null : TextDecoration.lineThrough,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(top: 16),
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: context.textMuted.withAlpha(20)),
+                          ),
+                          child: Text(
+                            '💡 Rule Details:\n'
+                            '• Cross out numbers so every row adds up to its right-side target.\n'
+                            '• Every column must also add up to its bottom target.\n'
+                            '• Tap a number to keep/cross it; tap again to toggle.',
+                            style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
                           ),
                         ),
+                        const SizedBox(height: 12),
                       ],
                     ),
                   ),

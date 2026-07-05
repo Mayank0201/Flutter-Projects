@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
-import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 
 class LightUpBetaScreen extends StatefulWidget {
@@ -263,6 +262,20 @@ class _LightUpBetaScreenState extends State<LightUpBetaScreen> {
                     ),
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(20)),
+                  ),
+                  child: Text(
+                    '💡 Rule Details:\n• Place bulbs so every white cell is lit.\n• A bulb lights its whole row and column until a wall blocks it.\n• No bulb may light another bulb.\n• A numbered wall shows how many bulbs touch it orthogonally.',
+                    style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [

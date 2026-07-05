@@ -1,88 +1,274 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/ad_manager.dart';
+import '../../../utils/audio_manager.dart';
 
 class ColorFloodBetaScreen extends StatefulWidget {
   const ColorFloodBetaScreen({super.key});
   @override
   State<ColorFloodBetaScreen> createState() => _ColorFloodBetaScreenState();
 }
+
 class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
-  List<int> _grid = List.filled(25, 0); // 5x5 grid of colors (0 to 3)
-  int _movesLeft = 10;
-  final List<Color> _colors = [Colors.red, Colors.green, Colors.blue, Colors.orange];
+  bool _playDailyMode = false;
+
+  int _gridSize = 5;
+  int _numColors = 4;
+  List<int> _grid = [];
+  int _movesLeft = 12;
+
+  final List<Color> _colors = [
+    Colors.red.shade400,
+    Colors.green.shade400,
+    Colors.blue.shade400,
+    Colors.orange.shade400,
+    Colors.purple.shade400,
+    Colors.teal.shade400,
+  ];
 
   @override
   void initState() {
     super.initState();
-    _loadLevel();
+    _initLevelState();
   }
+
+  Future<void> _initLevelState() async {
+    final prefs = await SharedPreferences.getInstance();
+    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    final savedLvl = prefs.getInt('level_color_flood') ?? 0;
+    if (mounted) {
+      setState(() {
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _loadLevel();
+      });
+    }
+  }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
-      _movesLeft = 12 - _currentLevel;
-      if (_currentLevel == 0) {
-        _grid = [0, 1, 2, 0, 1, 3, 0, 1, 2, 0, 2, 3, 0, 1, 2, 1, 3, 0, 2, 1, 0, 1, 3, 2, 0];
-      } else if (_currentLevel == 1) {
-        _grid = [1, 2, 0, 3, 1, 0, 1, 2, 0, 3, 2, 3, 1, 0, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0];
-      } else if (_currentLevel == 2) {
-        _grid = [2, 0, 1, 3, 2, 1, 3, 0, 2, 1, 0, 2, 3, 1, 0, 3, 1, 0, 2, 3, 2, 0, 1, 3, 2];
-      } else if (_currentLevel == 3) {
-        _grid = [3, 1, 0, 2, 3, 2, 0, 3, 1, 2, 1, 2, 0, 3, 1, 0, 3, 2, 1, 0, 3, 1, 0, 2, 3];
-      } else if (_currentLevel == 4) {
-        _grid = [0, 2, 3, 1, 0, 1, 3, 0, 2, 1, 2, 0, 1, 3, 2, 3, 1, 2, 0, 3, 0, 2, 3, 1, 0];
-      } else if (_currentLevel == 5) {
-        _grid = [1, 2, 0, 3, 1, 0, 1, 2, 0, 3, 2, 3, 1, 0, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0].map((e) => (e + 1) % 4).toList();
-      } else if (_currentLevel == 6) {
-        _grid = [2, 0, 1, 3, 2, 1, 3, 0, 2, 1, 0, 2, 3, 1, 0, 3, 1, 0, 2, 3, 2, 0, 1, 3, 2].map((e) => (e + 2) % 4).toList();
-      } else if (_currentLevel == 7) {
-        _grid = [3, 1, 0, 2, 3, 2, 0, 3, 1, 2, 1, 2, 0, 3, 1, 0, 3, 2, 1, 0, 3, 1, 0, 2, 3].map((e) => (e + 3) % 4).toList();
-      } else if (_currentLevel == 8) {
-        _grid = [0, 2, 3, 1, 0, 1, 3, 0, 2, 1, 2, 0, 1, 3, 2, 3, 1, 2, 0, 3, 0, 2, 3, 1, 0].map((e) => (e + 1) % 4).toList();
+
+      int minOptimal = 0;
+      int maxOptimal = 0;
+      int buffer = 0;
+
+      if (_currentLevel < 5) {
+        _gridSize = 5;
+        _numColors = 4;
+        minOptimal = 6;
+        maxOptimal = 9;
+        buffer = 2;
+      } else if (_currentLevel < 10) {
+        _gridSize = 6;
+        _numColors = 4;
+        minOptimal = 9;
+        maxOptimal = 12;
+        buffer = 1;
+      } else if (_currentLevel < 20) {
+        _gridSize = 7;
+        _numColors = 5;
+        minOptimal = 12;
+        maxOptimal = 15;
+        buffer = 0;
+      } else if (_currentLevel < 35) {
+        _gridSize = 8;
+        _numColors = 5;
+        minOptimal = 15;
+        maxOptimal = 18;
+        buffer = 0;
       } else {
-        _grid = [0, 1, 2, 0, 1, 3, 0, 1, 2, 0, 2, 3, 0, 1, 2, 1, 3, 0, 2, 1, 0, 1, 3, 2, 0].map((e) => (e + 2) % 4).toList();
+        _gridSize = 9;
+        _numColors = 6;
+        minOptimal = 18;
+        maxOptimal = 21;
+        buffer = 0;
+      }
+
+      final rng = Random(_currentLevel * 73 + 2026);
+
+      bool found = false;
+      int attempts = 0;
+      List<int> bestGrid = [];
+      int bestMoves = 999;
+      int bestOpt = -1;
+
+      while (attempts < 20) {
+        attempts++;
+        List<int> testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+        if (testGrid.every((c) => c == testGrid[0])) continue;
+
+        int opt = _solveColorFlood(testGrid, _gridSize, _numColors);
+        if (opt < 99) {
+          if (opt >= minOptimal && opt <= maxOptimal) {
+            _grid = testGrid;
+            _movesLeft = opt + buffer;
+            found = true;
+            break;
+          }
+          if ((opt - (minOptimal + maxOptimal) ~/ 2).abs() < (bestMoves - (minOptimal + maxOptimal) ~/ 2).abs()) {
+            bestGrid = testGrid;
+            bestMoves = opt;
+            bestOpt = opt;
+          }
+        }
+      }
+
+      if (!found) {
+        if (bestGrid.isNotEmpty) {
+          _grid = bestGrid;
+          _movesLeft = bestOpt + buffer;
+        } else {
+          _grid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+          if (_gridSize == 5) {
+            _movesLeft = 11;
+          } else if (_gridSize == 6) {
+            _movesLeft = 13;
+          } else if (_gridSize == 7) {
+            _movesLeft = 14;
+          } else if (_gridSize == 8) {
+            _movesLeft = 16;
+          } else {
+            _movesLeft = 18;
+          }
+        }
       }
     });
   }
+
+  int _solveColorFlood(List<int> initialGrid, int size, int numColors) {
+    String serialize(List<int> g) => String.fromCharCodes(g);
+    
+    final startKey = serialize(initialGrid);
+    final Set<String> visited = {startKey};
+    final List<(List<int>, int)> queue = [(List<int>.from(initialGrid), 0)];
+    
+    int limit = 800; // Fast cap
+    int head = 0;
+    
+    while (head < queue.length && head < limit) {
+      final (currentGrid, moves) = queue[head++];
+      
+      int firstColor = currentGrid[0];
+      if (currentGrid.every((c) => c == firstColor)) {
+        return moves;
+      }
+      
+      for (int col = 0; col < numColors; col++) {
+        if (col == firstColor) continue;
+        
+        List<int> nextGrid = List<int>.from(currentGrid);
+        
+        List<int> component = [0];
+        List<bool> compVisited = List.filled(size * size, false);
+        compVisited[0] = true;
+        int compHead = 0;
+        while (compHead < component.length) {
+          int curr = component[compHead++];
+          int r = curr ~/ size;
+          int c = curr % size;
+          
+          if (r > 0) {
+            int n = (r - 1) * size + c;
+            if (nextGrid[n] == firstColor && !compVisited[n]) {
+              compVisited[n] = true;
+              component.add(n);
+            }
+          }
+          if (r < size - 1) {
+            int n = (r + 1) * size + c;
+            if (nextGrid[n] == firstColor && !compVisited[n]) {
+              compVisited[n] = true;
+              component.add(n);
+            }
+          }
+          if (c > 0) {
+            int n = r * size + c - 1;
+            if (nextGrid[n] == firstColor && !compVisited[n]) {
+              compVisited[n] = true;
+              component.add(n);
+            }
+          }
+          if (c < size - 1) {
+            int n = r * size + c + 1;
+            if (nextGrid[n] == firstColor && !compVisited[n]) {
+              compVisited[n] = true;
+              component.add(n);
+            }
+          }
+        }
+        
+        for (int idx in component) {
+          nextGrid[idx] = col;
+        }
+        
+        final nKey = serialize(nextGrid);
+        if (!visited.contains(nKey)) {
+          visited.add(nKey);
+          queue.add((nextGrid, moves + 1));
+        }
+      }
+    }
+    return 99; // Solver limit hit
+  }
+
   Future<void> _onLevelCleared() async {
+    AudioManager.playSuccess();
+    settingsNotifier.hapticSuccess();
+
     final prefs = await SharedPreferences.getInstance();
-    int highest = prefs.getInt('beta_level_colorflood') ?? 0;
+    final key = 'level_color_flood';
+    int highest = prefs.getInt(key) ?? 0;
     if (_currentLevel + 1 > highest) {
-      await prefs.setInt('beta_level_colorflood', _currentLevel + 1);
+      await prefs.setInt(key, _currentLevel + 1);
     }
-    setState(() => _isSuccess = true);
+
+    int newLevel = _currentLevel + 1;
+    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
+      AdManager.showInterstitialAd();
+    }
+
+    setState(() {
+      _isSuccess = true;
+    });
   }
+
   void _nextLevel() {
-    if (_currentLevel < 9) {
-      setState(() {
-        _currentLevel++;
-        _loadLevel();
-      });
-    } else {
-      Navigator.pop(context);
-    }
+    setState(() {
+      _currentLevel++;
+      _loadLevel();
+    });
   }
+
   void _flood(int targetColor) {
     if (_movesLeft <= 0 || _isSuccess) return;
     int original = _grid[0];
     if (original == targetColor) return;
-    List<bool> visited = List.filled(25, false);
+
+    AudioManager.playClick();
+    settingsNotifier.hapticTap();
+
+    List<bool> visited = List.filled(_gridSize * _gridSize, false);
     List<int> queue = [0];
     visited[0] = true;
+
     while (queue.isNotEmpty) {
       int curr = queue.removeAt(0);
       _grid[curr] = targetColor;
-      int r = curr ~/ 5; int c = curr % 5;
+      int r = curr ~/ _gridSize;
+      int c = curr % _gridSize;
       var neighbors = [
-        if (r > 0) (r - 1) * 5 + c,
-        if (r < 4) (r + 1) * 5 + c,
-        if (c > 0) r * 5 + c - 1,
-        if (c < 4) r * 5 + c + 1,
+        if (r > 0) (r - 1) * _gridSize + c,
+        if (r < _gridSize - 1) (r + 1) * _gridSize + c,
+        if (c > 0) r * _gridSize + c - 1,
+        if (c < _gridSize - 1) r * _gridSize + c + 1,
       ];
       for (int n in neighbors) {
         if (_grid[n] == original && !visited[n]) {
@@ -91,29 +277,37 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         }
       }
     }
+
     setState(() {
       _movesLeft--;
       if (_grid.every((e) => e == targetColor)) {
         _onLevelCleared();
       } else if (_movesLeft == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No moves left! Reset to try again.')));
+        AudioManager.playFail();
+        settingsNotifier.hapticError();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No moves left! Reset to try again.'),
+          backgroundColor: Colors.redAccent,
+        ));
       }
     });
   }
 
   void _showHint() {
     int currentColor = _grid[0];
-    List<bool> flooded = List.filled(25, false);
+    List<bool> flooded = List.filled(_gridSize * _gridSize, false);
     List<int> queue = [0];
     flooded[0] = true;
+
     while (queue.isNotEmpty) {
       int curr = queue.removeAt(0);
-      int r = curr ~/ 5; int c = curr % 5;
+      int r = curr ~/ _gridSize;
+      int c = curr % _gridSize;
       var neighbors = [
-        if (r > 0) (r - 1) * 5 + c,
-        if (r < 4) (r + 1) * 5 + c,
-        if (c > 0) r * 5 + c - 1,
-        if (c < 4) r * 5 + c + 1,
+        if (r > 0) (r - 1) * _gridSize + c,
+        if (r < _gridSize - 1) (r + 1) * _gridSize + c,
+        if (c > 0) r * _gridSize + c - 1,
+        if (c < _gridSize - 1) r * _gridSize + c + 1,
       ];
       for (int nbr in neighbors) {
         if (!flooded[nbr] && _grid[nbr] == currentColor) {
@@ -122,19 +316,21 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         }
       }
     }
+
     int bestColor = -1;
     int maxGain = -1;
-    for (int col = 0; col < 4; col++) {
+    for (int col = 0; col < _numColors; col++) {
       if (col == currentColor) continue;
       int gain = 0;
-      for (int i = 0; i < 25; i++) {
+      for (int i = 0; i < _grid.length; i++) {
         if (flooded[i]) {
-          int r = i ~/ 5; int c = i % 5;
+          int r = i ~/ _gridSize;
+          int c = i % _gridSize;
           var neighbors = [
-            if (r > 0) (r - 1) * 5 + c,
-            if (r < 4) (r + 1) * 5 + c,
-            if (c > 0) r * 5 + c - 1,
-            if (c < 4) r * 5 + c + 1,
+            if (r > 0) (r - 1) * _gridSize + c,
+            if (r < _gridSize - 1) (r + 1) * _gridSize + c,
+            if (c > 0) r * _gridSize + c - 1,
+            if (c < _gridSize - 1) r * _gridSize + c + 1,
           ];
           for (int nbr in neighbors) {
             if (!flooded[nbr] && _grid[nbr] == col) {
@@ -148,16 +344,45 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         bestColor = col;
       }
     }
-    String colorName = "Unknown";
-    if (bestColor == 0) colorName = "Red";
-    if (bestColor == 1) colorName = "Green";
-    if (bestColor == 2) colorName = "Blue";
-    if (bestColor == 3) colorName = "Orange";
-    
+
+    final colorNames = ["Red", "Green", "Blue", "Orange", "Purple"];
+    String colorName = (bestColor >= 0 && bestColor < colorNames.length) ? colorNames[bestColor] : "Unknown";
+
     settingsNotifier.hapticTap();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('Hint: Try picking $colorName next to flood more cells!'),
     ));
+  }
+
+  void _showRules() {
+    settingsNotifier.hapticTap();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: context.textMuted.withAlpha(40)),
+        ),
+        title: Text(
+          'How to Play',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
+        ),
+        content: Text(
+          '• Start from the top-left cell.\n• Tap a color circle to flood connected cells of the same color.\n• Make the entire board a single color within the move limit.',
+          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Got it',
+              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
+            ),
+          )
+        ],
+      ),
+    );
   }
 
   @override
@@ -169,20 +394,34 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Rules',
+            onPressed: _showRules,
+          ),
+          IconButton(
             icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: Center(child: Text('Level ${_currentLevel + 1}/10', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),
+            child: Center(
+              child: Text(
+                'Level ${_currentLevel + 1}', 
+                style: AppTheme.numberStyle(
+                  color: AppTheme.dustyMauve, 
+                  fontSize: 14, 
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
         ],
       ),
       body: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
               children: [
                 Expanded(
@@ -193,91 +432,108 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: Text(
-                            'Flood the entire board with a single color. Start from the top-left cell (marked with 🏠). Pick a color below to fill all connected cells of the same color. Moves left: $_movesLeft',
+                            'Flood the entire board with a single color. Start at the top-left cell. Moves left: $_movesLeft',
                             style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
                             textAlign: TextAlign.center,
                           ),
                         ),
                         const SizedBox(height: 24),
-                        RepaintBoundary(
-                          child: Container(
-                            width: 250, height: 250,
-                            decoration: BoxDecoration(border: Border.all(color: context.textMuted, width: 2), borderRadius: BorderRadius.circular(12)),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: GridView.builder(
-                                physics: const NeverScrollableScrollPhysics(),
-                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 5),
-                                itemCount: 25,
-                                itemBuilder: (context, idx) {
-                                  return Container(
-                                    color: _colors[_grid[idx]],
-                                    child: idx == 0
-                                        ? const Center(
-                                            child: Icon(Icons.home, color: Colors.white, size: 24),
-                                          )
-                                        : null,
-                                  );
-                                },
+                        Builder(
+                          builder: (context) {
+                            final double boardSize = MediaQuery.of(context).size.width - 32;
+                            return RepaintBoundary(
+                              child: Container(
+                                width: boardSize, height: boardSize,
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: context.textMuted, width: 2), 
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: GridView.builder(
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
+                                    itemCount: _grid.length,
+                                    itemBuilder: (context, idx) {
+                                      return Container(
+                                        color: _colors[_grid[idx]],
+                                        child: idx == 0
+                                            ? const Center(
+                                                child: Icon(Icons.home, color: Colors.white, size: 20),
+                                              )
+                                            : null,
+                                      );
+                                    },
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 24),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: List.generate(4, (i) {
+                          children: List.generate(_numColors, (i) {
                             return GestureDetector(
                               onTap: () => _flood(i),
                               child: Container(
-                                width: 44, height: 44,
+                                width: 42, height: 42,
                                 decoration: BoxDecoration(
                                   color: _colors[i],
                                   shape: BoxShape.circle,
                                   border: Border.all(color: Colors.white, width: 2),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.15),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    )
+                                  ],
                                 ),
                               ),
                             );
                           }),
                         ),
+                        const SizedBox(height: 36),
                       ],
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: context.bgCard, foregroundColor: context.textPrimary),
-                      onPressed: _loadLevel, icon: const Icon(Icons.refresh), label: const Text('Reset'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (_isSuccess)
-            Container(
-              color: Colors.black.withOpacity(0.6),
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                if (!_isSuccess)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                      const SizedBox(height: 16),
-                      Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
-                      AutoNextCountdown(
-                        onNext: _nextLevel,
-                        accentColor: AppTheme.dustyMauve,
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.bgCard,
+                          foregroundColor: context.textPrimary,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: context.textMuted.withAlpha(40)),
+                          ),
+                        ),
+                        onPressed: _loadLevel,
+                        icon: const Icon(Icons.refresh),
+                        label: Text('Reset Board', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
-                ),
+                if (_isSuccess && !_playDailyMode)
+                  AutoNextCountdown(
+                    onNext: _nextLevel,
+                    accentColor: AppTheme.dustyMauve,
+                  ),
+              ],
+            ),
+          ),
+          if (_isSuccess && _playDailyMode)
+            Positioned.fill(
+              child: ChallengeClearedOverlay(
+                accentColor: AppTheme.dustyMauve,
+                onComplete: () {
+                  Navigator.pop(context, true);
+                },
               ),
             ),
         ],

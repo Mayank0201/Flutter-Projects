@@ -270,6 +270,20 @@ class _BinairoBetaScreenState extends State<BinairoBetaScreen> {
                     ),
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: context.textMuted.withAlpha(20)),
+                  ),
+                  child: Text(
+                    '💡 Rule Details:\n• Fill every cell with 0 or 1.\n• No more than two of the same number adjacent in a row or column.\n• Each row and column has an equal count of 0s and 1s.\n• No two rows (or two columns) are identical.',
+                    style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [

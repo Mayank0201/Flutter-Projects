@@ -38,7 +38,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
   int _hintCount = 0;
   bool _dragActive = false;
-  late AnimationController _rippleController;
   bool _isDailyMode = false;
   String _dailyModifierType = '';
   List<(int, int)>? _solution;
@@ -48,7 +47,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
   @override
   void dispose() {
-    _rippleController.dispose();
     _blindStepsTimer?.cancel();
     super.dispose();
   }
@@ -56,11 +54,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _rippleController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    );
-
     _level = _getDynamicLevel(0);
     _initLevel();
   }
@@ -98,10 +91,11 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     await prefs.setInt('level_zip', lvl);
     final earned = await HintManager.onLevelCleared('zip');
     final newCount = await HintManager.getHints('zip');
+    if (!mounted) return;
     setState(() {
       _hintCount = newCount;
     });
-    if (earned && mounted) {
+    if (earned) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
@@ -124,8 +118,12 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
     List<(int, int)> path = [(startR, startC)];
     Set<String> visited = {'$startR,$startC'};
+    int steps = 0;
 
     bool dfs(int r, int c, int nextWp) {
+      steps++;
+      if (steps > 10000) return false; // Prevent infinite loops or massive searches
+      
       if (path.length == level.totalCellsToVisit) {
         final lastWp = level.waypoints[path.last.$1][path.last.$2];
         return lastWp == level.maxWaypoint;
@@ -151,6 +149,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
             
             path.removeLast();
             visited.remove(key);
+            if (steps > 10000) return false;
           }
         }
       }
@@ -184,6 +183,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     await HintManager.useHint('zip');
     final newCount = await HintManager.getHints('zip');
 
+    if (!mounted) return;
     setState(() {
       _hintCount = newCount;
       if (!matches || _path.isEmpty) {
@@ -227,61 +227,118 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   }
 
   ZipLevel _getDynamicLevel(int levelIndex) {
-    final int waypointCount = levelIndex + 2;
-    int gridSize = 3;
-    while ((gridSize * gridSize) ~/ 2 < waypointCount) {
-      gridSize++;
+    int gridSize;
+    int waypointCount;
+
+    if (levelIndex < 5) {
+      gridSize = 3;
+      waypointCount = 2 + (levelIndex % 2); // 2 or 3 waypoints
+    } else if (levelIndex < 15) {
+      gridSize = 4;
+      waypointCount = 3 + (levelIndex % 3); // 3 to 5 waypoints
+    } else if (levelIndex < 30) {
+      gridSize = 5;
+      waypointCount = 5 + (levelIndex % 3); // 5 to 7 waypoints
+    } else if (levelIndex < 50) {
+      gridSize = 6;
+      waypointCount = 8 + (levelIndex % 4); // 8 to 11 waypoints
+    } else {
+      gridSize = 6;
+      waypointCount = 15 + (levelIndex % 6); // 15 to 20 waypoints
     }
     final int rows = gridSize;
     final int cols = gridSize;
-    final int pathLength = rows * cols;
     final rand = Random(levelIndex);
 
-    List<(int, int)>? path;
-    int totalSteps = 0;
+    List<(int, int)> path = [];
+    final successfulWalls = <String>{};
+
+    // Check that all non-wall cells are still connected via BFS
+    bool isConnected(Set<String> walls, int rows, int cols) {
+      // Find the first non-wall cell
+      (int, int)? start;
+      for (int r = 0; r < rows && start == null; r++) {
+        for (int c = 0; c < cols && start == null; c++) {
+          if (!walls.contains('$r,$c')) start = (r, c);
+        }
+      }
+      if (start == null) return false;
+      final visited = <String>{};
+      final queue = <(int, int)>[start];
+      visited.add('${start.$1},${start.$2}');
+      while (queue.isNotEmpty) {
+        final cell = queue.removeAt(0);
+        for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
+          final nr = cell.$1 + d.$1;
+          final nc = cell.$2 + d.$2;
+          final key = '$nr,$nc';
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !walls.contains(key) && !visited.contains(key)) {
+            visited.add(key);
+            queue.add((nr, nc));
+          }
+        }
+      }
+      return visited.length == rows * cols - walls.length;
+    }
 
     int countUnvisitedNeighbors(int r, int c, Set<String> visited) {
       int count = 0;
-      final dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)];
-      for (final dir in dirs) {
-        final nr = r + dir.$1;
-        final nc = c + dir.$2;
-        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-          if (!visited.contains('$nr,$nc')) {
-            count++;
-          }
+      for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
+        final nr = r + d.$1;
+        final nc = c + d.$2;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited.contains('$nr,$nc')) {
+          count++;
         }
       }
       return count;
     }
 
-    for (int attempt = 0; attempt < 10; attempt++) {
+    // Try up to 20 attempts with higher step budget to find a Hamiltonian path
+    for (int attempt = 0; attempt < 20; attempt++) {
       final startR = rand.nextInt(rows);
       final startC = rand.nextInt(cols);
+
+      // Generate walls for levels 30+, validating connectivity
+      final walls = <String>{};
+      if (levelIndex >= 30) {
+        final numWalls = 2 + (levelIndex % 4); // 2 to 5 walls
+        final candidates = <(int, int)>[];
+        for (int r = 0; r < rows; r++) {
+          for (int c = 0; c < cols; c++) {
+            if (r != startR || c != startC) candidates.add((r, c));
+          }
+        }
+        candidates.shuffle(rand);
+        for (final cell in candidates) {
+          if (walls.length >= numWalls) break;
+          final key = '${cell.$1},${cell.$2}';
+          walls.add(key);
+          // Check connectivity — if adding this wall breaks it, remove it
+          if (!isConnected(walls, rows, cols)) {
+            walls.remove(key);
+          }
+        }
+      }
+
+      final int targetPathLength = rows * cols - walls.length;
       final currentPath = <(int, int)>[(startR, startC)];
-      final visited = <String>{'$startR,$startC'};
-      totalSteps = 0;
+      final visited = <String>{'$startR,$startC', ...walls};
+      int totalSteps = 0;
 
       bool dfs(int r, int c) {
         totalSteps++;
-        if (totalSteps > 2000) return false;
-        if (currentPath.length == pathLength) {
-          return true;
-        }
+        if (totalSteps > 5000) return false;
+        if (currentPath.length == targetPathLength) return true;
 
         final dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]..shuffle(rand);
+        // Warnsdorff heuristic: prefer neighbors with fewer exits
         dirs.sort((a, b) {
-          final nra = r + a.$1;
-          final nca = c + a.$2;
-          final nrb = r + b.$1;
-          final ncb = c + b.$2;
-
+          final nra = r + a.$1, nca = c + a.$2;
+          final nrb = r + b.$1, ncb = c + b.$2;
           final countA = (nra >= 0 && nra < rows && nca >= 0 && nca < cols && !visited.contains('$nra,$nca'))
-              ? countUnvisitedNeighbors(nra, nca, visited)
-              : 999;
+              ? countUnvisitedNeighbors(nra, nca, visited) : 999;
           final countB = (nrb >= 0 && nrb < rows && ncb >= 0 && ncb < cols && !visited.contains('$nrb,$ncb'))
-              ? countUnvisitedNeighbors(nrb, ncb, visited)
-              : 999;
+              ? countUnvisitedNeighbors(nrb, ncb, visited) : 999;
           return countA.compareTo(countB);
         });
 
@@ -296,7 +353,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
               if (dfs(nr, nc)) return true;
               currentPath.removeLast();
               visited.remove(key);
-              if (totalSteps > 2000) return false;
+              if (totalSteps > 5000) return false;
             }
           }
         }
@@ -305,28 +362,78 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
       if (dfs(startR, startC)) {
         path = currentPath;
+        successfulWalls.addAll(walls);
         break;
       }
     }
 
-    if (path == null) {
-      path = [];
-      for (int r = 0; r < rows; r++) {
-        if (r % 2 == 0) {
-          for (int c = 0; c < cols; c++) {
-            path.add((r, c));
-          }
-        } else {
-          for (int c = cols - 1; c >= 0; c--) {
-            path.add((r, c));
+    // Randomized fallback — shuffle a zigzag to avoid boring straight lines
+    if (path.isEmpty) {
+      // Use a simple randomized walk: start from a random corner, 
+      // greedily visit unvisited neighbors in random order
+      final fallbackRand = Random(levelIndex * 7 + 13);
+      final visited = <String>{};
+      final fallbackPath = <(int, int)>[];
+      final startR = fallbackRand.nextInt(rows);
+      final startC = fallbackRand.nextInt(cols);
+      fallbackPath.add((startR, startC));
+      visited.add('$startR,$startC');
+
+      while (fallbackPath.length < rows * cols) {
+        final cur = fallbackPath.last;
+        final neighbors = <(int, int)>[];
+        for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
+          final nr = cur.$1 + d.$1;
+          final nc = cur.$2 + d.$2;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited.contains('$nr,$nc')) {
+            neighbors.add((nr, nc));
           }
         }
+        if (neighbors.isEmpty) {
+          // Dead end — restart with basic zigzag
+          fallbackPath.clear();
+          visited.clear();
+          for (int r = 0; r < rows; r++) {
+            if (r % 2 == 0) {
+              for (int c = 0; c < cols; c++) fallbackPath.add((r, c));
+            } else {
+              for (int c = cols - 1; c >= 0; c--) fallbackPath.add((r, c));
+            }
+          }
+          break;
+        }
+        neighbors.shuffle(fallbackRand);
+        // Pick neighbor with fewest unvisited neighbors (greedy Warnsdorff)
+        neighbors.sort((a, b) {
+          int countA = 0, countB = 0;
+          for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
+            final ar = a.$1 + d.$1, ac = a.$2 + d.$2;
+            if (ar >= 0 && ar < rows && ac >= 0 && ac < cols && !visited.contains('$ar,$ac')) countA++;
+            final br = b.$1 + d.$1, bc = b.$2 + d.$2;
+            if (br >= 0 && br < rows && bc >= 0 && bc < cols && !visited.contains('$br,$bc')) countB++;
+          }
+          return countA.compareTo(countB);
+        });
+        final next = neighbors.first;
+        fallbackPath.add(next);
+        visited.add('${next.$1},${next.$2}');
       }
-      path = path.take(pathLength).toList();
+      path = fallbackPath;
+      successfulWalls.clear(); // No walls on fallback
     }
 
     // Set all cells initially to 0 (free tile)
     final waypoints = List.generate(rows, (_) => List.filled(cols, 0));
+
+    // Fill walls
+    for (final wallStr in successfulWalls) {
+      final parts = wallStr.split(',');
+      final r = int.parse(parts[0]);
+      final c = int.parse(parts[1]);
+      waypoints[r][c] = -1;
+    }
+
+    // Fill waypoints evenly along the path
     final int pathLen = path.length;
     for (int i = 0; i < waypointCount; i++) {
       final int pathIndex = (i * (pathLen - 1) / (waypointCount - 1)).round();
@@ -417,7 +524,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         }
       }
       _msg = 'Dragging...';
-      _saveState();
     });
   }
 
@@ -465,9 +571,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         }
       }
       _path.add((r, c));
-      _rippleController.forward(from: 0.0);
       _msg = 'Dragging...';
-      _saveState();
     });
     _checkWin();
   }
@@ -501,10 +605,32 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     if (box == null) return null;
     final cw = box.size.width / _level.cols;
     final ch = box.size.height / _level.rows;
-    final col = (local.dx / cw).floor();
-    final row = (local.dy / ch).floor();
-    if (row < 0 || row >= _level.rows || col < 0 || col >= _level.cols) return null;
+    final dx = local.dx.clamp(-cw / 2, box.size.width + cw / 2);
+    final dy = local.dy.clamp(-ch / 2, box.size.height + ch / 2);
+    final col = (dx / cw).floor().clamp(0, _level.cols - 1);
+    final row = (dy / ch).floor().clamp(0, _level.rows - 1);
     return (row, col);
+  }
+
+  List<(int, int)> _interpolatePath((int, int) start, (int, int) end) {
+    List<(int, int)> path = [];
+    int r = start.$1;
+    int c = start.$2;
+    int tr = end.$1;
+    int tc = end.$2;
+    int limit = 30; // Safety limit to avoid infinite loop
+    while ((r != tr || c != tc) && limit > 0) {
+      limit--;
+      int dr = (tr - r).sign;
+      int dc = (tc - c).sign;
+      if (dr.abs() >= dc.abs()) {
+        r += dr;
+      } else {
+        c += dc;
+      }
+      path.add((r, c));
+    }
+    return path;
   }
 
   void _nextLevel() {
@@ -660,6 +786,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                                   }
                                 }
                               }
+                              _saveState();
                             }
                           },
                           onPanStart: (d) {
@@ -679,8 +806,9 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                                   setState(() => _msg = _isReversePath ? 'Start at number $targetStartWp!' : 'Start at number 1!');
                                 }
                               } else {
-                                if (c == _path.last) {
+                                if (_path.contains(c)) {
                                   _dragActive = true;
+                                  _truncatePathTo(c);
                                 } else if (_isAdjacent(_path.last, c) && !_path.contains(c)) {
                                   _dragActive = true;
                                   _addCell(c.$1, c.$2);
@@ -696,9 +824,16 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             if (_won || !_dragActive) return;
                             final c = _cellAtLocal(d.localPosition);
                             if (c != null) {
+                              if (_path.isNotEmpty && c == _path.last) return; // Ignore duplicate cell updates to prevent lag
                               if (_path.contains(c)) {
-                                if (_path.length >= 2 && _path[_path.length - 2] == c) {
-                                  _truncatePathTo(c);
+                                _truncatePathTo(c);
+                              } else if (_path.isNotEmpty) {
+                                final last = _path.last;
+                                final lineCells = _interpolatePath(last, c);
+                                for (final cell in lineCells) {
+                                  if (!_path.contains(cell)) {
+                                    _addCell(cell.$1, cell.$2);
+                                  }
                                 }
                               } else {
                                 _addCell(c.$1, c.$2);
@@ -709,19 +844,21 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             setState(() {
                               _dragActive = false;
                             });
+                            _saveState();
                             _checkWin();
                           },
                           onPanCancel: () {
                             setState(() {
                               _dragActive = false;
                             });
+                            _saveState();
                           },
                           child: SizedBox(
                             key: _gridKey, width: sw, height: cellH * _level.rows,
                             child: CustomPaint(
                               painter: _ZipPainter(
                                   level: _level,
-                                  path: _path,
+                                  path: List.from(_path),
                                   solution: _solution,
                                   cellW: cellW,
                                   cellH: cellH,
@@ -731,7 +868,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                                   pathColor: AppTheme.zipPink,
                                   fillColor: AppTheme.zipPink.withAlpha(35),
                                   visitedWpColor: AppTheme.softSage,
-                                  rippleAnimation: _rippleController,
                                   modifierType: _dailyModifierType,
                                   hideWaypoints: _hideGridPathElements,
                                 ),
@@ -790,7 +926,6 @@ class _ZipPainter extends CustomPainter {
   final Color pathColor;
   final Color fillColor;
   final Color visitedWpColor;
-  final Animation<double> rippleAnimation;
   final String modifierType;
   final bool hideWaypoints;
 
@@ -806,16 +941,14 @@ class _ZipPainter extends CustomPainter {
     required this.pathColor,
     required this.fillColor,
     required this.visitedWpColor,
-    required this.rippleAnimation,
     required this.modifierType,
     required this.hideWaypoints,
-  }) : super(repaint: rippleAnimation);
+  }) : super();
 
   Offset _ctr(int r, int c) => Offset(c * cellW + cellW / 2, r * cellH + cellH / 2);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rippleProgress = rippleAnimation.value;
     final isRetro = modifierType == 'retro';
     final bgPaint = Paint()..color = cellBgColor..style = PaintingStyle.fill;
     final border = Paint()
@@ -934,20 +1067,6 @@ class _ZipPainter extends CustomPainter {
       }
     }
 
-    // Draw ripple effect around the last point in path if path is not empty and ripple is active
-    if (path.isNotEmpty && rippleProgress < 1.0) {
-      final lastCell = path.last;
-      final center = _ctr(lastCell.$1, lastCell.$2);
-      final double startRadius = cellW * 0.35;
-      final double endRadius = cellW * 0.85;
-      final double currentRadius = startRadius + (endRadius - startRadius) * rippleProgress;
-      final double opacity = 0.6 * (1.0 - rippleProgress);
-      final ripplePaint = Paint()
-        ..color = pathColor.withOpacity(opacity)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.5;
-      canvas.drawCircle(center, currentRadius, ripplePaint);
-    }
   }
 
   @override

@@ -21,6 +21,9 @@ class MainActivity : FlutterActivity() {
                     file.createNewFile()
                     result.success(true)
                 }
+                "getLocalTimezone" -> {
+                    result.success(java.util.TimeZone.getDefault().id)
+                }
                 else -> result.notImplemented()
             }
         }

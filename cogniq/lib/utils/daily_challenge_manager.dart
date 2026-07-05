@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:home_widget/home_widget.dart';
 import '../models/game_info.dart';
 import 'hint_manager.dart';
+import 'notification_manager.dart';
 
 class DailyChallenge {
   final String difficulty; // 'Easy', 'Medium', 'Hard'
@@ -1130,6 +1131,9 @@ class DailyChallengeManager {
         await prefs.setInt('daily_v2_perfect_days', perfectDays + 1);
       }
     }
+
+    // Update notifications state
+    await NotificationManager.updateDailyChallengeReminder();
   }
 
   static Future<void> syncStarsToWidget() async {

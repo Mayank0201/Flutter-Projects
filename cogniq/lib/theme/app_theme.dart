@@ -111,6 +111,10 @@ class AppTheme {
       case 'oddcolor':    return warmAmber;
       case 'hue':         return deepLavender;
       case 'nonogram':    return softSage;
+      case 'pattern_lock': return terracotta;
+      case 'colour_link':  return roseGold;
+      case 'color_flood':  return warmAmber;
+      case 'circuit_guide': return slateBlue;
       default:            return textSecondaryLight;
     }
   }

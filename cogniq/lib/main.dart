@@ -29,6 +29,11 @@ import 'screens/games/number_memory/number_memory_screen.dart';
 import 'screens/games/sequence_memory/sequence_memory_screen.dart';
 import 'screens/games/odd_color_out/odd_color_out_screen.dart';
 import 'screens/games/spectrum/spectrum_screen.dart';
+import 'screens/games/beta/pattern_lock_beta.dart';
+import 'screens/games/beta/numberlink_beta.dart';
+import 'screens/games/beta/color_flood_beta.dart';
+import 'screens/games/beta/rush_hour_beta.dart';
+import 'screens/games/beta/circuit_guide_beta.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_manager.dart';
 import 'utils/audio_manager.dart';
@@ -40,6 +45,7 @@ import 'utils/ad_manager.dart';
 import 'utils/purchase_manager.dart';
 import 'utils/update_manager.dart';
 import 'utils/restore_manager.dart';
+import 'utils/notification_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,13 +54,37 @@ void main() async {
       await FlutterDisplayMode.setHighRefreshRate();
     } catch (_) {}
   }
-  await AdManager.initialize();
-  await PurchaseManager.initialize();
-  AudioManager.init();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  try {
+    await AdManager.initialize();
+  } catch (e) {
+    debugPrint('AdManager init failed: $e');
+  }
+
+  try {
+    await PurchaseManager.initialize();
+  } catch (e) {
+    debugPrint('PurchaseManager init failed: $e');
+  }
+
+  try {
+    await NotificationManager.initialize();
+  } catch (e) {
+    debugPrint('NotificationManager init failed: $e');
+  }
+
+  try {
+    AudioManager.init();
+  } catch (e) {
+    debugPrint('AudioManager init failed: $e');
+  }
+
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  } catch (_) {}
+
   try {
     final prefs = await SharedPreferences.getInstance();
 
@@ -69,7 +99,13 @@ void main() async {
       await prefs.setBool('play_daily_mode', false);
     }
   } catch (_) {}
-  await RestoreManager.checkAndHandleRestore();
+
+  try {
+    await RestoreManager.checkAndHandleRestore();
+  } catch (e) {
+    debugPrint('RestoreManager check failed: $e');
+  }
+
   runApp(const CogniQApp());
 }
 
@@ -166,6 +202,11 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
             '/sequence': (ctx) => const SequenceMemoryScreen(),
             '/oddcolor': (ctx) => const OddColorOutScreen(),
             '/hue': (ctx) => const SpectrumScreen(),
+            '/pattern_lock': (ctx) => const PatternLockBetaScreen(),
+            '/colour_link': (ctx) => const NumberlinkBetaScreen(),
+            '/color_flood': (ctx) => const ColorFloodBetaScreen(),
+            '/block_escape': (ctx) => const RushHourBetaScreen(),
+            '/circuit_guide': (ctx) => const CircuitGuideBetaScreen(),
           },
         );
       },

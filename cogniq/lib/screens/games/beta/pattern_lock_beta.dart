@@ -4,7 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/ad_manager.dart';
+import '../../../utils/audio_manager.dart';
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 class PatternLockBetaScreen extends StatefulWidget {
@@ -16,18 +20,49 @@ class PatternLockBetaScreen extends StatefulWidget {
 class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
-  List<int> _targetPattern = [0, 4, 8];
+  bool _playDailyMode = false;
+  List<int> _targetPattern = [];
   List<int> _userPattern = [];
   bool _isMemorizing = true;
   Timer? _memorizeTimer;
 
-  // For live drag line tracking
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
+  static const double _boardSize = 260;
+
+  int get _gridN {
+    if (_currentLevel < 5) return 3;
+    if (_currentLevel < 10) return 4;
+    return 5;
+  }
+  double get _spacing => _boardSize / _gridN;
+
+  Offset _dotCenter(int idx) => Offset(
+        _spacing * (idx % _gridN) + _spacing / 2,
+        _spacing * (idx ~/ _gridN) + _spacing / 2,
+      );
 
   @override
   void initState() {
     super.initState();
-    _loadLevel();
+    _initLevelState();
+  }
+
+  Future<void> _initLevelState() async {
+    final prefs = await SharedPreferences.getInstance();
+    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    final savedLvl = prefs.getInt('level_pattern_lock') ?? 0;
+    if (mounted) {
+      setState(() {
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _loadLevel();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _memorizeTimer?.cancel();
+    super.dispose();
   }
 
   void _loadLevel() {
@@ -37,89 +72,65 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       _isSuccess = false;
       _userPattern = [];
       _isMemorizing = true;
-      if (_currentLevel == 0) {
-        _targetPattern = [0, 4, 8];
-      } else if (_currentLevel == 1) {
-        _targetPattern = [1, 4, 7];
-      } else if (_currentLevel == 2) {
-        _targetPattern = [2, 4, 6];
-      } else if (_currentLevel == 3) {
-        _targetPattern = [0, 1, 2, 5];
-      } else if (_currentLevel == 4) {
-        _targetPattern = [3, 4, 5, 8];
-      } else if (_currentLevel == 5) {
-        _targetPattern = [0, 3, 6, 7, 8];
-      } else if (_currentLevel == 6) {
-        _targetPattern = [2, 5, 8, 7, 6];
-      } else if (_currentLevel == 7) {
-        _targetPattern = [0, 1, 2, 4, 6];
-      } else if (_currentLevel == 8) {
-        _targetPattern = [2, 4, 6, 3, 0];
-      } else {
-        _targetPattern = [0, 1, 2, 5, 8, 7, 6, 3, 4];
+      
+      final n = _gridN;
+      final rng = Random(_currentLevel * 137 + 42);
+      
+      int targetLength = 3 + (_currentLevel ~/ 2);
+      targetLength = targetLength.clamp(3, n * n);
+
+      List<int> pattern = [];
+      int curr = rng.nextInt(n * n);
+      pattern.add(curr);
+
+      int attempts = 0;
+      while (pattern.length < targetLength && attempts < 1000) {
+        attempts++;
+        int r = curr ~/ n;
+        int c = curr % n;
+
+        List<int> neighbors = [];
+        if (r > 0) neighbors.add((r - 1) * n + c);
+        if (r < n - 1) neighbors.add((r + 1) * n + c);
+        if (c > 0) neighbors.add(r * n + c - 1);
+        if (c < n - 1) neighbors.add(r * n + c + 1);
+
+        // Filter already visited
+        neighbors.removeWhere((idx) => pattern.contains(idx));
+
+        if (neighbors.isEmpty) {
+          // Backtrack or restart random walk
+          pattern = [rng.nextInt(n * n)];
+          curr = pattern.first;
+          continue;
+        }
+
+        int next = neighbors[rng.nextInt(neighbors.length)];
+        pattern.add(next);
+        curr = next;
       }
-    });
 
-    _memorizeTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _isMemorizing = false;
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _memorizeTimer?.cancel();
-    _dragPositionNotifier.dispose();
-    super.dispose();
-  }
-
-  Future<void> _onLevelCleared() async {
-    final prefs = await SharedPreferences.getInstance();
-    int highest = prefs.getInt('beta_level_patternlock') ?? 0;
-    if (_currentLevel + 1 > highest) {
-      await prefs.setInt('beta_level_patternlock', _currentLevel + 1);
-    }
-    setState(() => _isSuccess = true);
-  }
-
-  void _nextLevel() {
-    if (_currentLevel < 9) {
-      setState(() {
-        _currentLevel++;
-        _loadLevel();
+      _targetPattern = pattern;
+      
+      // Proportional memorization duration based on pattern length (0.6s per dot)
+      double durationSeconds = max(1.5, targetLength * 0.6);
+      
+      _memorizeTimer = Timer(Duration(milliseconds: (durationSeconds * 1000).toInt()), () {
+        if (mounted) {
+          setState(() {
+            _isMemorizing = false;
+          });
+        }
       });
-    } else {
-      Navigator.pop(context);
-    }
-  }
-
-  void _showHint() {
-    if (_isSuccess) return;
-    _dragPositionNotifier.value = null;
-    setState(() {
-      _userPattern = [];
-      _isMemorizing = true;
-    });
-    _memorizeTimer?.cancel();
-    _memorizeTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _isMemorizing = false;
-        });
-      }
     });
   }
 
-  // Get dot index based on local coordinate
   int _getHitDot(Offset localPos) {
-    for (int idx = 0; idx < 9; idx++) {
-      double cx = 40.0 + (idx % 3) * 80.0;
-      double cy = 40.0 + (idx ~/ 3) * 80.0;
-      double dist = (localPos - Offset(cx, cy)).distance;
-      if (dist < 24.0) {
+    final total = _gridN * _gridN;
+    final hitRadius = _spacing * 0.35;
+    for (int idx = 0; idx < total; idx++) {
+      double dist = (localPos - _dotCenter(idx)).distance;
+      if (dist < hitRadius) {
         return idx;
       }
     }
@@ -142,11 +153,18 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     _dragPositionNotifier.value = d.localPosition;
 
     final idx = _getHitDot(d.localPosition);
-    if (idx != -1 && !_userPattern.contains(idx)) {
-      settingsNotifier.hapticTap();
-      setState(() {
-        _userPattern.add(idx);
-      });
+    if (idx != -1) {
+      if (!_userPattern.contains(idx)) {
+        settingsNotifier.hapticTap();
+        setState(() {
+          _userPattern.add(idx);
+        });
+      } else if (_userPattern.length >= 2 && idx == _userPattern[_userPattern.length - 2]) {
+        settingsNotifier.hapticTap();
+        setState(() {
+          _userPattern.removeLast();
+        });
+      }
     }
   }
 
@@ -156,19 +174,101 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
 
     if (_userPattern.isEmpty) return;
 
-    // Accept any drawing order — set equality
-    final userSet = _userPattern.toSet();
-    final targetSet = _targetPattern.toSet();
-    bool win = userSet.length == targetSet.length && userSet.containsAll(targetSet);
+    // Order independent pattern matching (forward or backward draw sequence)
+    bool win = listEquals(_userPattern, _targetPattern) || 
+               listEquals(_userPattern, _targetPattern.reversed.toList());
 
     if (win) {
       _onLevelCleared();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect pattern! Try again.')));
+      AudioManager.playFail();
+      settingsNotifier.hapticError();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Incorrect pattern sequence! Try again.'),
+        backgroundColor: Colors.redAccent,
+      ));
       setState(() {
         _userPattern = [];
       });
     }
+  }
+
+  Future<void> _onLevelCleared() async {
+    AudioManager.playSuccess();
+    settingsNotifier.hapticSuccess();
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'level_pattern_lock';
+    int highest = prefs.getInt(key) ?? 0;
+    if (_currentLevel + 1 > highest) {
+      await prefs.setInt(key, _currentLevel + 1);
+    }
+
+    int newLevel = _currentLevel + 1;
+    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
+      AdManager.showInterstitialAd();
+    }
+
+    setState(() {
+      _isSuccess = true;
+    });
+  }
+
+  void _nextLevel() {
+    setState(() {
+      _currentLevel++;
+      _loadLevel();
+    });
+  }
+
+  void _showHint() {
+    settingsNotifier.hapticTap();
+    // Reset memorization to show target pattern again
+    _memorizeTimer?.cancel();
+    setState(() {
+      _isMemorizing = true;
+      _userPattern = [];
+    });
+    
+    double durationSeconds = max(1.5, _targetPattern.length * 0.6);
+    _memorizeTimer = Timer(Duration(milliseconds: (durationSeconds * 1000).toInt()), () {
+      if (mounted) {
+        setState(() {
+          _isMemorizing = false;
+        });
+      }
+    });
+  }
+
+  void _showRules() {
+    settingsNotifier.hapticTap();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: context.textMuted.withAlpha(40)),
+        ),
+        title: Text(
+          'How to Play',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
+        ),
+        content: Text(
+          '• Memorize the highlighted path connecting the dots.\n• Trace the pattern from either end.\n• Swipe from dot to dot without lifting your finger.',
+          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Got it',
+              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
+            ),
+          )
+        ],
+      ),
+    );
   }
 
   @override
@@ -180,20 +280,34 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Rules',
+            onPressed: _showRules,
+          ),
+          IconButton(
             icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
             tooltip: 'Show Pattern Again',
             onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: Center(child: Text('Level ${_currentLevel + 1}/10', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),
+            child: Center(
+              child: Text(
+                'Level ${_currentLevel + 1}', 
+                style: AppTheme.numberStyle(
+                  color: AppTheme.dustyMauve, 
+                  fontSize: 14, 
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
         ],
       ),
       body: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
               children: [
                 Expanded(
@@ -216,22 +330,28 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             onPanUpdate: _onPanUpdate,
                             onPanEnd: _onPanEnd,
                             child: Container(
-                              width: 240, height: 240,
-                              decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
+                              width: _boardSize, height: _boardSize,
+                              decoration: BoxDecoration(
+                                color: context.bgCard, 
+                                borderRadius: BorderRadius.circular(16), 
+                                border: Border.all(color: context.textMuted.withAlpha(40)),
+                              ),
                               child: Stack(
                                 children: [
                                   CustomPaint(
-                                    size: const Size(240, 240),
+                                    size: const Size(_boardSize, _boardSize),
                                     painter: PatternPainter(
                                       pattern: _isMemorizing ? _targetPattern : _userPattern,
                                       lineColor: _isMemorizing ? Colors.amber.withOpacity(0.6) : AppTheme.dustyMauve,
                                       dragPositionNotifier: _dragPositionNotifier,
+                                      gridN: _gridN,
+                                      spacing: _spacing,
                                     ),
                                   ),
-                                  for (int idx = 0; idx < 9; idx++)
+                                  for (int idx = 0; idx < _gridN * _gridN; idx++)
                                     Positioned(
-                                      left: 40.0 + (idx % 3) * 80.0 - 20.0,
-                                      top: 40.0 + (idx ~/ 3) * 80.0 - 20.0,
+                                      left: _dotCenter(idx).dx - 20.0,
+                                      top: _dotCenter(idx).dy - 20.0,
                                       child: IgnorePointer(
                                         child: Container(
                                           width: 40, height: 40,
@@ -268,6 +388,12 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 36),
+                        if (_isSuccess && !_playDailyMode)
+                          AutoNextCountdown(
+                            onNext: _nextLevel,
+                            accentColor: AppTheme.dustyMauve,
+                          ),
                       ],
                     ),
                   ),
@@ -275,28 +401,13 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
               ],
             ),
           ),
-          if (_isSuccess)
-            Container(
-              color: Colors.black.withOpacity(0.6),
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                      const SizedBox(height: 16),
-                      Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
-                      AutoNextCountdown(
-                        onNext: _nextLevel,
-                        accentColor: AppTheme.dustyMauve,
-                      ),
-                    ],
-                  ),
-                ),
+          if (_isSuccess && _playDailyMode)
+            Positioned.fill(
+              child: ChallengeClearedOverlay(
+                accentColor: AppTheme.dustyMauve,
+                onComplete: () {
+                  Navigator.pop(context, true);
+                },
               ),
             ),
         ],
@@ -309,12 +420,21 @@ class PatternPainter extends CustomPainter {
   final List<int> pattern;
   final Color lineColor;
   final ValueNotifier<Offset?> dragPositionNotifier;
+  final int gridN;
+  final double spacing;
 
   PatternPainter({
     required this.pattern,
     required this.lineColor,
     required this.dragPositionNotifier,
+    required this.gridN,
+    required this.spacing,
   }) : super(repaint: dragPositionNotifier);
+
+  Offset _center(int idx) => Offset(
+        spacing * (idx % gridN) + spacing / 2,
+        spacing * (idx ~/ gridN) + spacing / 2,
+      );
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -324,28 +444,15 @@ class PatternPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    // 1. Draw connections between completed dots
     if (pattern.length >= 2) {
       for (int i = 0; i < pattern.length - 1; i++) {
-        int a = pattern[i];
-        int b = pattern[i + 1];
-        
-        double x1 = 40.0 + (a % 3) * 80.0;
-        double y1 = 40.0 + (a ~/ 3) * 80.0;
-        double x2 = 40.0 + (b % 3) * 80.0;
-        double y2 = 40.0 + (b ~/ 3) * 80.0;
-        
-        canvas.drawLine(Offset(x1, y1), Offset(x2, y2), paint);
+        canvas.drawLine(_center(pattern[i]), _center(pattern[i + 1]), paint);
       }
     }
 
-    // 2. Draw live line from last dot to current drag position
     final dragOffset = dragPositionNotifier.value;
     if (dragOffset != null && pattern.isNotEmpty) {
-      int lastIdx = pattern.last;
-      double x1 = 40.0 + (lastIdx % 3) * 80.0;
-      double y1 = 40.0 + (lastIdx ~/ 3) * 80.0;
-      canvas.drawLine(Offset(x1, y1), dragOffset, paint);
+      canvas.drawLine(_center(pattern.last), dragOffset, paint);
     }
   }
 
@@ -353,6 +460,8 @@ class PatternPainter extends CustomPainter {
   bool shouldRepaint(covariant PatternPainter oldDelegate) {
     return !listEquals(oldDelegate.pattern, pattern) ||
         oldDelegate.lineColor != lineColor ||
+        oldDelegate.gridN != gridN ||
+        oldDelegate.spacing != spacing ||
         oldDelegate.dragPositionNotifier != dragPositionNotifier;
   }
 }

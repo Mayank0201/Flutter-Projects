@@ -6,6 +6,15 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import 'package:flutter/foundation.dart';
 
+// Unified island-center coordinate formula.
+// Used identically by rendering (Positioned), hit-testing, and the painter so
+// that gesture math and drawing can never disagree.
+const double _kBoardSize = 240.0;
+const double _kCellSize = 80.0;
+const double _kOrigin = 40.0;
+Offset hashiIslandCenter(int idx) =>
+    Offset(_kOrigin + (idx % 3) * _kCellSize, _kOrigin + (idx ~/ 3) * _kCellSize);
+
 class HashiBetaScreen extends StatefulWidget {
   const HashiBetaScreen({super.key});
   @override
@@ -22,6 +31,9 @@ class _HashiBetaScreenState extends State<HashiBetaScreen> {
   int _dragStartIsland = -1;
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
 
+  // Tap (two-tap) selection state
+  int _selectedIsland = -1;
+
   @override
   void initState() {
     super.initState();
@@ -33,6 +45,7 @@ class _HashiBetaScreenState extends State<HashiBetaScreen> {
       _isSuccess = false;
       _bridgeCounts = {};
       _dragStartIsland = -1;
+      _selectedIsland = -1;
       _dragPositionNotifier.value = null;
       if (_currentLevel == 0) {
         _islands = [0, 0, 0, 0, 2, 1, 1, 2, 0];
@@ -97,25 +110,95 @@ class _HashiBetaScreenState extends State<HashiBetaScreen> {
     return sum;
   }
 
-  void _toggleBridge(int a, int b) {
+  // Cycle the bridge count between two islands 0 -> 1 -> 2 -> 0.
+  // Returns true if the bridge set actually changed.
+  bool _toggleBridge(int a, int b) {
+    if (!_isAdjacent(a, b)) return false;
     final key = a < b ? '$a-$b' : '$b-$a';
+    int current = _bridgeCounts[key] ?? 0;
+    // When placing a new bridge (0 -> 1) make sure it does not cross an
+    // existing perpendicular bridge.
+    if (current == 0 && _wouldCross(a, b)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bridges cannot cross each other.')),
+      );
+      return false;
+    }
     setState(() {
-      int current = _bridgeCounts[key] ?? 0;
       _bridgeCounts[key] = (current + 1) % 3;
     });
+    return true;
   }
 
-  int _getIslandAt(Offset localPos) {
-    for (int idx = 0; idx < 9; idx++) {
-      if (_islands[idx] == 0) continue;
-      double cx = 40.0 + (idx % 3) * 80.0;
-      double cy = 40.0 + (idx ~/ 3) * 80.0;
-      double dist = (localPos - Offset(cx, cy)).distance;
-      if (dist < 24.0) {
-        return idx;
+  // True if a straight bridge between a and b would cross an existing
+  // (perpendicular) bridge that already has at least one span.
+  bool _wouldCross(int a, int b) {
+    final p1 = hashiIslandCenter(a);
+    final p2 = hashiIslandCenter(b);
+    for (final entry in _bridgeCounts.entries) {
+      if (entry.value <= 0) continue;
+      final parts = entry.key.split('-');
+      int c = int.parse(parts[0]);
+      int d = int.parse(parts[1]);
+      // Skip bridges sharing an endpoint (they meet at an island, not a cross).
+      if (c == a || c == b || d == a || d == b) continue;
+      if (_segmentsIntersect(p1, p2, hashiIslandCenter(c), hashiIslandCenter(d))) {
+        return true;
       }
     }
-    return -1;
+    return false;
+  }
+
+  bool _segmentsIntersect(Offset p1, Offset p2, Offset p3, Offset p4) {
+    double d1 = _cross(p3, p4, p1);
+    double d2 = _cross(p3, p4, p2);
+    double d3 = _cross(p1, p2, p3);
+    double d4 = _cross(p1, p2, p4);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+      return true;
+    }
+    return false;
+  }
+
+  double _cross(Offset a, Offset b, Offset c) =>
+      (b.dx - a.dx) * (c.dy - a.dy) - (b.dy - a.dy) * (c.dx - a.dx);
+
+  int _getIslandAt(Offset localPos) {
+    int best = -1;
+    double bestDist = 28.0; // slightly larger than the 20px circle radius
+    for (int idx = 0; idx < 9; idx++) {
+      if (_islands[idx] == 0) continue;
+      double dist = (localPos - hashiIslandCenter(idx)).distance;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = idx;
+      }
+    }
+    return best;
+  }
+
+  // Detect a tap on the empty span between two adjacent islands.
+  // Returns the [a, b] pair whose connecting segment the point lies on, else null.
+  List<int>? _connectionAtPoint(Offset localPos) {
+    for (final conn in _getConnections()) {
+      final p1 = hashiIslandCenter(conn[0]);
+      final p2 = hashiIslandCenter(conn[1]);
+      if (_distanceToSegment(localPos, p1, p2) < 16.0) {
+        return conn;
+      }
+    }
+    return null;
+  }
+
+  double _distanceToSegment(Offset p, Offset a, Offset b) {
+    final ab = b - a;
+    final lenSq = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (lenSq == 0) return (p - a).distance;
+    double t = ((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / lenSq;
+    t = t.clamp(0.0, 1.0);
+    final proj = Offset(a.dx + ab.dx * t, a.dy + ab.dy * t);
+    return (p - proj).distance;
   }
 
   bool _isAdjacent(int a, int b) {
@@ -142,34 +225,77 @@ class _HashiBetaScreenState extends State<HashiBetaScreen> {
     return false;
   }
 
+  // ---- TAP: cycle a bridge 0 -> 1 -> 2 -> 0 ----
+  void _onTapUp(TapUpDetails d) {
+    if (_isSuccess) return;
+    final pos = d.localPosition;
+    int idx = _getIslandAt(pos);
+
+    if (idx != -1) {
+      // Tapped an island: two-tap mode. First tap selects, second adjacent
+      // tap toggles the connecting bridge.
+      if (_selectedIsland == -1) {
+        setState(() => _selectedIsland = idx);
+        settingsNotifier.hapticTap();
+      } else if (_selectedIsland == idx) {
+        setState(() => _selectedIsland = -1); // deselect
+      } else {
+        int a = _selectedIsland;
+        setState(() => _selectedIsland = -1);
+        if (_toggleBridge(a, idx)) {
+          settingsNotifier.hapticTap();
+        }
+      }
+      return;
+    }
+
+    // Not on an island: maybe tapped the empty span between two adjacent islands.
+    final conn = _connectionAtPoint(pos);
+    if (conn != null) {
+      if (_selectedIsland != -1) setState(() => _selectedIsland = -1);
+      if (_toggleBridge(conn[0], conn[1])) {
+        settingsNotifier.hapticTap();
+      }
+    } else if (_selectedIsland != -1) {
+      setState(() => _selectedIsland = -1); // tapped empty space -> clear selection
+    }
+  }
+
+  // ---- DRAG: from one island to an adjacent aligned island ----
   void _onPanStart(DragStartDetails d) {
     if (_isSuccess) return;
     int idx = _getIslandAt(d.localPosition);
     if (idx != -1) {
       settingsNotifier.hapticTap();
       _dragStartIsland = idx;
-      double cx = 40.0 + (idx % 3) * 80.0;
-      double cy = 40.0 + (idx ~/ 3) * 80.0;
-      _dragPositionNotifier.value = Offset(cx, cy);
+      // rubber-band starts at the island center (no setState — notifier repaints)
+      _dragPositionNotifier.value = hashiIslandCenter(idx);
+      if (_selectedIsland != -1) setState(() => _selectedIsland = -1);
     }
   }
 
   void _onPanUpdate(DragUpdateDetails d) {
     if (_isSuccess || _dragStartIsland == -1) return;
+    // Only the rubber-band line follows the finger: ValueNotifier drives the
+    // painter's repaint directly, so NO setState here (perf: no per-frame rebuild).
     _dragPositionNotifier.value = d.localPosition;
   }
 
   void _onPanEnd(DragEndDetails d) {
-    if (_isSuccess || _dragStartIsland == -1) return;
+    if (_isSuccess || _dragStartIsland == -1) {
+      _dragStartIsland = -1;
+      _dragPositionNotifier.value = null;
+      return;
+    }
     final releasePos = _dragPositionNotifier.value;
     _dragPositionNotifier.value = null;
 
     if (releasePos != null) {
       int targetIdx = _getIslandAt(releasePos);
       if (targetIdx != -1 && targetIdx != _dragStartIsland) {
-        if (_isAdjacent(_dragStartIsland, targetIdx)) {
+        // _toggleBridge validates adjacency + crossing internally.
+        if (_toggleBridge(_dragStartIsland, targetIdx)) {
           settingsNotifier.hapticTap();
-          _toggleBridge(_dragStartIsland, targetIdx);
         }
       }
     }
@@ -322,15 +448,17 @@ class _HashiBetaScreenState extends State<HashiBetaScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Drag from one island to another to draw bridges. Connect all islands into a single network.', style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), textAlign: TextAlign.center),
+                        Text('Tap between two islands (or tap one then an adjacent one), or drag from island to island, to draw bridges. Connect all islands into a single network.', style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), textAlign: TextAlign.center),
                         const SizedBox(height: 24),
                         RepaintBoundary(
                           child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapUp: _onTapUp,
                             onPanStart: _onPanStart,
                             onPanUpdate: _onPanUpdate,
                             onPanEnd: _onPanEnd,
                             child: Container(
-                              width: 240, height: 240,
+                              width: _kBoardSize, height: _kBoardSize,
                               decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
                               child: Stack(
                                 children: [
@@ -348,31 +476,50 @@ class _HashiBetaScreenState extends State<HashiBetaScreen> {
                                   for (int i = 0; i < 9; i++)
                                     if (_islands[i] > 0)
                                       Positioned(
-                                        left: 40.0 + (i % 3) * 80.0 - 20.0,
-                                        top: 40.0 + (i ~/ 3) * 80.0 - 20.0,
-                                        child: Builder(
-                                          builder: (context) {
-                                            int sum = _getCurrentBridges(i);
-                                            Color nodeColor = sum == _islands[i]
-                                                ? Colors.green.shade700
-                                                : (sum > _islands[i] ? Colors.red.shade700 : AppTheme.dustyMauve);
-                                            return Container(
-                                              width: 40, height: 40,
-                                              decoration: BoxDecoration(
-                                                color: nodeColor,
-                                                shape: BoxShape.circle,
-                                                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
-                                              ),
-                                              child: Center(
-                                                child: Text('${_islands[i]}', style: GoogleFonts.spaceGrotesk(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                                              ),
-                                            );
-                                          }
+                                        left: hashiIslandCenter(i).dx - 20.0,
+                                        top: hashiIslandCenter(i).dy - 20.0,
+                                        child: IgnorePointer(
+                                          child: Builder(
+                                            builder: (context) {
+                                              int sum = _getCurrentBridges(i);
+                                              Color nodeColor = sum == _islands[i]
+                                                  ? Colors.green.shade700
+                                                  : (sum > _islands[i] ? Colors.red.shade700 : AppTheme.dustyMauve);
+                                              bool selected = _selectedIsland == i;
+                                              return Container(
+                                                width: 40, height: 40,
+                                                decoration: BoxDecoration(
+                                                  color: nodeColor,
+                                                  shape: BoxShape.circle,
+                                                  border: selected
+                                                      ? Border.all(color: Colors.white, width: 3)
+                                                      : null,
+                                                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
+                                                ),
+                                                child: Center(
+                                                  child: Text('${_islands[i]}', style: GoogleFonts.spaceGrotesk(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                                                ),
+                                              );
+                                            }
+                                          ),
                                         ),
                                       ),
                                 ],
                               ),
                             ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(top: 16),
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: context.textMuted.withAlpha(20)),
+                          ),
+                          child: Text(
+                            '💡 Rule Details:\n• Connect islands with bridges (max 2 between a pair).\n• Bridges are straight, horizontal or vertical, and cannot cross.\n• Each island\'s bridge count must equal its number.',
+                            style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
                           ),
                         ),
                       ],
@@ -455,10 +602,12 @@ class HashiPainter extends CustomPainter {
       final key = a < b ? '$a-$b' : '$b-$a';
       int val = bridgeCounts[key] ?? 0;
 
-      double x1 = 40.0 + (a % 3) * 80.0;
-      double y1 = 40.0 + (a ~/ 3) * 80.0;
-      double x2 = 40.0 + (b % 3) * 80.0;
-      double y2 = 40.0 + (b ~/ 3) * 80.0;
+      final c1 = hashiIslandCenter(a);
+      final c2 = hashiIslandCenter(b);
+      double x1 = c1.dx;
+      double y1 = c1.dy;
+      double x2 = c2.dx;
+      double y2 = c2.dy;
 
       if (val == 0) {
         paint.color = lineColor.withOpacity(0.15);
@@ -507,9 +656,7 @@ class HashiPainter extends CustomPainter {
     if (dragOffset != null && dragStartIsland != -1) {
       paint.color = lineColor.withOpacity(0.5);
       paint.strokeWidth = 3.0;
-      double x1 = 40.0 + (dragStartIsland % 3) * 80.0;
-      double y1 = 40.0 + (dragStartIsland ~/ 3) * 80.0;
-      canvas.drawLine(Offset(x1, y1), dragOffset, paint);
+      canvas.drawLine(hashiIslandCenter(dragStartIsland), dragOffset, paint);
     }
   }
 

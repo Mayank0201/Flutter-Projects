@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:collection';
 import '../../../theme/app_theme.dart';
+import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 
 class SlidingTileBetaScreen extends StatefulWidget {
@@ -78,6 +79,7 @@ class _SlidingTileBetaScreenState extends State<SlidingTileBetaScreen> {
     bool isAdjacent = (emptyRow == tappedRow && (emptyCol - tappedCol).abs() == 1) ||
                       (emptyCol == tappedCol && (emptyRow - tappedRow).abs() == 1);
     if (isAdjacent) {
+      settingsNotifier.hapticTap();
       setState(() {
         _board[emptyIdx] = _board[idx];
         _board[idx] = 0;
@@ -85,6 +87,35 @@ class _SlidingTileBetaScreenState extends State<SlidingTileBetaScreen> {
           _onLevelCleared();
         }
       });
+    }
+  }
+
+  // Slide via swipe/drag. The swipe direction must point toward the empty gap,
+  // i.e. the neighbouring cell in that direction is the empty slot. Reuses the
+  // same move logic as tapping. An illegal swipe does nothing.
+  void _swipeTile(int idx, {required bool horizontal, required double primaryVelocity}) {
+    if (_isSuccess) return;
+    if (primaryVelocity == 0) return;
+    int emptyIdx = _board.indexOf(0);
+    int row = idx ~/ 3;
+    int col = idx % 3;
+    int? targetIdx;
+    if (horizontal) {
+      if (primaryVelocity > 0 && col < 2) {
+        targetIdx = idx + 1; // swipe right
+      } else if (primaryVelocity < 0 && col > 0) {
+        targetIdx = idx - 1; // swipe left
+      }
+    } else {
+      if (primaryVelocity > 0 && row < 2) {
+        targetIdx = idx + 3; // swipe down
+      } else if (primaryVelocity < 0 && row > 0) {
+        targetIdx = idx - 3; // swipe up
+      }
+    }
+    // Only slide if the swipe points at the empty gap.
+    if (targetIdx == emptyIdx) {
+      _moveTile(idx);
     }
   }
 
@@ -203,7 +234,7 @@ class _SlidingTileBetaScreenState extends State<SlidingTileBetaScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Slide tiles to arrange them in order 1 to 8.', style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), textAlign: TextAlign.center),
+                        Text('Tap or swipe tiles to arrange them in order 1 to 8.', style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary), textAlign: TextAlign.center),
                         const SizedBox(height: 24),
                         Container(
                           width: 240, height: 240,
@@ -216,6 +247,8 @@ class _SlidingTileBetaScreenState extends State<SlidingTileBetaScreen> {
                               int val = _board[idx];
                               return GestureDetector(
                                 onTap: () => _moveTile(idx),
+                                onHorizontalDragEnd: (details) => _swipeTile(idx, horizontal: true, primaryVelocity: details.primaryVelocity ?? 0),
+                                onVerticalDragEnd: (details) => _swipeTile(idx, horizontal: false, primaryVelocity: details.primaryVelocity ?? 0),
                                 child: Container(
                                   decoration: BoxDecoration(
                                     color: val == 0 ? Colors.transparent : context.bgSurface,
@@ -229,6 +262,21 @@ class _SlidingTileBetaScreenState extends State<SlidingTileBetaScreen> {
                                 ),
                               );
                             },
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(top: 16),
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: context.textMuted.withAlpha(20)),
+                          ),
+                          child: Text(
+                            '💡 Rule Details:\n'
+                            '• Slide tiles into the empty space by tapping or swiping.\n'
+                            '• Arrange the numbers in order to solve the puzzle.',
+                            style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
                           ),
                         ),
                       ],

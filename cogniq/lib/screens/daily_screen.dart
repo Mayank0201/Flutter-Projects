@@ -7,7 +7,8 @@ import '../theme/settings_manager.dart';
 import '../utils/audio_manager.dart';
 import '../utils/daily_challenge_manager.dart';
 import '../utils/recently_played_manager.dart';
-
+import '../utils/challenge_reminder_helper.dart';
+import '../utils/activity_tracker.dart';
 const Map<String, IconData> _gameIcons = {
   'wordle':      Icons.grid_4x4_outlined,
   'hangman':     Icons.person_outline,
@@ -63,6 +64,9 @@ class _DailyScreenState extends State<DailyScreen> {
     super.initState();
     _loadDailyState();
     _startCountdown();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ChallengeReminderHelper.checkAndShowReminder(context);
+    });
   }
 
   @override
@@ -199,6 +203,7 @@ class _DailyScreenState extends State<DailyScreen> {
     
     if (!mounted) return;
     AudioManager.fadeOutMusic();
+    ActivityTracker.trackGamePlay(game.id);
     final result = await Navigator.pushNamed(context, game.routeName);
     AudioManager.fadeInMusic();
 

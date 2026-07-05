@@ -235,11 +235,28 @@ class _KakuroBetaScreenState extends State<KakuroBetaScreen> {
                                   itemCount: 16,
                                   itemBuilder: (context, idx) {
                                     int type = _types[idx];
+                                    // Plain wall / blank cell: solid dark, no slash, no number.
                                     if (type == 0) return Container(color: Colors.grey[900]);
                                     if (type == 2) {
+                                      final int hc = _hClues[idx];
+                                      final int vc = _vClues[idx];
+                                      // A block cell with no clue in either direction is just a
+                                      // solid wall — no diagonal, no number.
+                                      if (hc == 0 && vc == 0) {
+                                        return Container(color: Colors.grey[900]);
+                                      }
+                                      // Clue cell: diagonal divider, DOWN sum top-right,
+                                      // RIGHT sum bottom-left.
                                       return Container(
-                                        color: Colors.grey[950],
-                                        child: CustomPaint(painter: _KakuroCluePainter(_hClues[idx], _vClues[idx])),
+                                        color: Colors.grey[900],
+                                        child: CustomPaint(
+                                          painter: _KakuroCluePainter(
+                                            rightSum: hc,
+                                            downSum: vc,
+                                            lineColor: AppTheme.dustyMauve.withAlpha(160),
+                                            textColor: Colors.white.withAlpha(230),
+                                          ),
+                                        ),
                                       );
                                     }
                                     return GestureDetector(
@@ -320,6 +337,23 @@ class _KakuroBetaScreenState extends State<KakuroBetaScreen> {
                                 ],
                               ),
                             ),
+                            Container(
+                              margin: const EdgeInsets.only(top: 16),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: context.bgCard,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: context.textMuted.withAlpha(20)),
+                              ),
+                              child: Text(
+                                '💡 Rule Details:\n'
+                                '• Fill white cells with 1-9 so each run sums to its clue.\n'
+                                '• The number top-right of a shaded cell = sum of the run going DOWN.\n'
+                                '• The number bottom-left = sum of the run going RIGHT.\n'
+                                '• No digit repeats within a single run.',
+                                style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                              ),
+                            ),
                       ],
                     ),
                   ),
@@ -370,22 +404,69 @@ class _KakuroBetaScreenState extends State<KakuroBetaScreen> {
   }
 }
 class _KakuroCluePainter extends CustomPainter {
-  final int hSum; final int vSum;
-  _KakuroCluePainter(this.hSum, this.vSum);
+  final int rightSum; // clue for the run going RIGHT  -> bottom-left triangle
+  final int downSum;  // clue for the run going DOWN   -> top-right triangle
+  final Color lineColor;
+  final Color textColor;
+  const _KakuroCluePainter({
+    required this.rightSum,
+    required this.downSum,
+    required this.lineColor,
+    required this.textColor,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
-    Paint lp = Paint()..color = Colors.grey..strokeWidth = 1.0;
-    canvas.drawLine(const Offset(0, 0), Offset(size.width, size.height), lp);
-    TextPainter tp;
-    if (hSum > 0) {
-      tp = TextPainter(text: TextSpan(text: '$hSum', style: GoogleFonts.spaceGrotesk(fontSize: 10, color: Colors.white)), textDirection: TextDirection.ltr)..layout();
-      tp.paint(canvas, Offset(size.width * 0.55, size.height * 0.15));
+    // Single diagonal divider from top-left to bottom-right.
+    final Paint lp = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1.5
+      ..isAntiAlias = true;
+    canvas.drawLine(Offset.zero, Offset(size.width, size.height), lp);
+
+    final double fontSize = size.shortestSide * 0.26;
+
+    // DOWN sum: top-right triangle.
+    if (downSum > 0) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '$downSum',
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+            color: textColor,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final double cx = size.width * 0.72 - tp.width / 2;
+      final double cy = size.height * 0.24 - tp.height / 2;
+      tp.paint(canvas, Offset(cx, cy));
     }
-    if (vSum > 0) {
-      tp = TextPainter(text: TextSpan(text: '$vSum', style: GoogleFonts.spaceGrotesk(fontSize: 10, color: Colors.white)), textDirection: TextDirection.ltr)..layout();
-      tp.paint(canvas, Offset(size.width * 0.15, size.height * 0.55));
+
+    // RIGHT sum: bottom-left triangle.
+    if (rightSum > 0) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '$rightSum',
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+            color: textColor,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final double cx = size.width * 0.28 - tp.width / 2;
+      final double cy = size.height * 0.76 - tp.height / 2;
+      tp.paint(canvas, Offset(cx, cy));
     }
   }
+
   @override
-  bool shouldRepaint(covariant CustomPainter old) => false;
+  bool shouldRepaint(covariant _KakuroCluePainter old) =>
+      old.rightSum != rightSum ||
+      old.downSum != downSum ||
+      old.lineColor != lineColor ||
+      old.textColor != textColor;
 }

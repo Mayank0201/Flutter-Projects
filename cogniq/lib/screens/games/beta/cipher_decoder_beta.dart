@@ -17,8 +17,10 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
   String _encoded = "";
   String _target = "";
   int _currentShift = 1;
-  List<TextEditingController> _controllers = [];
-  List<FocusNode> _focusNodes = [];
+  // One editable guess per cipher position. Letter positions start at 'A';
+  // non-letter positions (spaces/punctuation) store the character itself and
+  // are not editable.
+  List<String> _guesses = [];
 
   @override
   void initState() {
@@ -26,27 +28,9 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
     _loadLevel();
   }
 
-  @override
-  void dispose() {
-    for (var c in _controllers) {
-      c.dispose();
-    }
-    for (var f in _focusNodes) {
-      f.dispose();
-    }
-    super.dispose();
-  }
+  bool _isLetter(String c) => c.length == 1 && c.codeUnitAt(0) >= 65 && c.codeUnitAt(0) <= 90;
 
   void _loadLevel() {
-    for (var c in _controllers) {
-      c.dispose();
-    }
-    for (var f in _focusNodes) {
-      f.dispose();
-    }
-    _controllers = [];
-    _focusNodes = [];
-
     setState(() {
       _isSuccess = false;
       if (_currentLevel == 0) {
@@ -91,10 +75,10 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
         _currentShift = 5;
       }
 
-      for (int i = 0; i < _encoded.length; i++) {
-        _controllers.add(TextEditingController());
-        _focusNodes.add(FocusNode());
-      }
+      _guesses = [
+        for (int i = 0; i < _encoded.length; i++)
+          _isLetter(_encoded[i]) ? 'A' : _encoded[i],
+      ];
     });
   }
 
@@ -118,8 +102,20 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
     }
   }
 
+  // Shift a single letter one step. dir = +1 (A->B->...->Z->A) or -1 (A->Z wrap).
+  void _step(int i, int dir) {
+    if (!_isLetter(_guesses[i])) return;
+    settingsNotifier.hapticTap();
+    int code = _guesses[i].codeUnitAt(0) - 65;
+    code = (code + dir) % 26;
+    if (code < 0) code += 26;
+    setState(() {
+      _guesses[i] = String.fromCharCode(65 + code);
+    });
+  }
+
   void _checkSolution() {
-    String userText = _controllers.map((c) => c.text.trim().toUpperCase()).join();
+    final userText = _guesses.join();
     if (userText == _target) {
       settingsNotifier.hapticTap();
       _onLevelCleared();
@@ -133,15 +129,15 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
   void _showHint() {
     int hintIdx = -1;
     for (int i = 0; i < _target.length; i++) {
-      if (_controllers[i].text.toUpperCase() != _target[i]) {
+      if (_isLetter(_encoded[i]) && _guesses[i] != _target[i]) {
         hintIdx = i;
         break;
       }
     }
-    
+
     if (hintIdx != -1) {
       setState(() {
-        _controllers[hintIdx].text = _target[hintIdx];
+        _guesses[hintIdx] = _target[hintIdx];
       });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Hint: The Caesar Shift for this level is +$_currentShift. Filled in one character for you.'),
@@ -151,6 +147,87 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
         content: Text('All characters are already correctly filled!'),
       ));
     }
+  }
+
+  Widget _buildCaret(IconData icon, VoidCallback onTap) {
+    return InkResponse(
+      onTap: onTap,
+      radius: 22,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Icon(icon, size: 24, color: AppTheme.dustyMauve),
+      ),
+    );
+  }
+
+  Widget _buildSlot(int i) {
+    final ch = _encoded[i];
+    final isLetter = _isLetter(ch);
+
+    if (!isLetter) {
+      // Non-editable character (space, punctuation) shown as-is.
+      return SizedBox(
+        width: ch.trim().isEmpty ? 20 : 32,
+        height: 132,
+        child: Center(
+          child: Text(
+            ch,
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: context.textMuted,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final isCorrect = _guesses[i] == _target[i];
+
+    return SizedBox(
+      width: 54,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Cipher symbol reference.
+          Text(
+            ch,
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.dustyMauve.withAlpha(160),
+            ),
+          ),
+          const SizedBox(height: 2),
+          _buildCaret(Icons.keyboard_arrow_up, () => _step(i, 1)),
+          Container(
+            width: 48,
+            height: 52,
+            decoration: BoxDecoration(
+              color: isCorrect
+                  ? AppTheme.dustyMauve.withAlpha(38)
+                  : context.bgCard,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isCorrect
+                    ? AppTheme.dustyMauve.withAlpha(140)
+                    : context.textMuted.withAlpha(50),
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              _guesses[i],
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: context.textPrimary,
+              ),
+            ),
+          ),
+          _buildCaret(Icons.keyboard_arrow_down, () => _step(i, -1)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -192,63 +269,27 @@ class _CipherDecoderBetaScreenState extends State<CipherDecoderBetaScreen> {
                               textAlign: TextAlign.center,
                             ),
                           ),
-                          const SizedBox(height: 32),
-                          // Column based layout
+                          const SizedBox(height: 28),
                           Wrap(
                             alignment: WrapAlignment.center,
                             spacing: 8,
                             runSpacing: 16,
                             children: [
-                              for (int i = 0; i < _encoded.length; i++)
-                                Container(
-                                  width: 48,
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        _encoded[i],
-                                        style: GoogleFonts.spaceGrotesk(
-                                          fontSize: 32,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppTheme.dustyMauve,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Icon(
-                                        Icons.arrow_downward,
-                                        size: 16,
-                                        color: context.textMuted.withOpacity(0.5),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Container(
-                                        height: 52,
-                                        decoration: BoxDecoration(
-                                          color: context.bgCard,
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: context.textMuted.withAlpha(50)),
-                                        ),
-                                        child: TextField(
-                                          controller: _controllers[i],
-                                          focusNode: _focusNodes[i],
-                                          maxLength: 1,
-                                          textAlign: TextAlign.center,
-                                          textCapitalization: TextCapitalization.characters,
-                                          style: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.bold, color: context.textPrimary),
-                                          decoration: const InputDecoration(
-                                            counterText: "",
-                                            border: InputBorder.none,
-                                          ),
-                                          onChanged: (val) {
-                                            if (val.isNotEmpty && i < _encoded.length - 1) {
-                                              _focusNodes[i + 1].requestFocus();
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              for (int i = 0; i < _encoded.length; i++) _buildSlot(i),
                             ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(top: 16),
+                            decoration: BoxDecoration(
+                              color: context.bgCard,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: context.textMuted.withAlpha(20)),
+                            ),
+                            child: Text(
+                              '💡 Rule Details:\n• Each symbol maps to one hidden letter.\n• Use the ▲ / ▼ carets to shift a letter one step at a time.\n• Decode the full quote, then press Check.',
+                              style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                            ),
                           ),
                         ],
                       ),
