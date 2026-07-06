@@ -114,7 +114,7 @@ class _HomeScreenState extends State<HomeScreen>
       NotificationManager.requestPermissions();
       NotificationManager.updateDailyChallengeReminder();
       NotificationManager.updateInactivityReminders();
-      NotificationManager.scheduleInstallTestNotification();
+      // NotificationManager.scheduleInstallTestNotification();
       _checkAndShowDailyChallengePopup();
     });
   }

@@ -24,6 +24,8 @@ import '../games/beta/buzzer_beta.dart';
 import '../games/categories/categories_screen.dart';
 import '../games/beta/rush_hour_beta.dart';
 import '../games/beta/word_salad_beta.dart';
+import '../games/nonogram/nonogram_screen.dart';
+import '../games/word_search/word_search_screen.dart';
 
 class BetaGameInfo {
   final String id;
@@ -255,6 +257,22 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         category: 'Word & Vocabulary',
         icon: Icons.restaurant_menu_outlined,
         builder: const WordSaladBetaScreen(),
+      ),
+      BetaGameInfo(
+        id: 'nonogram',
+        name: 'Nonogram',
+        description: 'Fill grid cells to match row/column clues.',
+        category: 'Logic Grids',
+        icon: Icons.apps_rounded,
+        builder: const NonogramScreen(),
+      ),
+      BetaGameInfo(
+        id: 'wordsearch',
+        name: 'Word Search',
+        description: 'Find target words hidden in grid.',
+        category: 'Word & Vocabulary',
+        icon: Icons.search_outlined,
+        builder: const WordSearchScreen(),
       ),
     ];
   }

@@ -7,6 +7,7 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/ad_manager.dart';
 import '../../../utils/audio_manager.dart';
+import '../../../utils/hint_manager.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -25,6 +26,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   List<int> _userPattern = [];
   bool _isMemorizing = true;
   Timer? _memorizeTimer;
+  int _hintCount = 0;
 
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
   static const double _boardSize = 260;
@@ -51,8 +53,10 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_pattern_lock') ?? 0;
+    final hCount = await HintManager.getHints('pattern_lock');
     if (mounted) {
       setState(() {
+        _hintCount = hCount;
         _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
@@ -204,14 +208,22 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       await prefs.setInt(key, _currentLevel + 1);
     }
 
-    int newLevel = _currentLevel + 1;
-    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
-      AdManager.showInterstitialAd();
-    }
+    final earned = await HintManager.onLevelCleared('pattern_lock');
+    final hCount = await HintManager.getHints('pattern_lock');
 
     setState(() {
+      _hintCount = hCount;
       _isSuccess = true;
     });
+
+    if (earned && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hint earned! (Total: $hCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.accentFor('pattern_lock'),
+        ),
+      );
+    }
   }
 
   void _nextLevel() {
@@ -221,23 +233,44 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     });
   }
 
-  void _showHint() {
+  Future<void> _useHint() async {
+    if (_hintCount <= 0 || _isSuccess || _isMemorizing) return;
+
     settingsNotifier.hapticTap();
-    // Reset memorization to show target pattern again
-    _memorizeTimer?.cancel();
-    setState(() {
-      _isMemorizing = true;
-      _userPattern = [];
-    });
-    
-    double durationSeconds = max(1.5, _targetPattern.length * 0.6);
-    _memorizeTimer = Timer(Duration(milliseconds: (durationSeconds * 1000).toInt()), () {
-      if (mounted) {
-        setState(() {
-          _isMemorizing = false;
-        });
+
+    bool isPrefix = true;
+    if (_userPattern.length > _targetPattern.length) {
+      isPrefix = false;
+    } else {
+      for (int i = 0; i < _userPattern.length; i++) {
+        if (_userPattern[i] != _targetPattern[i]) {
+          isPrefix = false;
+          break;
+        }
       }
+    }
+
+    setState(() {
+      if (!isPrefix) {
+        _userPattern.clear();
+      }
+      _userPattern.add(_targetPattern[_userPattern.length]);
     });
+
+    await HintManager.useHint('pattern_lock');
+    final hCount = await HintManager.getHints('pattern_lock');
+    setState(() {
+      _hintCount = hCount;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text('Hint: Revealed the next dot!'),
+      backgroundColor: AppTheme.accentFor('pattern_lock'),
+    ));
+
+    if (_userPattern.length == _targetPattern.length) {
+      _onLevelCleared();
+    }
   }
 
   void _showRules() {
@@ -280,14 +313,30 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                   child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: _hintCount > 0 && !_isSuccess && !_isMemorizing ? _useHint : null,
+          ),
+          IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
-          ),
-          IconButton(
-            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
-            tooltip: 'Show Pattern Again',
-            onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),

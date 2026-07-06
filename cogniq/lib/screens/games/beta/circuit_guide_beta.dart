@@ -9,6 +9,8 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/ad_manager.dart';
 import '../../../utils/audio_manager.dart';
 
+import '../../../utils/hint_manager.dart';
+
 class CircuitGuideBetaScreen extends StatefulWidget {
   const CircuitGuideBetaScreen({super.key});
   @override
@@ -22,6 +24,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   int _gridSize = 3;
   List<int> _rotations = []; // 0 to 3
   List<String> _wireTypes = []; // "SRC", "TGT", "S", "E", "T"
+  List<int> _solutionRotations = [];
+  int _hintCount = 0;
 
   @override
   void initState() {
@@ -33,8 +37,10 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_circuit_guide') ?? 0;
+    final hCount = await HintManager.getHints('circuit_guide');
     if (mounted) {
       setState(() {
+        _hintCount = hCount;
         _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
@@ -284,12 +290,14 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             _rotations[i] = 0;
           }
         }
-        
-        final playRng = Random(_currentLevel * 43 + 999);
-        for (int i = 0; i < W * W; i++) {
-          if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT") {
-            _rotations[i] = playRng.nextInt(4);
-          }
+      }
+      
+      _solutionRotations = List.from(_rotations);
+
+      final playRng = Random(_currentLevel * 43 + 999);
+      for (int i = 0; i < _gridSize * _gridSize; i++) {
+        if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT") {
+          _rotations[i] = playRng.nextInt(4);
         }
       }
     });
@@ -369,16 +377,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     return connected;
   }
 
-  void _onRotate(int idx) {
-    if (_isSuccess) return;
-    if (_wireTypes[idx] == "SRC" || _wireTypes[idx] == "TGT") return;
-
-    AudioManager.playClick();
-    settingsNotifier.hapticTap();
-    setState(() {
-      _rotations[idx] = (_rotations[idx] + 1) % 4;
-    });
-
+  void _checkConnections() {
     final conn = _getConnectedStatus();
     bool won = true;
     for (int i = 0; i < _wireTypes.length; i++) {
@@ -392,6 +391,19 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     }
   }
 
+  void _onRotate(int idx) {
+    if (_isSuccess) return;
+    if (_wireTypes[idx] == "SRC" || _wireTypes[idx] == "TGT") return;
+
+    AudioManager.playClick();
+    settingsNotifier.hapticTap();
+    setState(() {
+      _rotations[idx] = (_rotations[idx] + 1) % 4;
+    });
+
+    _checkConnections();
+  }
+
   Future<void> _onLevelCleared() async {
     AudioManager.playSuccess();
     settingsNotifier.hapticSuccess();
@@ -403,14 +415,22 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       await prefs.setInt(key, _currentLevel + 1);
     }
 
-    int newLevel = _currentLevel + 1;
-    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
-      AdManager.showInterstitialAd();
-    }
+    final earned = await HintManager.onLevelCleared('circuit_guide');
+    final hCount = await HintManager.getHints('circuit_guide');
 
     setState(() {
+      _hintCount = hCount;
       _isSuccess = true;
     });
+
+    if (earned && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hint earned! (Total: $hCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.accentFor('circuit_guide'),
+        ),
+      );
+    }
   }
 
   void _nextLevel() {
@@ -420,11 +440,40 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     });
   }
 
-  void _showHint() {
+  Future<void> _useHint() async {
+    if (_hintCount <= 0 || _isSuccess) return;
+
+    List<int> wrongIndices = [];
+    for (int i = 0; i < _wireTypes.length; i++) {
+      if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT") {
+        if (_rotations[i] != _solutionRotations[i]) {
+          wrongIndices.add(i);
+        }
+      }
+    }
+
+    if (wrongIndices.isEmpty) return;
+
     settingsNotifier.hapticTap();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Hint: Follow the glowing wires starting from the power source!'),
+    final rng = Random();
+    int targetIdx = wrongIndices[rng.nextInt(wrongIndices.length)];
+
+    setState(() {
+      _rotations[targetIdx] = _solutionRotations[targetIdx];
+    });
+
+    await HintManager.useHint('circuit_guide');
+    final hCount = await HintManager.getHints('circuit_guide');
+    setState(() {
+      _hintCount = hCount;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Hint: Corrected one wire on the board!'),
+      backgroundColor: AppTheme.accentFor('circuit_guide'),
     ));
+
+    _checkConnections();
   }
 
   void _showRules() {
@@ -469,14 +518,30 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                   child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: _hintCount > 0 && !_isSuccess ? _useHint : null,
+          ),
+          IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
-          ),
-          IconButton(
-            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
-            tooltip: 'Hint',
-            onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),

@@ -137,15 +137,6 @@ class NotificationManager {
   }
 
   static Future<AndroidScheduleMode> _getScheduleMode() async {
-    try {
-      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      if (androidPlugin != null) {
-        final bool? canSchedule = await androidPlugin.canScheduleExactNotifications();
-        if (canSchedule == true) {
-          return AndroidScheduleMode.exactAllowWhileIdle;
-        }
-      }
-    } catch (_) {}
     return AndroidScheduleMode.inexactAllowWhileIdle;
   }
 

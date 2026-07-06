@@ -8,6 +8,7 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/ad_manager.dart';
 import '../../../utils/audio_manager.dart';
+import '../../../utils/hint_manager.dart';
 import 'package:flutter/foundation.dart';
 
 class NumberlinkBetaScreen extends StatefulWidget {
@@ -25,6 +26,8 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   int _numColors = 2;
   List<int> _grid = []; // 0 = empty, 1..C = endpoints
   List<List<int>> _paths = []; // User paths for each color 1..C
+  List<List<int>> _solutionPaths = [];
+  int _hintCount = 0;
   int _dragColor = 0; // 0 = none, 1..C = active dragging color
 
   final List<Color> _colors = [
@@ -48,8 +51,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_colour_link') ?? 0;
+    final hCount = await HintManager.getHints('colour_link');
     if (mounted) {
       setState(() {
+        _hintCount = hCount;
         _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
@@ -138,6 +143,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
             _grid[ep1] = c;
             _grid[ep2] = c;
           }
+          _solutionPaths = testPaths;
           generated = true;
           break;
         }
@@ -151,6 +157,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         _paths = List.generate(2, (_) => []);
         _grid[0] = 1; _grid[15] = 1; // Red
         _grid[3] = 2; _grid[12] = 2; // Blue
+        _solutionPaths = [
+          [0, 1, 5, 9, 13, 14, 15],
+          [3, 2, 6, 10, 11, 7, 8, 12]
+        ];
       }
     });
   }
@@ -322,14 +332,22 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
       await prefs.setInt(key, _currentLevel + 1);
     }
 
-    int newLevel = _currentLevel + 1;
-    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
-      AdManager.showInterstitialAd();
-    }
+    final earned = await HintManager.onLevelCleared('colour_link');
+    final hCount = await HintManager.getHints('colour_link');
 
     setState(() {
+      _hintCount = hCount;
       _isSuccess = true;
     });
+
+    if (earned && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hint earned! (Total: $hCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.accentFor('colour_link'),
+        ),
+      );
+    }
   }
 
   void _nextLevel() {
@@ -339,11 +357,76 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     });
   }
 
-  void _showHint() {
+  Future<void> _useHint() async {
+    if (_hintCount <= 0 || _isSuccess) return;
+
     settingsNotifier.hapticTap();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Hint: Connect the corners first to leave room in the center!'),
-    ));
+
+    int targetColor = -1;
+    for (int c = 1; c <= _numColors; c++) {
+      final userPath = _paths[c - 1];
+      final solPath = _solutionPaths[c - 1];
+      
+      bool isMatch = userPath.length == solPath.length;
+      if (isMatch) {
+        for (int i = 0; i < userPath.length; i++) {
+          if (userPath[i] != solPath[i]) {
+            isMatch = false;
+            break;
+          }
+        }
+      }
+      if (!isMatch) {
+        targetColor = c;
+        break;
+      }
+    }
+
+    if (targetColor == -1) return;
+
+    final userPath = _paths[targetColor - 1];
+    final solPath = _solutionPaths[targetColor - 1];
+
+    bool isPrefix = true;
+    if (userPath.length > solPath.length) {
+      isPrefix = false;
+    } else {
+      for (int i = 0; i < userPath.length; i++) {
+        if (userPath[i] != solPath[i]) {
+          isPrefix = false;
+          break;
+        }
+      }
+    }
+
+    setState(() {
+      if (!isPrefix) {
+        userPath.clear();
+      }
+      if (userPath.isEmpty) {
+        userPath.addAll(solPath.take(2));
+        for (int c = 1; c <= _numColors; c++) {
+          if (c == targetColor) continue;
+          _paths[c - 1].remove(solPath[0]);
+          _paths[c - 1].remove(solPath[1]);
+        }
+      } else {
+        int nextCell = solPath[userPath.length];
+        userPath.add(nextCell);
+        for (int c = 1; c <= _numColors; c++) {
+          if (c == targetColor) continue;
+          _paths[c - 1].remove(nextCell);
+        }
+      }
+    });
+
+    await HintManager.useHint('colour_link');
+    final hCount = await HintManager.getHints('colour_link');
+    setState(() {
+      _hintCount = hCount;
+    });
+
+    _checkSilentWin();
   }
 
   void _showRules() {
@@ -386,14 +469,30 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: _hintCount > 0 && !_isSuccess ? _useHint : null,
+          ),
+          IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
-          ),
-          IconButton(
-            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
-            tooltip: 'Hint',
-            onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),

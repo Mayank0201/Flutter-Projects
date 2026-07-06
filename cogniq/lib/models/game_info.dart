@@ -27,7 +27,7 @@ const List<GameInfo> kAllGames = [
   GameInfo(id:'minesweeper', name:'Mine Finder', description:'Locate and flag all hidden mines on the grid', emoji:'💣', routeName:'/minesweeper'),
   GameInfo(id:'hangman',     name:'Hangman',      description:'Save the stick figure letter by letter', emoji:'', routeName:'/hangman', isStashed: true),
   GameInfo(id:'reaction',    name:'Reaction Time', description:'Test your reflexes in milliseconds',   emoji:'⚡', routeName:'/reaction', isStashed: true),
-  GameInfo(id:'nonogram',    name:'Nonogram',     description:'Fill grid cells to match row/column clues', emoji:'🧩', routeName:'/nonogram'),
+  GameInfo(id:'nonogram',    name:'Nonogram',     description:'Fill grid cells to match row/column clues', emoji:'🧩', routeName:'/nonogram', isStashed: true),
   GameInfo(id:'hue',         name:'Spectrum',      description:'Arrange tiles to form a perfect color gradient', emoji:'🌈', routeName:'/hue'),
   GameInfo(id:'numbermemory', name:'Number Memory', description:'Memorize and recall growing numbers', emoji:'', routeName:'/numbermemory', isStashed: true),
   GameInfo(id:'wordbuilder', name:'Word Builder', description:'Form words using only given letters',   emoji:'', routeName:'/wordbuilder', isStashed: true),
@@ -37,7 +37,7 @@ const List<GameInfo> kAllGames = [
   GameInfo(id:'connections', name:'Categories',   description:'Group 16 words into 4 categories',     emoji:'', routeName:'/connections', isStashed: true),
   GameInfo(id:'flagle',      name:'Flag Finder',  description:'Guess the country by revealing flag segments', emoji:'', routeName:'/flagle', isStashed: true),
   GameInfo(id:'spellingbee', name:'Word Hive',    description:'Form words with honeycomb letters',    emoji:'', routeName:'/spellingbee'),
-  GameInfo(id:'wordsearch',  name:'Word Search',  description:'Find target words hidden in grid',     emoji:'', routeName:'/wordsearch'),
+  GameInfo(id:'wordsearch',  name:'Word Search',  description:'Find target words hidden in grid',     emoji:'', routeName:'/wordsearch', isStashed: true),
   
   // Graduate Games
   GameInfo(id:'pattern_lock', name:'Pattern Lock', description:'Trace the pattern from memory', emoji:'🔒', routeName:'/pattern_lock'),

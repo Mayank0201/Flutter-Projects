@@ -9,6 +9,8 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/ad_manager.dart';
 import '../../../utils/audio_manager.dart';
 
+import '../../../utils/hint_manager.dart';
+
 class ColorFloodBetaScreen extends StatefulWidget {
   const ColorFloodBetaScreen({super.key});
   @override
@@ -24,6 +26,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   int _numColors = 4;
   List<int> _grid = [];
   int _movesLeft = 12;
+  int _hintCount = 0;
 
   final List<Color> _colors = [
     Colors.red.shade400,
@@ -44,8 +47,10 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_color_flood') ?? 0;
+    final hCount = await HintManager.getHints('color_flood');
     if (mounted) {
       setState(() {
+        _hintCount = hCount;
         _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
@@ -230,14 +235,22 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
       await prefs.setInt(key, _currentLevel + 1);
     }
 
-    int newLevel = _currentLevel + 1;
-    if (newLevel == 15 || newLevel == 30 || newLevel == 40 || newLevel == 50) {
-      AdManager.showInterstitialAd();
-    }
+    final earned = await HintManager.onLevelCleared('color_flood');
+    final hCount = await HintManager.getHints('color_flood');
 
     setState(() {
+      _hintCount = hCount;
       _isSuccess = true;
     });
+
+    if (earned && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hint earned! (Total: $hCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.accentFor('color_flood'),
+        ),
+      );
+    }
   }
 
   void _nextLevel() {
@@ -293,7 +306,9 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     });
   }
 
-  void _showHint() {
+  Future<void> _useHint() async {
+    if (_hintCount <= 0 || _isSuccess || _movesLeft <= 0) return;
+
     int currentColor = _grid[0];
     List<bool> flooded = List.filled(_gridSize * _gridSize, false);
     List<int> queue = [0];
@@ -345,12 +360,23 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
       }
     }
 
-    final colorNames = ["Red", "Green", "Blue", "Orange", "Purple"];
+    if (bestColor == -1) return;
+
+    final colorNames = ["Red", "Green", "Blue", "Orange", "Purple", "Teal"];
     String colorName = (bestColor >= 0 && bestColor < colorNames.length) ? colorNames[bestColor] : "Unknown";
 
     settingsNotifier.hapticTap();
+    _flood(bestColor);
+
+    await HintManager.useHint('color_flood');
+    final hCount = await HintManager.getHints('color_flood');
+    setState(() {
+      _hintCount = hCount;
+    });
+
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Hint: Try picking $colorName next to flood more cells!'),
+      content: Text('Hint: Flooded board with $colorName!'),
+      backgroundColor: AppTheme.accentFor('color_flood'),
     ));
   }
 
@@ -394,14 +420,30 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                   child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: _hintCount > 0 && !_isSuccess && _movesLeft > 0 ? _useHint : null,
+          ),
+          IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
-          ),
-          IconButton(
-            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
-            tooltip: 'Hint',
-            onPressed: _showHint,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
