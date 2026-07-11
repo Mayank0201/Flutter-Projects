@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../widgets/auto_next_countdown.dart';
@@ -10,6 +11,7 @@ import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../widgets/animated_level_indicator.dart';
+import '../../../utils/shuffle_manager.dart';
 class QueensLevel {
   final int n;
   final List<List<int>> regions;
@@ -354,6 +356,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   int _hintCount = 0;
   final GlobalKey _gridKey = GlobalKey();
   final List<List<List<int>>> _history = [];
+  bool _shuffleActive = false;
 
   @override
   void initState() {
@@ -521,8 +524,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
 
 
+    final active = await ShuffleManager.isActive();
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = targetLevel;
         _loadLevel();
       });
@@ -619,14 +624,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     setState(() {
       _hintCount = newCount;
     });
-    if (earned && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: AppTheme.accentFor('queens'),
-        ),
-      );
-    }
+    
     await _clearNormalState();
   }
 
@@ -663,7 +661,22 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   }
 
   Future<void> _useHint() async {
-    if (_won || _hintCount <= 0) return;
+    if (_won) return;
+
+    if (_hintCount <= 0) {
+      BuyHintsDialog.show(
+        context,
+        initialGameId: 'queens',
+        isFromGameScreen: true,
+        onPurchaseComplete: () {
+          HintManager.getHints('queens').then((val) {
+            if (mounted) setState(() => _hintCount = val);
+          });
+        },
+      );
+      return;
+    }
+
     final solution = _solveQueens(_level);
     if (solution == null) return;
 
@@ -684,32 +697,25 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
     setState(() {
       _hintCount = newCount;
-      final tr = targetCell!.$1;
-      final tc = targetCell.$2;
-
-      // Clear any other queens in the same row, col, or region
-      for (int r = 0; r < _level.n; r++) {
-        for (int c = 0; c < _level.n; c++) {
-          if (_cells[r][c] == 2) {
-            if (r == tr || c == tc || _level.regions[r][c] == _level.regions[tr][tc]) {
-              _cells[r][c] = 0;
-            }
-          }
-        }
-      }
-
-      // Place the correct queen
-      _cells[tr][tc] = 2;
-      _error = '';
-
-      // Re-check if this solves the level
-      final queensCount = _cells.expand((row) => row).where((cell) => cell == 2).length;
-      if (queensCount == _level.n) {
-        // Run full validation to check if won
-        _check();
-      }
     });
-    _saveNormalState();
+
+    final int targetRow = targetCell.$1;
+    final int targetCol = targetCell.$2;
+    final int half = (_level.n / 2).ceil();
+    final String colRange = targetCol < half ? "1 to $half" : "${half + 1} to ${_level.n}";
+    final String message = "Hint: A star belongs in Row ${targetRow + 1}, columns $colRange.";
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+        duration: const Duration(seconds: 4),
+        backgroundColor: AppTheme.accentFor('queens'),
+      ),
+    );
   }
 
   void _loadLevel() {
@@ -844,8 +850,9 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     });
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
+    if (await ShuffleManager.tryShuffleNavigate(context, 'queens')) return;
 
     setState(() {
       _levelIndex = _levelIndex + 1;
@@ -862,6 +869,12 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         title: Text('Star Battle', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'queens'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -874,14 +887,29 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_won ? _useHint : null,
+            onPressed: !_won
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'queens',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('queens');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),

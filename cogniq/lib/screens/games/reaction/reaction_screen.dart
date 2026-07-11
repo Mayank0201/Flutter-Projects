@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import'package:google_fonts/google_fonts.dart';
 import'package:shared_preferences/shared_preferences.dart';
 import'../../../utils/rules_helper.dart';
@@ -306,14 +307,29 @@ class _ReactionScreenState extends State<ReactionScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-'$_hintCount',
+_hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_won && !_gameOver ? _useHint : null,
+            onPressed: !_won && !_gameOver
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'reaction',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('reaction');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),

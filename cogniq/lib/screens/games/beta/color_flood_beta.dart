@@ -6,10 +6,15 @@ import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../utils/ad_manager.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/audio_manager.dart';
-
 import '../../../utils/hint_manager.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
+import '../../../widgets/swipe_trail_overlay.dart';
+import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/achievement_manager.dart';
+import '../../../widgets/achievement_toast.dart';
 
 class ColorFloodBetaScreen extends StatefulWidget {
   const ColorFloodBetaScreen({super.key});
@@ -27,6 +32,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   List<int> _grid = [];
   int _movesLeft = 12;
   int _hintCount = 0;
+  bool _shuffleActive = false;
 
   final List<Color> _colors = [
     Colors.red.shade400,
@@ -36,6 +42,10 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     Colors.purple.shade400,
     Colors.teal.shade400,
   ];
+
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
 
   @override
   void initState() {
@@ -48,18 +58,49 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_color_flood') ?? 0;
     final hCount = await HintManager.getHints('color_flood');
+    
+    final tutorialKey = 'has_seen_tutorial_color_flood';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    
     if (mounted) {
       setState(() {
         _hintCount = hCount;
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _actualGameLevel = savedLvl;
+        if (!hasSeen) {
+          _isTutorialMode = true;
+          _currentLevel = 0;
+        } else {
+          _isTutorialMode = false;
+          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        }
         _loadLevel();
       });
     }
   }
 
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_color_flood';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
+  }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
+
+      if (_isTutorialMode) {
+        _gridSize = 3;
+        _numColors = 3;
+        final rng = Random(2026);
+        _grid = List.generate(9, (_) => rng.nextInt(3));
+        _movesLeft = 6;
+        return;
+      }
 
       int minOptimal = 0;
       int maxOptimal = 0;
@@ -251,9 +292,21 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         ),
       );
     }
+
+    final newUnlocks = await AchievementManager.checkAndUnlock('color_flood');
+    for (final a in newUnlocks) {
+      if (mounted) {
+        AchievementToast.show(context, a);
+      }
+    }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
+    if (await ShuffleManager.isActive()) {
+      final next = await ShuffleManager.pickNextGame('color_flood');
+      if (mounted) ShuffleManager.navigateToGame(context, next);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _loadLevel();
@@ -294,7 +347,17 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     setState(() {
       _movesLeft--;
       if (_grid.every((e) => e == targetColor)) {
-        _onLevelCleared();
+        if (_isTutorialMode) {
+          if (!_tutorialCompleted) {
+            AudioManager.playSuccess();
+            settingsNotifier.hapticSuccess();
+            setState(() {
+              _tutorialCompleted = true;
+            });
+          }
+        } else {
+          _onLevelCleared();
+        }
       } else if (_movesLeft == 0) {
         AudioManager.playFail();
         settingsNotifier.hapticError();
@@ -307,7 +370,21 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   }
 
   Future<void> _useHint() async {
-    if (_hintCount <= 0 || _isSuccess || _movesLeft <= 0) return;
+    if (_isSuccess || _movesLeft <= 0) return;
+
+    if (_hintCount <= 0) {
+      BuyHintsDialog.show(
+        context,
+        initialGameId: 'color_flood',
+        isFromGameScreen: true,
+        onPurchaseComplete: () {
+          HintManager.getHints('color_flood').then((val) {
+            if (mounted) setState(() => _hintCount = val);
+          });
+        },
+      );
+      return;
+    }
 
     int currentColor = _grid[0];
     List<bool> flooded = List.filled(_gridSize * _gridSize, false);
@@ -366,7 +443,6 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     String colorName = (bestColor >= 0 && bestColor < colorNames.length) ? colorNames[bestColor] : "Unknown";
 
     settingsNotifier.hapticTap();
-    _flood(bestColor);
 
     await HintManager.useHint('color_flood');
     final hCount = await HintManager.getHints('color_flood');
@@ -374,41 +450,17 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
       _hintCount = hCount;
     });
 
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Hint: Flooded board with $colorName!'),
+      content: Text('Hint: Try flooding with $colorName next!'),
       backgroundColor: AppTheme.accentFor('color_flood'),
+      duration: const Duration(seconds: 3),
     ));
   }
 
   void _showRules() {
     settingsNotifier.hapticTap();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: context.textMuted.withAlpha(40)),
-        ),
-        title: Text(
-          'How to Play',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
-        ),
-        content: Text(
-          '• Start from the top-left cell.\n• Tap a color circle to flood connected cells of the same color.\n• Make the entire board a single color within the move limit.',
-          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Got it',
-              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
-            ),
-          )
-        ],
-      ),
-    );
+    GameTutorialDialog.show(context, 'color_flood', 'Color Flood');
   }
 
   @override
@@ -419,6 +471,12 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         title: Text('Color Flood', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'color_flood'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -431,14 +489,29 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_isSuccess && _movesLeft > 0 ? _useHint : null,
+            onPressed: !_isSuccess && _movesLeft > 0
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'color_flood',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('color_flood');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
@@ -449,7 +522,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: Center(
               child: Text(
-                'Level ${_currentLevel + 1}', 
+                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
                 style: AppTheme.numberStyle(
                   color: AppTheme.dustyMauve, 
                   fontSize: 14, 
@@ -460,19 +533,23 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
+      body: SwipeTrailOverlay(
+        accentColor: AppTheme.dustyMauve,
+        child: Stack(
+          children: [
           Padding(
             padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
               children: [
                 Expanded(
                   child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: Text(
                             'Flood the entire board with a single color. Start at the top-left cell. Moves left: $_movesLeft',
                             style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
@@ -482,7 +559,10 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                         const SizedBox(height: 24),
                         Builder(
                           builder: (context) {
-                            final double boardSize = MediaQuery.of(context).size.width - 32;
+                            final double screenW = MediaQuery.of(context).size.width;
+                            final double screenH = MediaQuery.of(context).size.height;
+                            final double maxBoardH = screenH - 320;
+                            final double boardSize = min(screenW - 32, maxBoardH).clamp(180.0, 400.0);
                             return RepaintBoundary(
                               child: Container(
                                 width: boardSize, height: boardSize,
@@ -498,7 +578,13 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                                     itemCount: _grid.length,
                                     itemBuilder: (context, idx) {
                                       return Container(
-                                        color: _colors[_grid[idx]],
+                                        decoration: BoxDecoration(
+                                          color: _colors[_grid[idx]],
+                                          border: Border.all(
+                                            color: context.bgDark.withOpacity(0.12),
+                                            width: 1.0,
+                                          ),
+                                        ),
                                         child: idx == 0
                                             ? const Center(
                                                 child: Icon(Icons.home, color: Colors.white, size: 20),
@@ -541,6 +627,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                     ),
                   ),
                 ),
+              ),
                 if (!_isSuccess)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -561,7 +648,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                       ),
                     ],
                   ),
-                if (_isSuccess && !_playDailyMode)
+                if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                   AutoNextCountdown(
                     onNext: _nextLevel,
                     accentColor: AppTheme.dustyMauve,
@@ -578,8 +665,18 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                 },
               ),
             ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully flooded the entire board with a single color."
+                  : "Tap the color buttons below. Start at the top-left home tile and flood adjacent cells until everything is one color!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
+            ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

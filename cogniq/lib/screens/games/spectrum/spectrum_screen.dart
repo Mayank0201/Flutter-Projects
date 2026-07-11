@@ -8,6 +8,9 @@ import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/shuffle_manager.dart';
 
 class HueTile {
   final int id;
@@ -34,6 +37,7 @@ class SpectrumScreen extends StatefulWidget {
 
 class _SpectrumScreenState extends State<SpectrumScreen> {
   int _levelIndex = 0;
+  bool _shuffleActive = false;
   int _hintCount = 0;
   bool _won = false;
   bool _isDailyMode = false;
@@ -409,9 +413,11 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
     }
     final savedLevel = prefs.getInt('level_hue') ?? 0;
+    final active = await ShuffleManager.isActive();
 
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = savedLevel;
 
         final midLevelIndex = prefs.getInt('spectrum_mid_levelIndex');
@@ -488,17 +494,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         _hintCount = newCount;
       });
     }
-    if (earned && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Hint earned! (Total: $newCount)',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: AppTheme.accentFor('hue'),
-        ),
-      );
-    }
+    
   }
 
   void _onTileTap(int r, int c) {
@@ -608,13 +604,14 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     });
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
     if (_isDailyMode) {
       Navigator.pop(context, true);
       return;
     }
-
+    if (await ShuffleManager.tryShuffleNavigate(context, 'hue')) return;
+ 
     setState(() {
       _levelIndex++;
       _generateSpectrum();
@@ -647,6 +644,12 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
           ),
         ),
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'hue'),
+            ),
           // Preview button
           if (!_won)
             IconButton(
@@ -658,8 +661,44 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
               onPressed: _togglePreview,
             ),
           IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      _hintCount == 0 ? '+' : '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: !_won
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'hue',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('hue');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
+          ),
+          IconButton(
             icon: const Icon(Icons.help_outline),
-            onPressed: () => _showTutorial(context),
+            onPressed: () => GameTutorialDialog.show(context, 'hue', 'Spectrum'),
           ),
         ],
       ),
@@ -891,7 +930,6 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                   ),
                 ),
                 const Spacer(),
-                // Bottom buttons
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -906,61 +944,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                                   accentColor: accentColor,
                                 ),
                         )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: _won ? null : _useHint,
-                              icon: Icon(
-                                Icons.lightbulb_outline,
-                                size: context.scale(18),
-                              ),
-                              label: Text(
-                                'Hint ($_hintCount)',
-                                style: GoogleFonts.outfit(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: context.scale(13),
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.amber,
-                                side: const BorderSide(
-                                  color: Colors.amber,
-                                  width: 1.2,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                              ),
-                            ),
-                            ElevatedButton(
-                              onPressed: _generateSpectrum,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: context.bgSurface,
-                                foregroundColor: context.textPrimary,
-                                elevation: 1,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 12,
-                                ),
-                              ),
-                              child: Text(
-                                'Reset',
-                                style: GoogleFonts.outfit(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: context.scale(13),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      : const SizedBox(height: 48),
                 ),
               ],
             ),

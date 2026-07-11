@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../models/game_info.dart';
 import '../theme/app_theme.dart';
 import '../theme/settings_manager.dart';
 import '../theme/theme_manager.dart';
-import '../utils/ad_manager.dart';
-import '../utils/hint_manager.dart';
 import '../utils/purchase_manager.dart';
+import '../widgets/buy_hints_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -178,12 +176,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   _Divider(),
                   _SettingsTile(
-                    icon: Icons.play_circle_outline,
-                    title: 'Earn Free Hints',
-                    subtitle: AdManager.isRewardedAdReady()
-                        ? 'Rewarded video ready'
-                        : 'Watch video to get +2 hints',
-                    onTap: () => _showEarnHintsDialog(context),
+                    icon: Icons.shopping_bag_outlined,
+                    title: 'Buy Hints',
+                    subtitle: 'Use your points to get hints',
+                    onTap: () {
+                      BuyHintsDialog.show(context, initialGameId: 'zip');
+                    },
                   ),
                 ],
               ),
@@ -261,121 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showEarnHintsDialog(BuildContext context) {
-    String selectedGameId = kAllGames.firstWhere((g) => !g.isStashed).id;
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: context.bgCard,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: Text(
-                'Earn Free Hints',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Select the game you want to add 2 hints to:',
-                    style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: context.bgDark,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: context.textMuted.withAlpha(50)),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: selectedGameId,
-                        isExpanded: true,
-                        dropdownColor: context.bgCard,
-                        icon: Icon(Icons.arrow_drop_down, color: context.textSecondary),
-                        items: kAllGames.where((g) => !g.isStashed).map((game) {
-                          return DropdownMenuItem<String>(
-                            value: game.id,
-                            child: Text(
-                              game.name,
-                              style: GoogleFonts.outfit(color: context.textPrimary, fontSize: 14),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() {
-                              selectedGameId = val;
-                            });
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(
-                    'Cancel',
-                    style: GoogleFonts.outfit(color: context.textMuted, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.wordleGreen,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                   onPressed: () {
-                    Navigator.pop(ctx);
-                    final messenger = ScaffoldMessenger.of(context);
-                    AdManager.showRewardedAd(
-                      onRewardGranted: (amount) async {
-                        await HintManager.addHints(selectedGameId, amount);
-                        final gameName = kAllGames.firstWhere((g) => g.id == selectedGameId).name;
-                        messenger.showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Earned $amount hints for $gameName!',
-                              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                            ),
-                            backgroundColor: AppTheme.wordleGreen,
-                          ),
-                        );
-                      },
-                      onAdNotReady: () {
-                        messenger.showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Rewarded ad is loading. Please try again in a moment.',
-                              style: GoogleFonts.outfit(),
-                            ),
-                            backgroundColor: Colors.amber[800],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                  child: Text(
-                    'Watch Video',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+
 }
 
 class _SectionHeader extends StatelessWidget {

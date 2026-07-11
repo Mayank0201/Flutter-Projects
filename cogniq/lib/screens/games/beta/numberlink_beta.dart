@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,10 +7,15 @@ import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../utils/ad_manager.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
-import 'package:flutter/foundation.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
+import '../../../widgets/swipe_trail_overlay.dart';
+import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../utils/achievement_manager.dart';
+import '../../../widgets/achievement_toast.dart';
 
 class NumberlinkBetaScreen extends StatefulWidget {
   const NumberlinkBetaScreen({super.key});
@@ -29,6 +35,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   List<List<int>> _solutionPaths = [];
   int _hintCount = 0;
   int _dragColor = 0; // 0 = none, 1..C = active dragging color
+  bool _shuffleActive = false;
 
   final List<Color> _colors = [
     Colors.red.shade500,       // Red
@@ -41,6 +48,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     Colors.amber.shade700,     // Amber/Yellow
   ];
 
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
+
   @override
   void initState() {
     super.initState();
@@ -52,19 +63,52 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_colour_link') ?? 0;
     final hCount = await HintManager.getHints('colour_link');
+    
+    final tutorialKey = 'has_seen_tutorial_colour_link';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    
     if (mounted) {
       setState(() {
         _hintCount = hCount;
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _actualGameLevel = savedLvl;
+        if (!hasSeen) {
+          _isTutorialMode = true;
+          _currentLevel = 0;
+        } else {
+          _isTutorialMode = false;
+          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        }
         _loadLevel();
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_colour_link';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
   }
 
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
       _dragColor = 0;
+      
+      if (_isTutorialMode) {
+        _gridSize = 3;
+        _numColors = 1;
+        _grid = List.filled(9, 0);
+        _grid[0] = 1;
+        _grid[8] = 1;
+        _paths = [[]];
+        _solutionPaths = [[0, 1, 2, 5, 8]];
+        return;
+      }
       
       // Determine difficulty parameters based on level
       if (_currentLevel < 5) {
@@ -304,7 +348,17 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
 
     if (allConnected) {
       if (totalPathCells == _gridSize * _gridSize) {
-        _onLevelCleared();
+        if (_isTutorialMode) {
+          if (!_tutorialCompleted) {
+            AudioManager.playSuccess();
+            settingsNotifier.hapticSuccess();
+            setState(() {
+              _tutorialCompleted = true;
+            });
+          }
+        } else {
+          _onLevelCleared();
+        }
       } else {
         AudioManager.playFail();
         settingsNotifier.hapticError();
@@ -348,9 +402,21 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         ),
       );
     }
+
+    final newUnlocks = await AchievementManager.checkAndUnlock('colour_link');
+    for (final a in newUnlocks) {
+      if (mounted) {
+        AchievementToast.show(context, a);
+      }
+    }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
+    if (await ShuffleManager.isActive()) {
+      final next = await ShuffleManager.pickNextGame('colour_link');
+      if (mounted) ShuffleManager.navigateToGame(context, next);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _loadLevel();
@@ -431,33 +497,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
 
   void _showRules() {
     settingsNotifier.hapticTap();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: context.textMuted.withAlpha(40)),
-        ),
-        title: Text(
-          'How to Play',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
-        ),
-        content: Text(
-          '• Connect matching colors with paths.\n• Paths cannot cross or overlap.\n• All cells on the grid must be filled.',
-          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Got it',
-              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
-            ),
-          )
-        ],
-      ),
-    );
+    GameTutorialDialog.show(context, 'colour_link', 'Colour Link');
   }
 
   @override
@@ -468,6 +508,12 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         title: Text('Colour Link', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'colour_link'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -480,14 +526,29 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_isSuccess ? _useHint : null,
+            onPressed: !_isSuccess
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'colour_link',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('colour_link');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
@@ -498,7 +559,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: Center(
               child: Text(
-                'Level ${_currentLevel + 1}', 
+                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
                 style: AppTheme.numberStyle(
                   color: AppTheme.dustyMauve, 
                   fontSize: 14, 
@@ -509,8 +570,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
+      body: SwipeTrailOverlay(
+        accentColor: AppTheme.dustyMauve,
+        child: Stack(
+          children: [
           Padding(
             padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
@@ -583,7 +646,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                       ),
                     ],
                   ),
-                if (_isSuccess && !_playDailyMode)
+                if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                   AutoNextCountdown(
                     onNext: _nextLevel,
                     accentColor: AppTheme.dustyMauve,
@@ -600,10 +663,20 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                 },
               ),
             ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully connected the endpoints and filled the grid."
+                  : "Drag to connect the matching colored dots. Paths cannot cross, and every empty tile must be filled!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
+            ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class NumberlinkPainter extends CustomPainter {

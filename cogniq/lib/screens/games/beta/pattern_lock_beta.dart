@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,12 +8,15 @@ import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../utils/ad_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
-import 'dart:async';
-import 'dart:math';
-import 'package:flutter/foundation.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
+import '../../../widgets/swipe_trail_overlay.dart';
+import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../utils/achievement_manager.dart';
+import '../../../widgets/achievement_toast.dart';
 
 class PatternLockBetaScreen extends StatefulWidget {
   const PatternLockBetaScreen({super.key});
@@ -27,6 +33,11 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   bool _isMemorizing = true;
   Timer? _memorizeTimer;
   int _hintCount = 0;
+  int _hintDot = -1;
+  bool _shuffleActive = false;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
 
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
   static const double _boardSize = 260;
@@ -53,14 +64,38 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_pattern_lock') ?? 0;
-    final hCount = await HintManager.getHints('pattern_lock');
+    final active = await ShuffleManager.isActive();
+    final hintCount = await HintManager.getHints('pattern_lock');
+    
+    final tutorialKey = 'has_seen_tutorial_pattern_lock';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    
     if (mounted) {
       setState(() {
-        _hintCount = hCount;
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _shuffleActive = active;
+        _hintCount = hintCount;
+        _actualGameLevel = savedLvl;
+        if (!hasSeen) {
+          _isTutorialMode = true;
+          _currentLevel = 0; // Force level 0 (simplest) for tutorial
+        } else {
+          _isTutorialMode = false;
+          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        }
         _loadLevel();
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_pattern_lock';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
   }
 
   @override
@@ -183,7 +218,17 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                listEquals(_userPattern, _targetPattern.reversed.toList());
 
     if (win) {
-      _onLevelCleared();
+      if (_isTutorialMode) {
+        if (!_tutorialCompleted) {
+          AudioManager.playSuccess();
+          settingsNotifier.hapticSuccess();
+          setState(() {
+            _tutorialCompleted = true;
+          });
+        }
+      } else {
+        _onLevelCleared();
+      }
     } else {
       AudioManager.playFail();
       settingsNotifier.hapticError();
@@ -224,9 +269,21 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         ),
       );
     }
+
+    final newUnlocks = await AchievementManager.checkAndUnlock('pattern_lock');
+    for (final a in newUnlocks) {
+      if (mounted) {
+        AchievementToast.show(context, a);
+      }
+    }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
+    if (await ShuffleManager.isActive()) {
+      final next = await ShuffleManager.pickNextGame('pattern_lock');
+      if (mounted) ShuffleManager.navigateToGame(context, next);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _loadLevel();
@@ -234,7 +291,21 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   }
 
   Future<void> _useHint() async {
-    if (_hintCount <= 0 || _isSuccess || _isMemorizing) return;
+    if (_isSuccess || _isMemorizing || _hintDot != -1) return;
+
+    if (_hintCount <= 0) {
+      BuyHintsDialog.show(
+        context,
+        initialGameId: 'pattern_lock',
+        isFromGameScreen: true,
+        onPurchaseComplete: () {
+          HintManager.getHints('pattern_lock').then((val) {
+            if (mounted) setState(() => _hintCount = val);
+          });
+        },
+      );
+      return;
+    }
 
     settingsNotifier.hapticTap();
 
@@ -250,11 +321,21 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       }
     }
 
+    int nextDot = _targetPattern[0];
+    if (isPrefix && _userPattern.length < _targetPattern.length) {
+      nextDot = _targetPattern[_userPattern.length];
+    }
+
     setState(() {
-      if (!isPrefix) {
-        _userPattern.clear();
+      _hintDot = nextDot;
+    });
+
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() {
+          _hintDot = -1;
+        });
       }
-      _userPattern.add(_targetPattern[_userPattern.length]);
     });
 
     await HintManager.useHint('pattern_lock');
@@ -263,45 +344,17 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       _hintCount = hCount;
     });
 
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: const Text('Hint: Revealed the next dot!'),
+      content: const Text('Hint: Flashing the next dot!'),
       backgroundColor: AppTheme.accentFor('pattern_lock'),
+      duration: const Duration(milliseconds: 1500),
     ));
-
-    if (_userPattern.length == _targetPattern.length) {
-      _onLevelCleared();
-    }
   }
 
   void _showRules() {
     settingsNotifier.hapticTap();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: context.textMuted.withAlpha(40)),
-        ),
-        title: Text(
-          'How to Play',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
-        ),
-        content: Text(
-          '• Memorize the highlighted path connecting the dots.\n• Trace the pattern from either end.\n• Swipe from dot to dot without lifting your finger.',
-          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Got it',
-              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
-            ),
-          )
-        ],
-      ),
-    );
+    GameTutorialDialog.show(context, 'pattern_lock', 'Pattern Lock');
   }
 
   @override
@@ -312,6 +365,12 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         title: Text('Pattern Lock', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'pattern_lock'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -324,14 +383,29 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_isSuccess && !_isMemorizing ? _useHint : null,
+            onPressed: !_isSuccess && !_isMemorizing
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'pattern_lock',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('pattern_lock');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
@@ -342,7 +416,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: Center(
               child: Text(
-                'Level ${_currentLevel + 1}', 
+                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
                 style: AppTheme.numberStyle(
                   color: AppTheme.dustyMauve, 
                   fontSize: 14, 
@@ -353,8 +427,10 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
+      body: SwipeTrailOverlay(
+        accentColor: AppTheme.dustyMauve,
+        child: Stack(
+          children: [
           Padding(
             padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
@@ -410,20 +486,18 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                                               builder: (context) {
                                                 bool isHighlighted = _isMemorizing
                                                     ? _targetPattern.contains(idx)
-                                                    : _userPattern.contains(idx);
+                                                    : (_userPattern.contains(idx) || _hintDot == idx);
                                                 Color dotColor = isHighlighted
-                                                    ? (_isMemorizing ? Colors.amber : AppTheme.dustyMauve)
+                                                    ? (_isMemorizing
+                                                        ? Colors.amber
+                                                        : (_hintDot == idx ? Colors.amber : AppTheme.dustyMauve))
                                                     : context.textMuted.withOpacity(0.3);
-                                                return AnimatedContainer(
-                                                  duration: const Duration(milliseconds: 200),
+                                                return Container(
                                                   width: isHighlighted ? 20 : 12,
                                                   height: isHighlighted ? 20 : 12,
                                                   decoration: BoxDecoration(
                                                     color: dotColor,
                                                     shape: BoxShape.circle,
-                                                    boxShadow: isHighlighted
-                                                        ? [BoxShadow(color: dotColor.withOpacity(0.5), blurRadius: 8, spreadRadius: 2)]
-                                                        : [],
                                                   ),
                                                 );
                                               }
@@ -438,7 +512,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                           ),
                         ),
                         const SizedBox(height: 36),
-                        if (_isSuccess && !_playDailyMode)
+                        if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                           AutoNextCountdown(
                             onNext: _nextLevel,
                             accentColor: AppTheme.dustyMauve,
@@ -459,10 +533,20 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                 },
               ),
             ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully traced the pattern and unlocked the level."
+                  : "Watch the highlighted pattern blink, then drag your finger to trace the exact same line sequence!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
+            ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class PatternPainter extends CustomPainter {

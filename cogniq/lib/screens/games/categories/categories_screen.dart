@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'dart:convert';
 import '../../../theme/settings_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -1265,7 +1266,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(
                         fontSize: 8,
                         fontWeight: FontWeight.bold,
@@ -1276,8 +1277,21 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_won && _mistakesLeft > 0
-                ? _useHint
+            onPressed: !_won && _mistakesLeft > 0
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'connections',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('connections');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
                 : null,
           ),
           IconButton(

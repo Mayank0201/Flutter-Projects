@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../utils/rules_helper.dart';
@@ -307,7 +308,7 @@ class _SequenceMemoryScreenState extends State<SequenceMemoryScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(
                         fontSize: 8,
                         fontWeight: FontWeight.bold,
@@ -318,8 +319,21 @@ class _SequenceMemoryScreenState extends State<SequenceMemoryScreen> {
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && _phase == _Phase.input && !_won
-                ? _useHint
+            onPressed: _phase == _Phase.input && !_won
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'sequence',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('sequence');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
                 : null,
           ),
           IconButton(

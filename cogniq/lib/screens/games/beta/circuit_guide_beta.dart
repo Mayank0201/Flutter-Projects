@@ -6,10 +6,15 @@ import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../utils/ad_manager.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/audio_manager.dart';
-
 import '../../../utils/hint_manager.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
+import '../../../widgets/swipe_trail_overlay.dart';
+import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/achievement_manager.dart';
+import '../../../widgets/achievement_toast.dart';
 
 class CircuitGuideBetaScreen extends StatefulWidget {
   const CircuitGuideBetaScreen({super.key});
@@ -26,6 +31,11 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   List<String> _wireTypes = []; // "SRC", "TGT", "S", "E", "T"
   List<int> _solutionRotations = [];
   int _hintCount = 0;
+  int _hintIndex = -1;
+  bool _shuffleActive = false;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
 
   @override
   void initState() {
@@ -37,14 +47,38 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_circuit_guide') ?? 0;
-    final hCount = await HintManager.getHints('circuit_guide');
+    final active = await ShuffleManager.isActive();
+    final hintCount = await HintManager.getHints('circuit_guide');
+    
+    final tutorialKey = 'has_seen_tutorial_circuit_guide';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    
     if (mounted) {
       setState(() {
-        _hintCount = hCount;
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _shuffleActive = active;
+        _hintCount = hintCount;
+        _actualGameLevel = savedLvl;
+        if (!hasSeen) {
+          _isTutorialMode = true;
+          _currentLevel = 0; // Force level 0 (simplest) for tutorial
+        } else {
+          _isTutorialMode = false;
+          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        }
         _loadLevel();
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_circuit_guide';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
   }
 
   void _loadLevel() {
@@ -54,7 +88,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       final seed = _currentLevel + 2026;
       final rng = Random(seed);
 
-      if (_currentLevel < 9) {
+      if (_currentLevel < 5) {
         _gridSize = 3;
         _rotations = List.filled(9, 0);
         if (_currentLevel == 0) {
@@ -72,30 +106,33 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         } else if (_currentLevel == 4) {
           _wireTypes = ["SRC", "E", "S", "E", "E", "S", "E", "S", "TGT"];
           _rotations = [1, 0, 0, 0, 0, 0, 1, 0, 3];
-        } else if (_currentLevel == 5) {
-          _wireTypes = ["SRC", "E", "S", "S", "S", "E", "S", "E", "TGT"];
-          _rotations = [1, 1, 0, 0, 0, 1, 1, 3, 3];
-        } else if (_currentLevel == 6) {
-          _wireTypes = ["SRC", "E", "S", "S", "S", "S", "E", "E", "TGT"];
-          _rotations = [1, 0, 0, 0, 0, 0, 0, 1, 3];
-        } else if (_currentLevel == 7) {
-          _wireTypes = ["SRC", "S", "E", "S", "E", "E", "S", "E", "TGT"];
-          _rotations = [1, 1, 0, 2, 0, 1, 0, 3, 3];
-        } else if (_currentLevel == 8) {
-          _wireTypes = ["SRC", "E", "E", "E", "S", "S", "S", "E", "TGT"];
-          _rotations = [1, 0, 0, 0, 0, 0, 0, 1, 3];
         }
       } else {
-        if (_currentLevel < 15) {
+        int numTargets = 1;
+        if (_currentLevel < 8) {
           _gridSize = 3;
-        } else if (_currentLevel < 25) {
+          numTargets = 1;
+        } else if (_currentLevel < 12) {
+          _gridSize = 3;
+          numTargets = 2;
+        } else if (_currentLevel < 17) {
           _gridSize = 4;
-        } else {
+          numTargets = 2;
+        } else if (_currentLevel < 22) {
+          _gridSize = 4;
+          numTargets = 3;
+        } else if (_currentLevel < 28) {
           _gridSize = 5;
+          numTargets = 3;
+        } else if (_currentLevel < 35) {
+          _gridSize = 5;
+          numTargets = 4;
+        } else {
+          _gridSize = 6;
+          numTargets = 4;
         }
         
         final int W = _gridSize;
-        final int numTargets = _currentLevel >= 12 ? 2 : 1;
         
         // Choose source and target positions randomly on opposite borders
         int srcIdx;
@@ -106,38 +143,34 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         if (side == 0) {
           srcIdx = rng.nextInt(W);
           srcNeighbor = srcIdx + W;
-          if (numTargets == 1) {
-            tgts.add(W * (W - 1) + rng.nextInt(W));
-          } else {
-            tgts.add(W * (W - 1) + rng.nextInt(W ~/ 2));
-            tgts.add(W * (W - 1) + W ~/ 2 + rng.nextInt(W - W ~/ 2));
-          }
         } else if (side == 1) {
           srcIdx = rng.nextInt(W) * W + (W - 1);
           srcNeighbor = srcIdx - 1;
-          if (numTargets == 1) {
-            tgts.add(rng.nextInt(W) * W);
-          } else {
-            tgts.add(rng.nextInt(W ~/ 2) * W);
-            tgts.add((W ~/ 2 + rng.nextInt(W - W ~/ 2)) * W);
-          }
         } else if (side == 2) {
           srcIdx = W * (W - 1) + rng.nextInt(W);
           srcNeighbor = srcIdx - W;
-          if (numTargets == 1) {
-            tgts.add(rng.nextInt(W));
-          } else {
-            tgts.add(rng.nextInt(W ~/ 2));
-            tgts.add(W ~/ 2 + rng.nextInt(W - W ~/ 2));
-          }
         } else {
           srcIdx = rng.nextInt(W) * W;
           srcNeighbor = srcIdx + 1;
-          if (numTargets == 1) {
-            tgts.add(rng.nextInt(W) * W + (W - 1));
+        }
+
+        // Place targets on the opposite border
+        final int oppSide = (side + 2) % 4;
+        final Set<int> chosenOffsets = {};
+        // Ensure we don't request more targets than available border cells
+        final int targetCount = numTargets.clamp(1, W);
+        while (chosenOffsets.length < targetCount) {
+          chosenOffsets.add(rng.nextInt(W));
+        }
+        for (int o in chosenOffsets) {
+          if (oppSide == 0) {
+            tgts.add(o);
+          } else if (oppSide == 1) {
+            tgts.add(o * W + (W - 1));
+          } else if (oppSide == 2) {
+            tgts.add(W * (W - 1) + o);
           } else {
-            tgts.add(rng.nextInt(W ~/ 2) * W + (W - 1));
-            tgts.add((W ~/ 2 + rng.nextInt(W - W ~/ 2)) * W + (W - 1));
+            tgts.add(o * W);
           }
         }
         
@@ -252,8 +285,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           
           List<int> neighbors = connections[i];
           if (neighbors.isEmpty) {
-            _wireTypes[i] = rng.nextBool() ? "S" : "E";
-            _rotations[i] = rng.nextInt(4);
+            _wireTypes[i] = "EMPTY";
+            _rotations[i] = 0;
             continue;
           }
           
@@ -267,6 +300,12 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           }
           
           dirs.sort();
+          
+          if (dirs.length < 2) {
+            _wireTypes[i] = "EMPTY";
+            _rotations[i] = 0;
+            continue;
+          }
           
           if (dirs.length == 2) {
             if ((dirs[0] == 0 && dirs[1] == 2) || (dirs[0] == 1 && dirs[1] == 3)) {
@@ -286,7 +325,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             else if (!dirs.contains(2)) _rotations[i] = 2;
             else if (!dirs.contains(3)) _rotations[i] = 3;
           } else {
-            _wireTypes[i] = "S";
+            _wireTypes[i] = "EMPTY";
             _rotations[i] = 0;
           }
         }
@@ -387,13 +426,25 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     }
 
     if (won) {
-      _onLevelCleared();
+      if (_isTutorialMode) {
+        if (!_tutorialCompleted) {
+          AudioManager.playSuccess();
+          settingsNotifier.hapticSuccess();
+          setState(() {
+            _tutorialCompleted = true;
+          });
+        }
+      } else {
+        _onLevelCleared();
+      }
     }
   }
 
+
+
   void _onRotate(int idx) {
     if (_isSuccess) return;
-    if (_wireTypes[idx] == "SRC" || _wireTypes[idx] == "TGT") return;
+    if (_wireTypes[idx] == "SRC" || _wireTypes[idx] == "TGT" || _wireTypes[idx] == "EMPTY") return;
 
     AudioManager.playClick();
     settingsNotifier.hapticTap();
@@ -431,9 +482,21 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         ),
       );
     }
+
+    final newUnlocks = await AchievementManager.checkAndUnlock('circuit_guide');
+    for (final a in newUnlocks) {
+      if (mounted) {
+        AchievementToast.show(context, a);
+      }
+    }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
+    if (await ShuffleManager.isActive()) {
+      final next = await ShuffleManager.pickNextGame('circuit_guide');
+      if (mounted) ShuffleManager.navigateToGame(context, next);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _loadLevel();
@@ -441,11 +504,25 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   }
 
   Future<void> _useHint() async {
-    if (_hintCount <= 0 || _isSuccess) return;
+    if (_isSuccess || _hintIndex != -1) return;
+
+    if (_hintCount <= 0) {
+      BuyHintsDialog.show(
+        context,
+        initialGameId: 'circuit_guide',
+        isFromGameScreen: true,
+        onPurchaseComplete: () {
+          HintManager.getHints('circuit_guide').then((val) {
+            if (mounted) setState(() => _hintCount = val);
+          });
+        },
+      );
+      return;
+    }
 
     List<int> wrongIndices = [];
     for (int i = 0; i < _wireTypes.length; i++) {
-      if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT") {
+      if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT" && _wireTypes[i] != "EMPTY") {
         if (_rotations[i] != _solutionRotations[i]) {
           wrongIndices.add(i);
         }
@@ -459,7 +536,15 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     int targetIdx = wrongIndices[rng.nextInt(wrongIndices.length)];
 
     setState(() {
-      _rotations[targetIdx] = _solutionRotations[targetIdx];
+      _hintIndex = targetIdx;
+    });
+
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() {
+          _hintIndex = -1;
+        });
+      }
     });
 
     await HintManager.useHint('circuit_guide');
@@ -468,47 +553,42 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       _hintCount = hCount;
     });
 
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Hint: Corrected one wire on the board!'),
+      content: const Text('Hint: Flashing one incorrect wire!'),
       backgroundColor: AppTheme.accentFor('circuit_guide'),
+      duration: const Duration(milliseconds: 1500),
     ));
-
-    _checkConnections();
   }
 
   void _showRules() {
     settingsNotifier.hapticTap();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: context.textMuted.withAlpha(40)),
-        ),
-        title: Text(
-          'How to Play',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
-        ),
-        content: Text(
-          '• Tap wires to rotate them 90°.\n• Connect the power source to all lightbulbs.\n• Wires light up only when connected back to the source.',
-          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Got it',
-              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
-            ),
-          )
-        ],
-      ),
-    );
+    GameTutorialDialog.show(context, 'circuit_guide', 'Circuit Guide');
+  }
+
+  @override
+  void dispose() {
+    AudioManager.resumeMusic();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_wireTypes.isEmpty) {
+      return Scaffold(
+        backgroundColor: context.bgDark,
+        appBar: AppBar(
+          title: Text('Circuit Guide', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+          leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        ),
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.dustyMauve),
+          ),
+        ),
+      );
+    }
+
     final connected = _getConnectedStatus();
 
     return Scaffold(
@@ -517,6 +597,12 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         title: Text('Circuit Guide', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'circuit_guide'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -529,14 +615,29 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_isSuccess ? _useHint : null,
+            onPressed: !_isSuccess
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'circuit_guide',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('circuit_guide');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
@@ -547,7 +648,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: Center(
               child: Text(
-                'Level ${_currentLevel + 1}', 
+                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
                 style: AppTheme.numberStyle(
                   color: AppTheme.dustyMauve, 
                   fontSize: 14, 
@@ -558,8 +659,10 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
+      body: SwipeTrailOverlay(
+        accentColor: AppTheme.dustyMauve,
+        child: Stack(
+          children: [
           Padding(
             padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
             child: Column(
@@ -577,27 +680,40 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                           textAlign: TextAlign.center
                         ),
                         const SizedBox(height: 36),
-                        SizedBox(
+                        Container(
                           width: 240, 
                           height: 240,
-                          child: GridView.builder(
-                            padding: EdgeInsets.zero,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
-                            itemCount: _gridSize * _gridSize,
-                            itemBuilder: (context, idx) {
-                              final isNodeConnected = connected[idx];
-                              return AnimatedCircuitNode(
-                                type: _wireTypes[idx],
-                                index: idx,
-                                rotation: _rotations[idx],
-                                isConnected: isNodeConnected,
-                                onTap: () => _onRotate(idx),
-                                activeColor: Colors.amber,
-                                mutedColor: context.textMuted.withOpacity(0.25),
-                                isLevel9: _currentLevel >= 9,
-                              );
-                            },
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            border: Border.all(
+                              color: context.textMuted.withOpacity(0.35),
+                              width: 2.0,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: RepaintBoundary(
+                              child: GridView.builder(
+                                padding: EdgeInsets.zero,
+                                physics: const NeverScrollableScrollPhysics(),
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
+                                itemCount: _gridSize * _gridSize,
+                                itemBuilder: (context, idx) {
+                                  final isNodeConnected = connected[idx];
+                                  return AnimatedCircuitNode(
+                                    type: _wireTypes[idx],
+                                    index: idx,
+                                    rotation: _rotations[idx],
+                                    isConnected: isNodeConnected,
+                                    onTap: () => _onRotate(idx),
+                                    activeColor: Colors.amber,
+                                    mutedColor: context.textMuted.withOpacity(0.25),
+                                    isLevel9: _currentLevel >= 9,
+                                  );
+                                },
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 36),
@@ -625,7 +741,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                       ),
                     ],
                   ),
-                if (_isSuccess && !_playDailyMode)
+                if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                   AutoNextCountdown(
                     onNext: _nextLevel,
                     accentColor: AppTheme.dustyMauve,
@@ -642,13 +758,23 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                 },
               ),
             ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You completed the tutorial. Power successfully connects from the source to the lightbulb."
+                  : "Tap the wire tiles to rotate and align them so that power flows from the source to the bulb.",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
+            ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
-class AnimatedCircuitNode extends StatefulWidget {
+class AnimatedCircuitNode extends StatelessWidget {
   final String type;
   final int index;
   final int rotation;
@@ -671,74 +797,38 @@ class AnimatedCircuitNode extends StatefulWidget {
   });
 
   @override
-  State<AnimatedCircuitNode> createState() => _AnimatedCircuitNodeState();
-}
-
-class _AnimatedCircuitNodeState extends State<AnimatedCircuitNode> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-  double _startAngle = 0.0;
-  double _targetAngle = 0.0;
-  double _cleanTargetAngle = 0.0;
-
-  @override
-  void initState() {
-    super.initState();
-    _cleanTargetAngle = widget.rotation * (pi / 2);
-    _startAngle = _cleanTargetAngle;
-    _targetAngle = _cleanTargetAngle;
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-    );
-    _animation = Tween<double>(begin: _startAngle, end: _targetAngle).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
-  }
-
-  @override
-  void didUpdateWidget(AnimatedCircuitNode oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.rotation != widget.rotation) {
-      _startAngle = _animation.value;
-      double diff = (widget.rotation - oldWidget.rotation) % 4;
-      if (diff < 0) diff += 4;
-      
-      _cleanTargetAngle += diff * (pi / 2);
-      _targetAngle = _cleanTargetAngle;
-      
-      _animation = Tween<double>(begin: _startAngle, end: _targetAngle).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-      );
-      _controller.forward(from: 0.0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final double targetAngle = rotation * (pi / 2);
     return GestureDetector(
-      onTap: widget.onTap,
-      child: AnimatedBuilder(
-        animation: _animation,
-        builder: (context, child) {
-          return CustomPaint(
-            painter: WirePainter(
-              type: widget.type,
-              index: widget.index,
-              rotationAngle: _animation.value,
-              isConnected: widget.isConnected,
-              activeColor: widget.activeColor,
-              mutedColor: widget.mutedColor,
-              isLevel9: widget.isLevel9,
-            ),
-          );
-        },
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: context.bgCard,
+          border: Border.all(
+            color: context.textMuted.withOpacity(0.35),
+            width: 1.0,
+          ),
+        ),
+        child: type == "EMPTY"
+            ? null
+            : TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: targetAngle),
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutBack,
+                builder: (context, angle, child) {
+                  return CustomPaint(
+                    painter: WirePainter(
+                      type: type,
+                      index: index,
+                      rotationAngle: angle,
+                      isConnected: isConnected,
+                      activeColor: activeColor,
+                      mutedColor: mutedColor,
+                      isLevel9: isLevel9,
+                    ),
+                  );
+                },
+              ),
       ),
     );
   }
@@ -770,7 +860,7 @@ class WirePainter extends CustomPainter {
     final Color wireColor = isConnected ? activeColor : mutedColor;
     final paint = Paint()
       ..color = wireColor
-      ..strokeWidth = 5
+      ..strokeWidth = 8.0
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 

@@ -46,6 +46,10 @@ import 'utils/purchase_manager.dart';
 import 'utils/update_manager.dart';
 import 'utils/restore_manager.dart';
 import 'utils/notification_manager.dart';
+import 'widgets/swipe_trail_overlay.dart';
+
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -139,7 +143,7 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
         state == AppLifecycleState.inactive) {
       AudioManager.stopMusic();
     } else if (state == AppLifecycleState.resumed) {
-      if (settingsNotifier.musicEnabled) {
+      if (settingsNotifier.musicEnabled && !AudioManager.isGameActive) {
         AudioManager.fadeInMusic();
       }
     }
@@ -151,7 +155,9 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
       listenable: Listenable.merge([themeNotifier, settingsNotifier]),
       builder: (context, _) {
         return MaterialApp(
+          navigatorKey: navigatorKey,
           title: 'CogniQ',
+          navigatorObservers: [routeObserver],
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme.copyWith(
             textTheme: GoogleFonts.outfitTextTheme(
@@ -171,7 +177,10 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
                 textScaleFactor:
                     mediaQueryData.textScaleFactor * settingsNotifier.fontScale,
               ),
-              child: child!,
+              child: SwipeTrailOverlay(
+                accentColor: AppTheme.dustyMauve,
+                child: child!,
+              ),
             );
           },
           initialRoute: '/',

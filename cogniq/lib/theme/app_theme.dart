@@ -143,6 +143,21 @@ class AppTheme {
     ),
   ];
 
+  // Zen Constants
+  static const Duration zenTransition = Duration(milliseconds: 500);
+  static const Curve zenCurve = Curves.easeOutCubic;
+  static const double zenPadding = 20.0;
+  static const double zenRadius = 16.0;
+
+  static BoxDecoration zenCard(BuildContext context) => BoxDecoration(
+    color: context.bgCard,
+    borderRadius: BorderRadius.circular(zenRadius),
+    border: Border.all(
+      color: context.textMuted.withAlpha(20),
+      width: 0.5,
+    ),
+  );
+
   static TextStyle numberStyle({Color? color, double? fontSize, FontWeight? fontWeight, double? letterSpacing}) {
     return GoogleFonts.spaceGrotesk(
       color: color,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -1479,7 +1480,7 @@ class _FlagFinderScreenState extends State<FlagFinderScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(
                         fontSize: 8,
                         fontWeight: FontWeight.bold,
@@ -1490,7 +1491,22 @@ class _FlagFinderScreenState extends State<FlagFinderScreen> {
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_gameOver ? _useHint : null,
+            onPressed: !_gameOver
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'flagle',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('flagle');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),

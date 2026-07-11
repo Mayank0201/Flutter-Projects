@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../utils/rules_helper.dart';
@@ -11,6 +12,7 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/shuffle_manager.dart';
 
 class ZipLevel {
   final int rows, cols;
@@ -41,6 +43,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   bool _isDailyMode = false;
   String _dailyModifierType = '';
   List<(int, int)>? _solution;
+  bool _shuffleActive = false;
   bool get _isReversePath => _isDailyMode && _dailyModifierType == 'mirror';
   bool _hideGridPathElements = false;
   Timer? _blindStepsTimer;
@@ -66,8 +69,10 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
     }
     final savedLevel = prefs.getInt('level_zip') ?? 0;
+    final active = await ShuffleManager.isActive();
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = savedLevel;
         _loadLevel(prefs);
       });
@@ -95,14 +100,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     setState(() {
       _hintCount = newCount;
     });
-    if (earned) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: AppTheme.accentFor('zip'),
-        ),
-      );
-    }
+    
   }
 
   List<(int, int)>? _solveZip(ZipLevel level) {
@@ -232,20 +230,21 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
     if (levelIndex < 5) {
       gridSize = 3;
-      waypointCount = 2 + (levelIndex % 2); // 2 or 3 waypoints
+      waypointCount = 2 + ((levelIndex + 1) ~/ 2); // 2, 3, 3, 4, 4 waypoints
     } else if (levelIndex < 15) {
       gridSize = 4;
-      waypointCount = 3 + (levelIndex % 3); // 3 to 5 waypoints
+      waypointCount = 3 + ((levelIndex - 5 + 1) ~/ 3);
     } else if (levelIndex < 30) {
       gridSize = 5;
-      waypointCount = 5 + (levelIndex % 3); // 5 to 7 waypoints
+      waypointCount = 5 + ((levelIndex - 15 + 1) ~/ 4);
     } else if (levelIndex < 50) {
       gridSize = 6;
-      waypointCount = 8 + (levelIndex % 4); // 8 to 11 waypoints
+      waypointCount = 8 + ((levelIndex - 30 + 1) ~/ 5);
     } else {
       gridSize = 6;
-      waypointCount = 15 + (levelIndex % 6); // 15 to 20 waypoints
+      waypointCount = 12 + ((levelIndex - 50) ~/ 6);
     }
+    waypointCount = waypointCount.clamp(2, (gridSize * gridSize) - 2);
     final int rows = gridSize;
     final int cols = gridSize;
     final rand = Random(levelIndex);
@@ -633,12 +632,13 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     return path;
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
     if (_isDailyMode) {
       Navigator.pop(context, true);
       return;
     }
+    if (await ShuffleManager.tryShuffleNavigate(context, 'zip')) return;
 
     _clearState();
     setState(() {
@@ -660,6 +660,12 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         title: Text('Grid Path', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'zip'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -672,14 +678,29 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-                      '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_won ? _useHint : null,
+            onPressed: !_won
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'zip',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('zip');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),

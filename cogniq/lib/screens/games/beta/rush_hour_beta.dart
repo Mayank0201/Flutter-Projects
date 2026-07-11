@@ -1,13 +1,15 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/ad_manager.dart';
 import '../../../utils/audio_manager.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 
 class RushHourBetaScreen extends StatefulWidget {
   const RushHourBetaScreen({super.key});
@@ -73,6 +75,10 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
     return size ~/ 2 - (size % 2 == 0 ? 1 : 0);
   }
 
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
+
   @override
   void initState() {
     super.initState();
@@ -83,17 +89,49 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
     final savedLvl = prefs.getInt('level_block_escape') ?? 0;
+    
+    final tutorialKey = 'has_seen_tutorial_block_escape';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    
     if (mounted) {
       setState(() {
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _actualGameLevel = savedLvl;
+        if (!hasSeen) {
+          _isTutorialMode = true;
+          _currentLevel = 0;
+        } else {
+          _isTutorialMode = false;
+          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        }
         _loadLevel();
       });
     }
   }
 
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_block_escape';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
+  }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
+      
+      if (_isTutorialMode) {
+        final er = _exitRow;
+        _vehicles = [
+          Vehicle(id: 'red', row: er, col: 0, len: 2, isVertical: false, color: Colors.redAccent),
+          Vehicle(id: 'v1', row: 0, col: 2, len: 2, isVertical: true, color: Colors.green.shade400),
+        ];
+        return;
+      }
+      
       _generateProceduralLevel();
     });
   }
@@ -291,22 +329,26 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
     double dx = details.globalPosition.dx - _dragStartX;
     double dy = details.globalPosition.dy - _dragStartY;
 
-    setState(() {
-      if (v.isVertical) {
-        int cellDiff = (dy / cs).round();
-        int targetRow = (_vehicleStartRow + cellDiff).clamp(0, size - v.len);
-        if (_isMoveValid(v, targetRow, v.col)) {
+    if (v.isVertical) {
+      int cellDiff = (dy / cs).round();
+      int targetRow = (_vehicleStartRow + cellDiff).clamp(0, size - v.len);
+      if (targetRow != v.row && _isMoveValid(v, targetRow, v.col)) {
+        settingsNotifier.hapticTap();
+        setState(() {
           v.row = targetRow;
-        }
-      } else {
-        int cellDiff = (dx / cs).round();
-        int maxCol = (v.id == 'red') ? size - v.len : size - v.len;
-        int targetCol = (_vehicleStartCol + cellDiff).clamp(0, maxCol);
-        if (_isMoveValid(v, v.row, targetCol)) {
-          v.col = targetCol;
-        }
+        });
       }
-    });
+    } else {
+      int cellDiff = (dx / cs).round();
+      int maxCol = (v.id == 'red') ? size - v.len : size - v.len;
+      int targetCol = (_vehicleStartCol + cellDiff).clamp(0, maxCol);
+      if (targetCol != v.col && _isMoveValid(v, v.row, targetCol)) {
+        settingsNotifier.hapticTap();
+        setState(() {
+          v.col = targetCol;
+        });
+      }
+    }
   }
 
   bool _isMoveValid(Vehicle v, int tr, int tc) {
@@ -331,8 +373,18 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
       if (v.id == 'red' && v.col == size - v.len) {
         // Red block reached exit! Slide completely out of board
         AudioManager.playClick();
-        _isSuccess = true;
-        _onLevelCleared();
+        if (_isTutorialMode) {
+          if (!_tutorialCompleted) {
+            AudioManager.playSuccess();
+            settingsNotifier.hapticSuccess();
+            setState(() {
+              _tutorialCompleted = true;
+            });
+          }
+        } else {
+          _isSuccess = true;
+          _onLevelCleared();
+        }
       }
     });
   }
@@ -372,33 +424,7 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
 
   void _showRules() {
     settingsNotifier.hapticTap();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: context.textMuted.withAlpha(40)),
-        ),
-        title: Text(
-          'How to Play',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
-        ),
-        content: Text(
-          '• Slide blocks along their length.\n• Blocks cannot overlap or rotate.\n• Clear a path so the red block can exit on the right.',
-          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 14, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Got it',
-              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
-            ),
-          )
-        ],
-      ),
-    );
+    GameTutorialDialog.show(context, 'block_escape', 'Block Escape');
   }
 
   @override
@@ -426,7 +452,7 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: Center(
               child: Text(
-                'Level ${_currentLevel + 1}', 
+                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
                 style: AppTheme.numberStyle(
                   color: AppTheme.dustyMauve, 
                   fontSize: 14, 
@@ -538,7 +564,7 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
                       ),
                     ],
                   ),
-                if (_isSuccess && !_playDailyMode)
+                if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                   AutoNextCountdown(
                     onNext: _nextLevel,
                     accentColor: AppTheme.dustyMauve,
@@ -554,6 +580,15 @@ class _RushHourBetaScreenState extends State<RushHourBetaScreen> {
                   Navigator.pop(context, true);
                 },
               ),
+            ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully escaped the red block from the grid."
+                  : "Slide the green blocking obstacle down, then slide the RED block to the right exit slot!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
             ),
         ],
       ),

@@ -7,19 +7,25 @@ import '../models/game_info.dart';
 import '../theme/app_theme.dart';
 import '../theme/settings_manager.dart';
 import '../theme/theme_manager.dart';
-import '../utils/ad_manager.dart';
 import '../utils/purchase_manager.dart';
-import '../utils/hint_manager.dart';
 import '../utils/audio_manager.dart';
 import '../utils/recently_played_manager.dart';
 import 'package:home_widget/home_widget.dart';
 import '../utils/daily_challenge_manager.dart';
 import 'daily_screen.dart';
 import 'beta/beta_games_screen.dart';
+import 'achievements_screen.dart';
+import 'trails_screen.dart';
+import '../widgets/buy_hints_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
 // import 'daily_challenge_test_screen.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/notification_manager.dart';
+import '../utils/shuffle_manager.dart';
+import '../main.dart';
+import '../utils/notification_manager.dart';
+import '../utils/shuffle_manager.dart';
+import '../main.dart';
 
 const Map<String, IconData> _gameIcons = {
   'wordle': Icons.grid_4x4_outlined,
@@ -81,7 +87,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
   late AnimationController _ctrl;
   String _activeCategory = 'All';
   int _dailyStreak = 0;
@@ -93,6 +99,298 @@ class _HomeScreenState extends State<HomeScreen>
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   List<GameInfo> _recentlyPlayedGames = [];
+  bool _shuffleActive = false;
+  int _pointBalance = 0;
+
+
+
+  Future<void> _loadShuffleState() async {
+    final active = await ShuffleManager.isActive();
+    if (mounted) {
+      setState(() {
+        _shuffleActive = active;
+      });
+    }
+  }
+
+  void _showShuffleConfigureSheet() async {
+    final activeGames = kAllGames.where((g) => !g.isStashed).toList();
+    final initiallySelected = await ShuffleManager.getSelectedGames();
+    final selectedSet = Set<String>.from(initiallySelected);
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.bgDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.6,
+              minChildSize: 0.4,
+              maxChildSize: 0.85,
+              expand: false,
+              builder: (context, scrollController) {
+                return Column(
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 8),
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: context.textMuted.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Shuffle Setup',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: context.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Deselect games to exclude them from shuffle loops.',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 11,
+                                  color: context.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setModalState(() {
+                                if (selectedSet.length == activeGames.length) {
+                                  selectedSet.clear();
+                                  selectedSet.add(activeGames.first.id);
+                                } else {
+                                  selectedSet.addAll(activeGames.map((g) => g.id));
+                                }
+                              });
+                            },
+                            child: Text(
+                              selectedSet.length == activeGames.length ? 'Deselect All' : 'Select All',
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.softSage,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        itemCount: activeGames.length,
+                        itemBuilder: (context, index) {
+                          final game = activeGames[index];
+                          final isSelected = selectedSet.contains(game.id);
+                          final accent = AppTheme.accentFor(game.id);
+
+                          return CheckboxListTile(
+                            activeColor: AppTheme.softSage,
+                            checkColor: Colors.white,
+                            secondary: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: accent.withAlpha((255 * 0.1).round()),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                _gameIcons[game.id] ?? Icons.gamepad_outlined,
+                                size: 16,
+                                color: accent,
+                              ),
+                            ),
+                            title: Text(
+                              game.name,
+                              style: GoogleFonts.outfit(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: context.textPrimary,
+                              ),
+                            ),
+                            value: isSelected,
+                            onChanged: (val) {
+                              setModalState(() {
+                                if (val == true) {
+                                  selectedSet.add(game.id);
+                                } else {
+                                  if (selectedSet.length > 1) {
+                                    selectedSet.remove(game.id);
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('At least one game must remain selected.'),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            await ShuffleManager.setSelectedGames(selectedSet.toList());
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Shuffle configuration saved successfully.'),
+                                  duration: Duration(seconds: 1),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.softSage,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Save Config',
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _toggleShuffle() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeen = prefs.getBool('has_seen_shuffle_tutorial') ?? false;
+
+    if (!hasSeen) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: context.bgCard,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: context.textMuted.withAlpha(40)),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.shuffle_rounded, color: Color(0xFF1DB954)),
+              const SizedBox(width: 10),
+              Text(
+                'Shuffle Mode',
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  color: context.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Shuffle Mode automatically transitions you to a new random exercise after each level completion to keep your training fresh.\n\nLong-press the shuffle icon to customize your setup and choose which games to include.',
+            style: GoogleFonts.outfit(
+              color: context.textSecondary,
+              fontSize: 13,
+              height: 1.5,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await prefs.setBool('has_seen_shuffle_tutorial', true);
+                Navigator.pop(ctx);
+                await _performToggleShuffle();
+              },
+              child: Text(
+                'Got it',
+                style: GoogleFonts.outfit(
+                  color: AppTheme.dustyMauve,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      await _performToggleShuffle();
+    }
+  }
+
+  Future<void> _performToggleShuffle() async {
+    final next = await ShuffleManager.toggleShuffle();
+    if (mounted) {
+      setState(() {
+        _shuffleActive = next;
+      });
+    }
+    settingsNotifier.hapticTap();
+
+    if (next && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Shuffle Mode ON — launching a random game...'),
+          duration: const Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      final game = await ShuffleManager.pickNextGame('');
+      AudioManager.fadeOutMusic();
+      if (mounted) {
+        Navigator.pushNamed(context, game.routeName);
+      }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Shuffle Mode OFF'),
+          duration: const Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -108,6 +406,7 @@ class _HomeScreenState extends State<HomeScreen>
     _todaysGame = kAllGames[seed % kAllGames.length];
 
     _loadDailyChallengeInfo();
+    _loadShuffleState();
     settingsNotifier.addListener(_onSettingsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ChallengeReminderHelper.checkAndShowReminder(context);
@@ -225,7 +524,21 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
+  void didPopNext() async {
+    await ShuffleManager.setInactive();
+    _loadDailyChallengeInfo();
+    _loadShuffleState();
+  }
+
+  @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     settingsNotifier.removeListener(_onSettingsChanged);
@@ -307,6 +620,9 @@ class _HomeScreenState extends State<HomeScreen>
         })
         .whereType<GameInfo>()
         .toList();
+
+    _pointBalance = prefs.getInt('points') ?? 0;
+    _shuffleActive = prefs.getBool('shuffle_mode') ?? false;
 
     if (mounted) setState(() {});
   }
@@ -469,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen>
       case 1:
         return const _DailyTab();
       case 2:
-        return const _StatsTab();
+        return _StatsTab(key: ValueKey(_completedCount));
       case 3:
         return const _ProfileTab();
       case 4:
@@ -499,40 +815,101 @@ class _HomeScreenState extends State<HomeScreen>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'How are you feeling today?',
+                      style: GoogleFonts.outfit(
+                        fontSize: context.scale(22),
+                        fontWeight: FontWeight.w600,
+                        color: context.textPrimary,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Cultivate your daily mindfulness & focus',
+                      style: GoogleFonts.outfit(
+                        fontSize: context.scale(12),
+                        color: context.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
                 children: [
-                  Text(
-                    'How are you feeling today?',
-                    style: GoogleFonts.outfit(
-                      fontSize: context.scale(22),
-                      fontWeight: FontWeight.w600,
-                      color: context.textPrimary,
-                      letterSpacing: -0.5,
+                   GestureDetector(
+                    onTap: () => BuyHintsDialog.show(context, initialGameId: 'zip', onPurchaseComplete: _loadDailyChallengeInfo),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warmAmber.withAlpha((255 * 0.12).round()),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.warmAmber.withAlpha((255 * 0.2).round()), width: 0.5),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.psychology, color: AppTheme.warmAmber, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$_pointBalance IQ',
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.warmAmber,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Cultivate your daily mindfulness & focus',
-                    style: GoogleFonts.outfit(
-                      fontSize: context.scale(12),
-                      color: context.textSecondary,
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: _toggleShuffle,
+                    onLongPress: _showShuffleConfigureSheet,
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.shuffle_rounded,
+                            color: _shuffleActive ? const Color(0xFF1DB954) : context.textMuted,
+                            size: 22,
+                          ),
+                          const SizedBox(height: 2),
+                          Container(
+                            width: 4,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: _shuffleActive ? const Color(0xFF1DB954) : Colors.transparent,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: AppTheme.dustyMauve.withAlpha(25),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.spa_outlined,
+                      color: AppTheme.dustyMauve,
+                      size: 20,
                     ),
                   ),
                 ],
-              ),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppTheme.dustyMauve.withAlpha(25),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.spa_outlined,
-                  color: AppTheme.dustyMauve,
-                  size: 20,
-                ),
               ),
             ],
           ),
@@ -616,7 +993,10 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   itemCount: filteredGames.length,
                   itemBuilder: (ctx, idx) {
-                    return _GameCard(game: filteredGames[idx])
+                    return _GameCard(
+                      game: filteredGames[idx],
+                      onRefresh: _loadDailyChallengeInfo,
+                    )
                         .animate()
                         .fadeIn(delay: (idx * 30).ms, duration: 300.ms)
                         .slideY(
@@ -922,15 +1302,19 @@ class _RecentGameCardState extends State<_RecentGameCard> {
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapCancel: () => setState(() => _pressed = false),
-      onTapUp: (_) {
+      onTapUp: (_) async {
         setState(() => _pressed = false);
         AudioManager.fadeOutMusic();
+        await ShuffleManager.setInactive();
         RecentlyPlayedManager.addGame(widget.game.id);
         ActivityTracker.trackGamePlay(widget.game.id);
-        Navigator.pushNamed(context, widget.game.routeName).then((_) {
-          AudioManager.fadeInMusic();
-          widget.onRefresh();
-        });
+        if (mounted) {
+          Navigator.pushNamed(context, widget.game.routeName).then((_) {
+            if (mounted) {
+              widget.onRefresh();
+            }
+          });
+        }
       },
       child: AnimatedScale(
         scale: _pressed ? 0.96 : 1.0,
@@ -1001,13 +1385,13 @@ class _CircularProgressBadge extends StatelessWidget {
     // If progress is 0, show a faint complete track instead of an empty line
     final displayValue = value == 0.0 ? 0.05 : value;
     return SizedBox(
-      width: 24,
-      height: 24,
+      width: 20,
+      height: 20,
       child: CircularProgressIndicator(
         value: displayValue,
         backgroundColor: color.withAlpha(25),
         valueColor: AlwaysStoppedAnimation<Color>(color),
-        strokeWidth: 2.5,
+        strokeWidth: 1.5,
       ),
     );
   }
@@ -1015,7 +1399,8 @@ class _CircularProgressBadge extends StatelessWidget {
 
 class _GameCard extends StatefulWidget {
   final GameInfo game;
-  const _GameCard({required this.game});
+  final VoidCallback onRefresh;
+  const _GameCard({required this.game, required this.onRefresh});
   @override
   State<_GameCard> createState() => _GameCardState();
 }
@@ -1027,6 +1412,12 @@ class _GameCardState extends State<_GameCard> {
   @override
   void initState() {
     super.initState();
+    _loadProgress();
+  }
+
+  @override
+  void didUpdateWidget(covariant _GameCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
     _loadProgress();
   }
 
@@ -1050,15 +1441,20 @@ class _GameCardState extends State<_GameCard> {
 
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
+      onTapUp: (_) async {
         setState(() => _pressed = false);
         AudioManager.fadeOutMusic();
+        await ShuffleManager.setInactive();
         RecentlyPlayedManager.addGame(widget.game.id);
         ActivityTracker.trackGamePlay(widget.game.id);
-        Navigator.pushNamed(context, widget.game.routeName).then((_) {
-          AudioManager.fadeInMusic();
-          _loadProgress();
-        });
+        if (mounted) {
+          Navigator.pushNamed(context, widget.game.routeName).then((_) {
+            if (mounted) {
+              _loadProgress();
+              widget.onRefresh();
+            }
+          });
+        }
       },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
@@ -1066,15 +1462,11 @@ class _GameCardState extends State<_GameCard> {
         duration: const Duration(milliseconds: 100),
         child: Container(
           clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: context.bgCard,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: AppTheme.cardShadow,
-          ),
+          decoration: AppTheme.zenCard(context),
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1101,7 +1493,7 @@ class _GameCardState extends State<_GameCard> {
                       widget.game.name,
                       style: GoogleFonts.outfit(
                         fontSize: 14,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w600,
                         color: context.textPrimary,
                       ),
                     ),
@@ -1111,23 +1503,10 @@ class _GameCardState extends State<_GameCard> {
                       style: GoogleFonts.outfit(
                         fontSize: 10,
                         color: context.textSecondary,
-                        fontWeight: FontWeight.w500,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                   ],
-                ),
-              ),
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: SizedBox(
-                  height: 4,
-                  child: LinearProgressIndicator(
-                    value: progressFraction == 0.0 ? 0.05 : progressFraction,
-                    backgroundColor: accent.withAlpha(20),
-                    valueColor: AlwaysStoppedAnimation<Color>(accent),
-                  ),
                 ),
               ),
             ],
@@ -1140,7 +1519,7 @@ class _GameCardState extends State<_GameCard> {
 
 // Stats Tab content
 class _StatsTab extends StatefulWidget {
-  const _StatsTab();
+  const _StatsTab({super.key});
   @override
   State<_StatsTab> createState() => _StatsTabState();
 }
@@ -1148,6 +1527,8 @@ class _StatsTab extends StatefulWidget {
 class _StatsTabState extends State<_StatsTab> {
   Map<String, int> _levels = {};
   Map<String, int> _streaks = {};
+  List<String> _recentlyPlayedIds = [];
+  String _sortBy = 'default'; // 'default', 'most_played', 'recent'
   bool _loading = true;
 
   @override
@@ -1164,34 +1545,157 @@ class _StatsTabState extends State<_StatsTab> {
       lvls[g.id] = (prefs.getInt('level_${g.id}') ?? 0) + 1;
       strks[g.id] = prefs.getInt('streak_${g.id}') ?? 0;
     }
+    final recentlyPlayedIds = prefs.getStringList('recently_played_games') ?? [];
     if (mounted) {
       setState(() {
         _levels = lvls;
         _streaks = strks;
+        _recentlyPlayedIds = recentlyPlayedIds;
         _loading = false;
       });
     }
   }
 
+  Widget _buildSortChip(String value, String label, IconData icon) {
+    final isSelected = _sortBy == value;
+    final accent = AppTheme.softSage;
+    return ChoiceChip(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: isSelected ? Colors.white : context.textSecondary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: GoogleFonts.outfit(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isSelected ? Colors.white : context.textSecondary,
+            ),
+          ),
+        ],
+      ),
+      selected: isSelected,
+      selectedColor: accent,
+      backgroundColor: context.bgCard,
+      checkmarkColor: Colors.white,
+      showCheckmark: false,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: isSelected ? accent : context.textMuted.withOpacity(0.15),
+          width: 1,
+        ),
+      ),
+      onSelected: (_) {
+        setState(() {
+          _sortBy = value;
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
+
+    final displayGames = kAllGames.where((g) => !g.isStashed).toList();
+    if (_sortBy == 'most_played') {
+      displayGames.sort((a, b) {
+        final lvlA = _levels[a.id] ?? 1;
+        final lvlB = _levels[b.id] ?? 1;
+        return lvlB.compareTo(lvlA); // Descending
+      });
+    } else if (_sortBy == 'recent') {
+      displayGames.sort((a, b) {
+        final idxA = _recentlyPlayedIds.indexOf(a.id);
+        final idxB = _recentlyPlayedIds.indexOf(b.id);
+        if (idxA != -1 && idxB != -1) {
+          return idxA.compareTo(idxB); // Ascending (since index 0 is most recent)
+        } else if (idxA != -1) {
+          return -1; // a is recent, b is not
+        } else if (idxB != -1) {
+          return 1; // b is recent, a is not
+        } else {
+          return a.name.compareTo(b.name); // Alphabetical fallback
+        }
+      });
+    }
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       children: [
-        Text(
-          'Progress Log',
-          style: GoogleFonts.outfit(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: context.textPrimary,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Progress Log',
+                  style: GoogleFonts.outfit(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: context.textPrimary,
+                  ),
+                ),
+                Text(
+                  'A record of your daily focus and exercises.',
+                  style: GoogleFonts.outfit(fontSize: 13, color: context.textSecondary),
+                ),
+              ],
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.auto_awesome_outlined, color: AppTheme.softSage),
+                  tooltip: 'Trails',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const TrailsScreen()),
+                    ).then((_) {
+                      _loadStats();
+                    });
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.emoji_events_outlined, color: AppTheme.dustyMauve),
+                  tooltip: 'Achievements',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const AchievementsScreen()),
+                    ).then((_) {
+                      _loadStats();
+                    });
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        // Sort Chips
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildSortChip('default', 'Default', Icons.grid_view_rounded),
+              const SizedBox(width: 8),
+              _buildSortChip('most_played', 'Most Played', Icons.stars_rounded),
+              const SizedBox(width: 8),
+              _buildSortChip('recent', 'Recently Played', Icons.history_rounded),
+            ],
           ),
         ),
-        Text(
-          'A record of your daily focus and exercises.',
-          style: GoogleFonts.outfit(fontSize: 13, color: context.textSecondary),
-        ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         Container(
           decoration: BoxDecoration(
             color: context.bgCard,
@@ -1199,58 +1703,70 @@ class _StatsTabState extends State<_StatsTab> {
             boxShadow: AppTheme.cardShadow,
           ),
           child: Column(
-            children: kAllGames.where((g) => !g.isStashed).map((g) {
+            children: displayGames.map((g) {
               final lvl = _levels[g.id] ?? 1;
               final strk = _streaks[g.id] ?? 0;
               final accent = AppTheme.accentFor(g.id);
               return Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: accent.withAlpha(25),
-                                borderRadius: BorderRadius.circular(8),
+                  InkWell(
+                    onTap: () {
+                      AudioManager.fadeOutMusic();
+                      RecentlyPlayedManager.addGame(g.id);
+                      ActivityTracker.trackGamePlay(g.id);
+                      Navigator.pushNamed(context, g.routeName).then((_) {
+                        AudioManager.fadeInMusic();
+                        _loadStats();
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: accent.withAlpha(25),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  _gameIcons[g.id] ?? Icons.gamepad_outlined,
+                                  size: 16,
+                                  color: accent,
+                                ),
                               ),
-                              child: Icon(
-                                _gameIcons[g.id] ?? Icons.gamepad_outlined,
-                                size: 16,
-                                color: accent,
+                              const SizedBox(width: 12),
+                              Text(
+                                g.name,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.textPrimary,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              g.name,
-                              style: GoogleFonts.outfit(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: context.textPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          'Level $lvl${strk > 0 ? ' • Streak $strk' : ''}',
-                          style: GoogleFonts.outfit(
-                            fontSize: 12,
-                            color: context.textSecondary,
-                            fontWeight: FontWeight.w500,
+                            ],
                           ),
-                        ),
-                      ],
+                          Text(
+                            'Level $lvl${strk > 0 ? ' • Streak $strk' : ''}',
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              color: context.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  if (g != kAllGames.last)
+                  if (g != displayGames.last)
                     Divider(
                       color: context.textMuted.withAlpha(40),
                       height: 1,
@@ -1478,12 +1994,12 @@ class _ProfileTab extends StatelessWidget {
                     thickness: 0.8,
                   ),
                   _ProfileTile(
-                    icon: Icons.play_circle_outline,
-                    title: 'Earn Free Hints',
-                    subtitle: AdManager.isRewardedAdReady()
-                        ? 'Rewarded video ready'
-                        : 'Watch video to get +2 hints',
-                    onTap: () => _showEarnHintsDialog(context),
+                    icon: Icons.shopping_bag_outlined,
+                    title: 'Buy Hints',
+                    subtitle: 'Use your points to get hints',
+                    onTap: () {
+                      BuyHintsDialog.show(context, initialGameId: 'zip');
+                    },
                   ),
                 ],
               ),
@@ -1601,149 +2117,7 @@ class _ProfileTab extends StatelessWidget {
     );
   }
 
-  void _showEarnHintsDialog(BuildContext context) {
-    String selectedGameId = kAllGames.first.id;
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: context.bgCard,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: Text(
-                'Earn Free Hints',
-                style: GoogleFonts.outfit(
-                  fontWeight: FontWeight.w700,
-                  color: context.textPrimary,
-                ),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Select the game you want to add 2 hints to:',
-                    style: GoogleFonts.outfit(
-                      color: context.textSecondary,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: context.bgDark,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: context.textMuted.withAlpha(50),
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: selectedGameId,
-                        isExpanded: true,
-                        dropdownColor: context.bgCard,
-                        icon: Icon(
-                          Icons.arrow_drop_down,
-                          color: context.textSecondary,
-                        ),
-                        items: kAllGames.map((game) {
-                          return DropdownMenuItem<String>(
-                            value: game.id,
-                            child: Text(
-                              game.name,
-                              style: GoogleFonts.outfit(
-                                color: context.textPrimary,
-                                fontSize: 14,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() {
-                              selectedGameId = val;
-                            });
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(
-                    'Cancel',
-                    style: GoogleFonts.outfit(
-                      color: context.textMuted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.wordleGreen,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    final messenger = ScaffoldMessenger.of(context);
-                    AdManager.showRewardedAd(
-                      onRewardGranted: (amount) async {
-                        await HintManager.addHints(selectedGameId, amount);
-                        final gameName = kAllGames
-                            .firstWhere((g) => g.id == selectedGameId)
-                            .name;
-                        messenger.showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Earned $amount hints for $gameName!',
-                              style: GoogleFonts.outfit(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            backgroundColor: AppTheme.wordleGreen,
-                          ),
-                        );
-                      },
-                      onAdNotReady: () {
-                        messenger.showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Rewarded ad is loading. Please try again in a moment.',
-                              style: GoogleFonts.outfit(),
-                            ),
-                            backgroundColor: Colors.amber[800],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                  child: Text(
-                    'Watch Video',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+
 }
 
 class _SectionHeader extends StatelessWidget {
@@ -1756,10 +2130,10 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title.toUpperCase(),
         style: GoogleFonts.outfit(
-          color: context.textSecondary,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.0,
+          color: context.textMuted,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
         ),
       ),
     );

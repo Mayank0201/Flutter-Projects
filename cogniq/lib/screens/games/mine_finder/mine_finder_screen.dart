@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -10,6 +11,7 @@ import '../../../utils/rules_helper.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/shuffle_manager.dart';
 
 class MineFinderScreen extends StatefulWidget {
   final int? dailyLevelIndex;
@@ -34,6 +36,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
 
   int _hintCount = 0;
   String _message = '';
+  bool _shuffleActive = false;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
   double _dailyModifierRadius = 2.0;
@@ -77,9 +80,11 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       return;
     }
     final savedLevel = prefs.getInt('level_minesweeper') ?? 0;
-
+    final active = await ShuffleManager.isActive();
+ 
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = savedLevel;
         _loadLevel();
       });
@@ -439,17 +444,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       setState(() {
         _hintCount = newCount;
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Hint earned! (Total: $newCount)',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: AppTheme.accentFor('minesweeper'),
-          ),
-        );
-      }
+      
     }
     await _clearNormalState();
   }
@@ -627,13 +622,14 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
     if (widget.dailyLevelIndex != null) {
       Navigator.pop(context, true);
       return;
     }
-
+    if (await ShuffleManager.tryShuffleNavigate(context, 'minesweeper')) return;
+ 
     setState(() {
       _levelIndex++;
       _loadLevel();
@@ -673,6 +669,12 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         ),
         centerTitle: true,
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'minesweeper'),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),
             color: context.textMuted,
@@ -692,7 +694,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                   color: Colors.amber,
                 ),
                 Text(
-                  '$_hintCount',
+                  _hintCount == 0 ? '+' : '$_hintCount',
                   style: GoogleFonts.outfit(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -701,7 +703,22 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                 ),
               ],
             ),
-            onPressed: _useHint,
+            onPressed: !_won && !_lost
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'minesweeper',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('minesweeper');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 20),

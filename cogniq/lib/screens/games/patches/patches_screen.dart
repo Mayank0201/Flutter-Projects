@@ -7,8 +7,12 @@ import'../../../theme/app_theme.dart';
 import'../../../utils/hint_manager.dart';
 import'../../../utils/audio_manager.dart';
 import'../../../widgets/challenge_cleared_overlay.dart';
+import'../../../widgets/auto_next_countdown.dart';
+import'../../../widgets/game_tutorial_dialog.dart';
+import'../../../widgets/buy_hints_dialog.dart';
 // Chimp Test: numbers appear, tap 1 to hide them, then tap in order from memory.
 // Grid and number count grow each level.
+import '../../../utils/shuffle_manager.dart';
 
 class ChimpTestScreen extends StatefulWidget {
   const ChimpTestScreen({super.key});
@@ -48,6 +52,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   bool _chaosShuffleDone = false;
 
   bool _isHintShowing = false;
+  bool _shuffleActive = false;
   int _hintCount = 0;
 
   @override
@@ -67,9 +72,11 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       _dailyModifierType = '';
     }
     final savedLevel = prefs.getInt('level_chimp') ?? 0;
-
+    final active = await ShuffleManager.isActive();
+ 
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = savedLevel;
         _loadLevel();
       });
@@ -85,14 +92,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     setState(() {
       _hintCount = newCount;
     });
-    if (earned && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: AppTheme.accentFor('chimp'),
-        ),
-      );
-    }
+    
   }
 
   Future<void> _useHint() async {
@@ -273,12 +273,13 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     return false;                        // hide all numbers after first tap
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
     if (_playDailyMode) {
       Navigator.pop(context, true);
       return;
     }
+    if (await ShuffleManager.tryShuffleNavigate(context, 'chimp')) return;
 
     setState(() {
       _levelIndex = _levelIndex + 1;
@@ -295,6 +296,12 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
         title: Text('Chimp Test', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'chimp'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -307,23 +314,47 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-'$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && _started && !_won && !_failed && !_isHintShowing ? _useHint : null,
+            onPressed: !_won && !_failed && !_isHintShowing
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'chimp',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('chimp');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),
             color: context.textMuted,
-            onPressed: () => RulesHelper.showRulesBottomSheet(context,'chimp','Chimp Test'),
+            onPressed: () => GameTutorialDialog.show(context, 'chimp', 'Chimp Test'),
           ),
-          IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
-          Padding(padding: const EdgeInsets.only(right: 12),
-            child: Center(child: Text(_playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}', style: AppTheme.numberStyle(color: AppTheme.patchesTeal, fontSize: context.scale(13))))),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Text(
+                _playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}', 
+                style: AppTheme.numberStyle(
+                  color: AppTheme.patchesTeal, 
+                  fontSize: context.scale(13),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
       body: Stack(
@@ -455,8 +486,11 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      if (_won && !_playDailyMode) TextButton(onPressed: _nextLevel,
-                        child: Text('Next →', style: GoogleFonts.outfit(color: AppTheme.patchesTeal, fontWeight: FontWeight.w700, fontSize: context.scale(16)))),
+                      if (_won && !_playDailyMode) 
+                        AutoNextCountdown(
+                          onNext: _nextLevel,
+                          accentColor: AppTheme.patchesTeal,
+                        ),
                       if (_failed) TextButton(onPressed: _reset,
                         child: Text('Retry', style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(15)))),
                     ],

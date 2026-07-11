@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -12,6 +13,7 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
+import '../../../utils/shuffle_manager.dart';
 class SudokuLevel {
   final int size; // 4, 6, or 9
   final List<List<int>> startBoard;
@@ -1144,6 +1146,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
   Timer? _warpTimer;
 
   bool _inRecallTest = false;
+  bool _shuffleActive = false;
   bool _isScanPhase = true;
   int _recallTargetCount = 2;
   int _recallPlacedCount = 0;
@@ -1337,9 +1340,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
       return;
     }
     final savedLevel = prefs.getInt('level_sudoku') ?? 0;
-
+    final active = await ShuffleManager.isActive();
+ 
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = savedLevel;
         _loadLevel();
       });
@@ -1374,17 +1379,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       setState(() {
         _hintCount = newCount;
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Hint earned! (Total: $newCount)',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: AppTheme.accentFor('sudoku'),
-          ),
-        );
-      }
+      
     }
   }
 
@@ -1743,13 +1738,14 @@ class _SudokuScreenState extends State<SudokuScreen> {
     }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
     if (widget.dailyLevelIndex != null) {
       Navigator.pop(context, true);
       return;
     }
-
+    if (await ShuffleManager.tryShuffleNavigate(context, 'sudoku')) return;
+ 
     setState(() {
       _levelIndex = _levelIndex + 1;
       _loadLevel();
@@ -1831,6 +1827,12 @@ class _SudokuScreenState extends State<SudokuScreen> {
         ),
         centerTitle: true,
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'sudoku'),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),
             color: context.textMuted,
@@ -1847,7 +1849,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                   color: Colors.amber,
                 ),
                 Text(
-                  '$_hintCount',
+                  _hintCount == 0 ? '+' : '$_hintCount',
                   style: GoogleFonts.outfit(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -1856,7 +1858,22 @@ class _SudokuScreenState extends State<SudokuScreen> {
                 ),
               ],
             ),
-            onPressed: _useSudokuHint,
+            onPressed: !_won
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useSudokuHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'sudoku',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('sudoku');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 20),

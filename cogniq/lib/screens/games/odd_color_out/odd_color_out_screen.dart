@@ -11,6 +11,10 @@ import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/auto_next_countdown.dart';
 
 class OddColorOutScreen extends StatefulWidget {
   const OddColorOutScreen({super.key});
@@ -21,6 +25,7 @@ class OddColorOutScreen extends StatefulWidget {
 
 class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTickerProviderStateMixin {
   int _levelIndex = 0;
+  bool _shuffleActive = false;
   int _hintCount = 0;
   bool _isHintShowing = false;
   bool _levelCleared = false;
@@ -269,9 +274,10 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       _dailyModifierName = '';
     }
     final savedLevel = prefs.getInt('level_oddcolor') ?? 0;
-
+    final active = await ShuffleManager.isActive();
     if (mounted) {
       setState(() {
+        _shuffleActive = active;
         _levelIndex = savedLevel;
         _generateLevelColors();
       });
@@ -289,14 +295,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
         _hintCount = newCount;
       });
     }
-    if (earned && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: AppTheme.accentFor('oddcolor'),
-        ),
-      );
-    }
+    
   }
 
   void _onCellTap(int r, int c) {
@@ -330,16 +329,6 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
         // Handled by ChallengeClearedOverlay
         return;
       }
-      Future.delayed(const Duration(milliseconds: 650), () {
-        if (mounted) {
-
-          setState(() {
-            _levelIndex++;
-            _savePersistedLevel(_levelIndex);
-            _generateLevelColors();
-          });
-        }
-      });
     } else {
       // Wrong cell - form a new color grid with same difficulty
       AudioManager.playFail();
@@ -351,22 +340,59 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   }
 
   Future<void> _useHint() async {
-    if (_levelCleared || _hintCount <= 0 || _isHintShowing) return;
+    if (_levelCleared) return;
+
+    if (_hintCount <= 0) {
+      BuyHintsDialog.show(
+        context,
+        initialGameId: 'oddcolor',
+        isFromGameScreen: true,
+        onPurchaseComplete: () {
+          HintManager.getHints('oddcolor').then((val) {
+            if (mounted) setState(() => _hintCount = val);
+          });
+        },
+      );
+      return;
+    }
 
     await HintManager.useHint('oddcolor');
     final newCount = await HintManager.getHints('oddcolor');
 
     setState(() {
       _hintCount = newCount;
-      _isHintShowing = true;
     });
 
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) {
-        setState(() {
-          _isHintShowing = false;
-        });
-      }
+    final side = _gridSide;
+    String message = "";
+    if (side <= 3) {
+      message = "Hint: The odd tile is in row ${_oddRow + 1} or column ${_oddCol + 1}.";
+    } else {
+      final verticalHalf = _oddRow < side / 2 ? "top" : "bottom";
+      final horizontalHalf = _oddCol < side / 2 ? "left" : "right";
+      message = "Hint: The odd tile is in the $verticalHalf-half, $horizontalHalf-half section.";
+    }
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+        duration: const Duration(seconds: 4),
+        backgroundColor: AppTheme.accentFor('oddcolor'),
+      ),
+    );
+  }
+
+  void _nextLevel() async {
+    if (await ShuffleManager.tryShuffleNavigate(context, 'oddcolor')) return;
+    setState(() {
+      _levelCleared = false;
+      _levelIndex++;
+      _savePersistedLevel(_levelIndex);
+      _generateLevelColors();
     });
   }
 
@@ -400,9 +426,51 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(18)),
         ),
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'oddcolor'),
+            ),
+          IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.lightbulb_outline, size: 20, color: context.textMuted),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      _hintCount == 0 ? '+' : '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            onPressed: !_levelCleared && !_gameOver && !_isHintShowing
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'oddcolor',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('oddcolor');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
+          ),
           IconButton(
             icon: const Icon(Icons.help_outline),
-            onPressed: () => RulesHelper.showRulesBottomSheet(context, 'oddcolor', 'Odd Color Out'),
+            onPressed: () => GameTutorialDialog.show(context, 'oddcolor', 'Odd Color Out'),
           ),
         ],
       ),
@@ -619,43 +687,12 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                   ),
                 ),
                 const SizedBox(height: 16),
-            // Bottom stats & Hint buttons
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _useHint,
-                    icon: Icon(Icons.lightbulb_outline, size: context.scale(18)),
-                    label: Text(
-                      'Hint ($_hintCount)',
-                      style: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: context.scale(13)),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.amber,
-                      side: const BorderSide(color: Colors.amber, width: 1.2),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
+                if (_levelCleared && !_isDailyMode)
+                  AutoNextCountdown(
+                    onNext: _nextLevel,
+                    accentColor: accentColor,
                   ),
-                  ElevatedButton(
-                    onPressed: _resetGame,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: context.bgSurface,
-                      foregroundColor: context.textPrimary,
-                      elevation: 1,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    ),
-                    child: Text(
-                      'Reset',
-                      style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(13)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                const SizedBox(height: 24),
           ],
         ),
       ),

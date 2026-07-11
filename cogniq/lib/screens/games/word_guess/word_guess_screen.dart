@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -233,17 +234,7 @@ class _WordGuessScreenState extends State<WordGuessScreen> {
       setState(() {
         _hintCount = newCount;
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Hint earned! (Total: $newCount)',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: AppTheme.wordleGreen,
-          ),
-        );
-      }
+      
     }
   }
 
@@ -543,7 +534,7 @@ class _WordGuessScreenState extends State<WordGuessScreen> {
                       radius: 6,
                       backgroundColor: Colors.amber,
                       child: Text(
-                        '$_hintCount',
+                        _hintCount == 0 ? '+' : '$_hintCount',
                         style: GoogleFonts.outfit(
                           fontSize: 8,
                           fontWeight: FontWeight.bold,
@@ -554,7 +545,22 @@ class _WordGuessScreenState extends State<WordGuessScreen> {
                   ),
                 ],
               ),
-              onPressed: _hintCount > 0 && !_gameOver ? _useWordleHint : null,
+              onPressed: !_gameOver
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useWordleHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'wordle',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('wordle');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
             ),
             IconButton(
               icon: const Icon(Icons.refresh, size: 20),

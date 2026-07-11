@@ -11,7 +11,7 @@ class AutoNextCountdown extends StatefulWidget {
   const AutoNextCountdown({
     super.key,
     required this.onNext,
-    this.duration = const Duration(milliseconds: 2000),
+    this.duration = const Duration(milliseconds: 2500),
     required this.accentColor,
   });
 
@@ -83,19 +83,12 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         decoration: BoxDecoration(
-          color: widget.accentColor.withAlpha((255 * 0.08).round()),
+          color: widget.accentColor.withAlpha((255 * 0.05).round()),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: widget.accentColor.withAlpha((255 * 0.3).round()),
-            width: 1.5,
+            color: widget.accentColor.withAlpha((255 * 0.15).round()),
+            width: 1.0,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: widget.accentColor.withAlpha((255 * 0.1).round()),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -104,19 +97,19 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 40,
-                  height: 40,
+                  width: 36,
+                  height: 36,
                   child: CircularProgressIndicator(
                     value: 1.0 - progress,
-                    strokeWidth: 3.5,
-                    backgroundColor: widget.accentColor.withAlpha((255 * 0.15).round()),
+                    strokeWidth: 2.0,
+                    backgroundColor: widget.accentColor.withAlpha((255 * 0.1).round()),
                     valueColor: AlwaysStoppedAnimation<Color>(widget.accentColor),
                   ),
                 ),
                 Icon(
                   Icons.arrow_forward_rounded,
                   color: widget.accentColor,
-                  size: 18,
+                  size: 16,
                 ).animate(
                   onPlay: (controller) => controller.repeat(reverse: true),
                 ).move(
@@ -136,7 +129,7 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
                   'Level Cleared!',
                   style: GoogleFonts.outfit(
                     fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w600,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
@@ -145,7 +138,7 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
                   'Next level in ${remainingSeconds}s... Tap to skip',
                   style: GoogleFonts.outfit(
                     fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w400,
                     color: isDark ? Colors.white60 : Colors.black54,
                   ),
                 ),
@@ -156,7 +149,8 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
       ),
     )
         .animate()
-        .fadeIn(duration: 400.ms)
-        .slideY(begin: 0.2, end: 0, curve: Curves.easeOutBack);
+        .fadeIn(duration: 500.ms)
+        .scale(begin: const Offset(0.95, 0.95), end: const Offset(1.0, 1.0), curve: Curves.easeOutCubic)
+        .slideY(begin: 0.1, end: 0, curve: Curves.easeOutCubic);
   }
 }

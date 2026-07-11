@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import'../../../utils/rules_helper.dart';
@@ -9,6 +10,7 @@ import'../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/shuffle_manager.dart';
 
 class SpellingBeeLevel {
   final String centerLetter;
@@ -440,6 +442,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   final ValueNotifier<Offset?> _currentDragNotifier = ValueNotifier<Offset?>(null);
 
   int _hintCount = 0;
+  bool _shuffleActive = false;
 
   int get _targetCount {
     if (_playDailyMode && _dailyModifierType == 'whisper') {
@@ -475,16 +478,13 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       _dailyModifierType = '';
     }
 
-    int targetLevel = 0;
-    if (widget.dailyLevelIndex != null) {
-      targetLevel = widget.dailyLevelIndex!;
-    } else {
-      targetLevel = prefs.getInt('level_spellingbee') ?? 0;
-    }
-
+    final savedLevel = prefs.getInt('level_spellingbee') ?? 0;
+    final active = await ShuffleManager.isActive();
+ 
     if (mounted) {
       setState(() {
-        _levelIndex = targetLevel;
+        _shuffleActive = active;
+        _levelIndex = savedLevel;
         _loadLevel();
       });
     }
@@ -584,14 +584,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     setState(() {
       _hintCount = newCount;
     });
-    if (earned && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Hint earned! (Total: $newCount)', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: AppTheme.accentFor('spellingbee'),
-        ),
-      );
-    }
+    
     await _clearNormalState();
   }
 
@@ -770,13 +763,14 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     }
   }
 
-  void _nextLevel() {
+  void _nextLevel() async {
     if (!_won) return;
     if (_playDailyMode) {
       Navigator.pop(context, true);
       return;
     }
-
+    if (await ShuffleManager.tryShuffleNavigate(context, 'spellingbee')) return;
+ 
     setState(() {
       _levelIndex = _levelIndex + 1;
       _loadLevel();
@@ -794,6 +788,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         title: Text('Word Hive', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
+          if (_shuffleActive)
+            IconButton(
+              icon: const Icon(Icons.skip_next_rounded),
+              tooltip: 'Skip Game',
+              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'spellingbee'),
+            ),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,
@@ -806,14 +806,29 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-'$_hintCount',
+_hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: _hintCount > 0 && !_won ? _useHint : null,
+            onPressed: !_won
+                ? () async {
+                    if (_hintCount > 0) {
+                      _useHint();
+                    } else {
+                      await BuyHintsDialog.show(
+                        context,
+                        initialGameId: 'spellingbee',
+                        onPurchaseComplete: () async {
+                          final newCount = await HintManager.getHints('spellingbee');
+                          if (mounted) setState(() => _hintCount = newCount);
+                        },
+                      );
+                    }
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),

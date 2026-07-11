@@ -1,5 +1,10 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ad_manager.dart';
+import 'shuffle_manager.dart';
+import 'point_manager.dart';
+import 'achievement_manager.dart';
+import '../widgets/achievement_toast.dart';
+import '../main.dart';
 
 class HintManager {
   static Future<int> getHints(String gameId) async {
@@ -29,6 +34,12 @@ class HintManager {
   static Future<bool> onLevelCleared(String gameId) async {
     final prefs = await SharedPreferences.getInstance();
     
+    // Increment shuffle clears if shuffle is active
+    if (await ShuffleManager.isActive()) {
+      final sc = (prefs.getInt('shuffle_clears') ?? 0) + 1;
+      await prefs.setInt('shuffle_clears', sc);
+    }
+
     // Increment game-specific clear count
     final key = 'cleared_count_$gameId';
     final count = (prefs.getInt(key) ?? 0) + 1;
@@ -45,11 +56,20 @@ class HintManager {
       AdManager.showInterstitialAd();
     }
 
-    if (count % 5 == 0) {
-      final current = await getHints(gameId);
-      await prefs.setInt('hints_$gameId', current + 1);
-      return true; // Earned a hint!
+    // Award 10 points on every level clear
+    await PointManager.addPoints(10);
+
+    // Check and unlock achievements
+    final newlyUnlocked = await AchievementManager.checkAndUnlock(gameId);
+    if (newlyUnlocked.isNotEmpty) {
+      final context = navigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        for (final a in newlyUnlocked) {
+          AchievementToast.show(context, a);
+        }
+      }
     }
-    return false;
+
+    return true; // Earned points!
   }
 }

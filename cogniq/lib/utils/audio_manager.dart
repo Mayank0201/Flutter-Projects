@@ -6,6 +6,7 @@ class AudioManager {
   static final AudioPlayer _sfxPlayer = AudioPlayer();
 
   static bool _initialized = false;
+  static bool isGameActive = false;
 
   static Future<void> init() async {
     if (_initialized) return;
@@ -92,6 +93,7 @@ class AudioManager {
   }
 
   static Future<void> stopMusic() async {
+    isGameActive = false;
     try {
       await _bgMusicPlayer.stop();
     } catch (_) {
@@ -100,6 +102,7 @@ class AudioManager {
   }
 
   static Future<void> fadeOutMusic() async {
+    isGameActive = true;
     try {
       final double startVol = settingsNotifier.musicEnabled ? 0.15 : 0.0;
       if (startVol > 0) {
@@ -109,6 +112,37 @@ class AudioManager {
         }
       }
       await _bgMusicPlayer.stop();
+    } catch (_) {
+      // Ignore playback exceptions
+    }
+  }
+
+  static Future<void> pauseMusic() async {
+    isGameActive = true;
+    try {
+      final double startVol = settingsNotifier.musicEnabled ? 0.15 : 0.0;
+      if (startVol > 0) {
+        for (int i = 10; i >= 0; i--) {
+          await _bgMusicPlayer.setVolume(startVol * (i / 10.0));
+          await Future.delayed(const Duration(milliseconds: 25));
+        }
+      }
+    } catch (_) {
+      // Ignore playback exceptions
+    }
+  }
+
+  static Future<void> resumeMusic() async {
+    isGameActive = false;
+    try {
+      if (settingsNotifier.musicEnabled) {
+        const double targetVol = 0.15;
+        // Keep volume at current low value or start from 0 if it was stopped/muted
+        for (int i = 0; i <= 10; i++) {
+          await _bgMusicPlayer.setVolume(targetVol * (i / 10.0));
+          await Future.delayed(const Duration(milliseconds: 25));
+        }
+      }
     } catch (_) {
       // Ignore playback exceptions
     }

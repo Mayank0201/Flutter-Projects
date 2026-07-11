@@ -151,6 +151,7 @@ class AdManager {
       },
     );
 
+    _interstitialAd!.setImmersiveMode(true);
     _interstitialAd!.show();
     _interstitialAd = null;
   }
@@ -190,6 +191,7 @@ class AdManager {
       },
     );
 
+    _rewardedAd!.setImmersiveMode(true);
     _rewardedAd!.show(
       onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
         debugPrint(
