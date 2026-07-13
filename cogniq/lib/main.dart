@@ -15,16 +15,13 @@ import 'screens/games/grid_path/grid_path_screen.dart';
 import 'screens/games/word_climb/word_climb_screen.dart';
 import 'screens/games/star_battle/star_battle_screen.dart';
 import 'screens/games/patches/patches_screen.dart';
-import 'screens/games/categories/categories_screen.dart';
 import 'screens/games/flag_finder/flag_finder_screen.dart';
 import 'screens/games/word_builder/word_builder_screen.dart';
 import 'screens/games/mahjong/mahjong_screen.dart';
 import 'screens/games/word_hive/word_hive_screen.dart';
 import 'screens/games/sudoku/sudoku_screen.dart';
-import 'screens/games/word_search/word_search_screen.dart';
 import 'screens/games/mine_finder/mine_finder_screen.dart';
 
-import 'screens/games/nonogram/nonogram_screen.dart';
 import 'screens/games/number_memory/number_memory_screen.dart';
 import 'screens/games/sequence_memory/sequence_memory_screen.dart';
 import 'screens/games/odd_color_out/odd_color_out_screen.dart';
@@ -32,7 +29,6 @@ import 'screens/games/spectrum/spectrum_screen.dart';
 import 'screens/games/beta/pattern_lock_beta.dart';
 import 'screens/games/beta/numberlink_beta.dart';
 import 'screens/games/beta/color_flood_beta.dart';
-import 'screens/games/beta/rush_hour_beta.dart';
 import 'screens/games/beta/circuit_guide_beta.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_manager.dart';
@@ -197,16 +193,13 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
             '/crossclimb': (ctx) => const WordClimbScreen(),
             '/queens': (ctx) => const StarBattleScreen(),
             '/chimp': (ctx) => const ChimpTestScreen(),
-            '/connections': (ctx) => const CategoriesScreen(),
             '/flagle': (ctx) => const FlagFinderScreen(),
             '/wordbuilder': (ctx) => const WordBuilderScreen(),
             '/memory': (ctx) => const MahjongScreen(),
             '/spellingbee': (ctx) => const WordHiveScreen(),
             '/sudoku': (ctx) => const SudokuScreen(),
-            '/wordsearch': (ctx) => const WordSearchScreen(),
             '/minesweeper': (ctx) => const MineFinderScreen(),
             // '/reaction': (ctx) => const ReactionScreen(),
-            '/nonogram': (ctx) => const NonogramScreen(),
             '/numbermemory': (ctx) => const NumberMemoryScreen(),
             '/sequence': (ctx) => const SequenceMemoryScreen(),
             '/oddcolor': (ctx) => const OddColorOutScreen(),
@@ -214,7 +207,6 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
             '/pattern_lock': (ctx) => const PatternLockBetaScreen(),
             '/colour_link': (ctx) => const NumberlinkBetaScreen(),
             '/color_flood': (ctx) => const ColorFloodBetaScreen(),
-            '/block_escape': (ctx) => const RushHourBetaScreen(),
             '/circuit_guide': (ctx) => const CircuitGuideBetaScreen(),
           },
         );

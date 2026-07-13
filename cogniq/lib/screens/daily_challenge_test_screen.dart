@@ -23,13 +23,10 @@ class DailyChallengeTestScreen extends StatelessWidget {
       'wordle': 'daily_wordle_state',
       'queens': 'daily_queens_state',
       'memory': 'daily_memory_state',
-      'nonogram': 'daily_nonogram_state',
       'numbermemory': 'daily_numbermemory_state',
       'wordbuilder': 'daily_wordbuilder_state',
       'sudoku': 'daily_sudoku_state',
-      'connections': 'daily_connections_state',
       'spellingbee': 'daily_spellingbee_state',
-      'wordsearch': 'daily_wordsearch_state',
     };
     final stateKey = stateKeyMap[gameId];
     if (stateKey != null) {

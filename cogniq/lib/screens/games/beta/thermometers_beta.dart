@@ -9,10 +9,18 @@ class ThermometersBetaScreen extends StatefulWidget {
   State<ThermometersBetaScreen> createState() => _ThermometersBetaScreenState();
 }
 class _ThermometersBetaScreenState extends State<ThermometersBetaScreen> {
+  final List<List<int>> _solutions = [
+    [0, 0, 0, 1, 0, 1, 1, 1, 1],
+    [0, 0, 0, 0, 1, 0, 1, 1, 1],
+    [1, 0, 0, 1, 0, 1, 1, 1, 1],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1],
+    [0, 1, 0, 0, 1, 0, 1, 1, 1]
+  ];
+
   int _currentLevel = 0;
   bool _isSuccess = false;
-  List<int> _grid = List.filled(9, 0); // 0: empty, 1: mercury
-  List<int> _rowTargets = [1, 2, 2];
+  List<int> _grid = List.filled(9, 0);
+  List<int> _rowTargets = [0, 2, 3];
   List<int> _colTargets = [2, 1, 2];
 
   @override
@@ -20,23 +28,64 @@ class _ThermometersBetaScreenState extends State<ThermometersBetaScreen> {
     super.initState();
     _loadLevel();
   }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
       _grid = List.filled(9, 0);
       if (_currentLevel == 0) {
-        _rowTargets = [1, 2, 2]; _colTargets = [2, 1, 2];
+        _rowTargets = [0, 2, 3]; _colTargets = [2, 1, 2];
       } else if (_currentLevel == 1) {
-        _rowTargets = [2, 1, 1]; _colTargets = [1, 2, 1];
+        _rowTargets = [0, 1, 3]; _colTargets = [1, 2, 1];
       } else if (_currentLevel == 2) {
-        _rowTargets = [3, 1, 2]; _colTargets = [2, 2, 2];
+        _rowTargets = [1, 2, 3]; _colTargets = [3, 1, 2];
       } else if (_currentLevel == 3) {
-        _rowTargets = [2, 2, 2]; _colTargets = [2, 2, 2];
+        _rowTargets = [0, 3, 3]; _colTargets = [2, 2, 2];
       } else {
-        _rowTargets = [1, 1, 1]; _colTargets = [1, 1, 1];
+        _rowTargets = [1, 1, 3]; _colTargets = [1, 3, 1];
       }
     });
   }
+
+  void _showHint() {
+    final sol = _solutions[_currentLevel];
+    int hintCell = -1;
+    for (int i = 0; i < _grid.length; i++) {
+      if (_grid[i] != sol[i]) {
+        hintCell = i;
+        break;
+      }
+    }
+    if (hintCell != -1) {
+      setState(() {
+        _grid[hintCell] = sol[hintCell];
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hint placed!')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Board matches correct solution!')));
+    }
+  }
+
+  void _showInstructions() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Instructions', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Text(
+          '1. Fill thermometers from bulb up to match row/column counts.\n\n2. Bulbs are marked with circular indicators in row 3.',
+          style: GoogleFonts.outfit(color: context.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Got it', style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _onLevelCleared() async {
     final prefs = await SharedPreferences.getInstance();
     int highest = prefs.getInt('beta_level_thermometers') ?? 0;
@@ -45,16 +94,7 @@ class _ThermometersBetaScreenState extends State<ThermometersBetaScreen> {
     }
     setState(() => _isSuccess = true);
   }
-  void _nextLevel() {
-    if (_currentLevel < 4) {
-      setState(() {
-        _currentLevel++;
-        _loadLevel();
-      });
-    } else {
-      Navigator.pop(context);
-    }
-  }
+
   void _checkSolution() {
     bool isValid = true;
     for (int r = 0; r < 3; r++) {
@@ -71,10 +111,28 @@ class _ThermometersBetaScreenState extends State<ThermometersBetaScreen> {
       }
       if (count != _colTargets[c]) isValid = false;
     }
+    for (int c = 0; c < 3; c++) {
+      // Bulb is at row 2 (index 6 + c), cap is at row 0 (index c)
+      // If row 0 is filled, row 1 must be filled
+      if (_grid[c] == 1 && _grid[3 + c] == 0) isValid = false;
+      // If row 1 is filled, row 2 must be filled
+      if (_grid[3 + c] == 1 && _grid[6 + c] == 0) isValid = false;
+    }
     if (isValid) {
       _onLevelCleared();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mercury levels do not match row/col clues!')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mercury levels do not match row/col targets or bulb-up continuous filling rules!')));
+    }
+  }
+
+  void _nextLevel() {
+    if (_currentLevel < 4) {
+      setState(() {
+        _currentLevel++;
+        _loadLevel();
+      });
+    } else {
+      Navigator.pop(context);
     }
   }
 
@@ -86,6 +144,16 @@ class _ThermometersBetaScreenState extends State<ThermometersBetaScreen> {
         title: Text('Thermometers', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Instructions',
+            onPressed: _showInstructions,
+          ),
+          IconButton(
+            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Hint',
+            onPressed: _showHint,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(child: Text('Level ${_currentLevel + 1}/5', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),
@@ -145,45 +213,36 @@ class _ThermometersBetaScreenState extends State<ThermometersBetaScreen> {
                             },
                           ),
                         ),
+                        const SizedBox(height: 32),
+                        ElevatedButton(
+                          onPressed: _checkSolution,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.dustyMauve,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                          ),
+                          child: Text('Check Grid', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                        ),
                       ],
                     ),
                   ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: context.bgCard, foregroundColor: context.textPrimary),
-                      onPressed: _loadLevel, icon: const Icon(Icons.refresh), label: const Text('Reset'),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve, foregroundColor: Colors.white),
-                      onPressed: _checkSolution, icon: const Icon(Icons.check), label: const Text('Check'),
-                    ),
-                  ],
                 ),
               ],
             ),
           ),
           if (_isSuccess)
-            Container(
-              color: Colors.black.withOpacity(0.6),
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withOpacity(0.8),
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                      const SizedBox(height: 16),
-                      Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
+                      Text('Correct!', style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.softSage)),
+                      const SizedBox(height: 24),
                       ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve, foregroundColor: Colors.white),
                         onPressed: _nextLevel,
-                        child: Text(_currentLevel < 4 ? 'Next Level' : 'Finish'),
+                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+                        child: Text('Next Level', style: GoogleFonts.outfit(color: Colors.white)),
                       ),
                     ],
                   ),

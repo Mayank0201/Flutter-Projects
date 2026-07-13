@@ -5,6 +5,7 @@ import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:math';
 
 class MasyuBetaScreen extends StatefulWidget {
   const MasyuBetaScreen({super.key});
@@ -13,15 +14,12 @@ class MasyuBetaScreen extends StatefulWidget {
 }
 
 class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
-  // Shared coordinate math: single source of truth for node centres.
-  // Board is 280x280, 4x4 nodes -> spacing 70, origin 35 keeps it centred
-  // (35 + 3*70 = 245, and 280 - 245 = 35). Hit detection AND painting both
-  // use _nodeCenter so drag segments align exactly to the visible dots/pearls.
-  static const double kOrigin = 35.0;
-  static const double kSpacing = 70.0;
+  double get _boardSize => min(MediaQuery.of(context).size.width - 32, 400.0);
+  double get _spacing => _boardSize / 4;
+  double get _origin => _spacing / 2;
 
   Offset _nodeCenter(int idx) =>
-      Offset(kOrigin + (idx % 4) * kSpacing, kOrigin + (idx ~/ 4) * kSpacing);
+      Offset(_origin + (idx % 4) * _spacing, _origin + (idx ~/ 4) * _spacing);
 
   int _currentLevel = 0;
   bool _isSuccess = false;
@@ -428,12 +426,12 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
                             onPanUpdate: _onPanUpdate,
                             onPanEnd: _onPanEnd,
                             child: Container(
-                              width: 280, height: 280,
+                              width: _boardSize, height: _boardSize,
                               decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
                               child: Stack(
                                 children: [
                                   CustomPaint(
-                                    size: const Size(280, 280),
+                                    size: Size(_boardSize, _boardSize),
                                     painter: MasyuPainter(
                                       edges: edges,
                                       // Pass copies so the painter's oldDelegate
@@ -444,6 +442,8 @@ class _MasyuBetaScreenState extends State<MasyuBetaScreen> {
                                       lineColor: AppTheme.dustyMauve,
                                       dragPath: List<int>.from(_dragPath),
                                       dragPositionNotifier: _dragPositionNotifier,
+                                      origin: _origin,
+                                      spacing: _spacing,
                                     ),
                                   ),
                                   for (int i = 0; i < 16; i++)
@@ -566,6 +566,8 @@ class MasyuPainter extends CustomPainter {
   final Color lineColor;
   final List<int> dragPath;
   final ValueNotifier<Offset?> dragPositionNotifier;
+  final double origin;
+  final double spacing;
 
   MasyuPainter({
     required this.edges,
@@ -574,14 +576,14 @@ class MasyuPainter extends CustomPainter {
     required this.lineColor,
     required this.dragPath,
     required this.dragPositionNotifier,
+    required this.origin,
+    required this.spacing,
   }) : super(repaint: dragPositionNotifier);
 
   // IDENTICAL to _MasyuBetaScreenState._nodeCenter so painted segments align
   // exactly with hit detection and the pearl/dot widgets.
-  static const double kOrigin = 35.0;
-  static const double kSpacing = 70.0;
   Offset _nodeCenter(int idx) =>
-      Offset(kOrigin + (idx % 4) * kSpacing, kOrigin + (idx ~/ 4) * kSpacing);
+      Offset(origin + (idx % 4) * spacing, origin + (idx ~/ 4) * spacing);
 
   @override
   void paint(Canvas canvas, Size size) {

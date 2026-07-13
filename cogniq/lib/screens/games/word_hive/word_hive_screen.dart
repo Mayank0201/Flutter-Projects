@@ -10,6 +10,8 @@ import'../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class SpellingBeeLevel {
@@ -434,6 +436,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   final Set<String> _foundWords = {};
   String _message ='';
   bool _won = false;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
 
@@ -480,17 +485,43 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
     final savedLevel = prefs.getInt('level_spellingbee') ?? 0;
     final active = await ShuffleManager.isActive();
+
+    final tutorialKey = 'has_seen_tutorial_spellingbee';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_playDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
  
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
         _loadLevel();
       });
+      _checkSavedState();
     }
+  }
 
-    if (!_playDailyMode) {
-      Future.delayed(Duration.zero, () async {
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_spellingbee';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
+  }
+
+  Future<void> _checkSavedState() async {
+    if (_playDailyMode || _isTutorialMode) return;
+    final prefs = await SharedPreferences.getInstance();
+    Future.delayed(Duration.zero, () async {
         if (!mounted) return;
         final savedStateStr = prefs.getString('normal_spellingbee_state');
         if (savedStateStr != null) {
@@ -555,7 +586,6 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
           }
         }
       });
-    }
   }
 
   Future<void> _saveNormalState() async {
@@ -744,10 +774,16 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         _currentGuess.clear();
         _selectedIndices.clear();
         if (_foundWords.length >= _targetCount) {
-          _won = true;
-          _message ='Word Hive cleared!';
-          AudioManager.playSuccess();
-          _savePersistedLevel(_levelIndex + 1);
+          if (_isTutorialMode) {
+            _tutorialCompleted = true;
+            _message = 'Tutorial complete!';
+            AudioManager.playSuccess();
+          } else {
+            _won = true;
+            _message = 'Word Hive cleared!';
+            AudioManager.playSuccess();
+            _savePersistedLevel(_levelIndex + 1);
+          }
         } else {
           AudioManager.playClick();
         }
@@ -785,10 +821,10 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       appBar: AppBar(
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
-        title: Text('Word Hive', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        title: Text(_isTutorialMode ? 'Tutorial' : 'Word Hive', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
@@ -806,14 +842,14 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                     radius: 6,
                     backgroundColor: Colors.amber,
                     child: Text(
-_hintCount == 0 ? '+' : '$_hintCount',
+                      _hintCount == 0 ? '+' : '$_hintCount',
                       style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                   ),
                 ),
               ],
             ),
-            onPressed: !_won
+            onPressed: !_won && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useHint();
@@ -830,17 +866,60 @@ _hintCount == 0 ? '+' : '$_hintCount',
                   }
                 : null,
           ),
-          IconButton(
-            icon: const Icon(Icons.help_outline, size: 20),
-            color: context.textMuted,
-            onPressed: () => RulesHelper.showRulesBottomSheet(context,'spellingbee','Word Hive'),
-          ),
-          IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
+          if (MediaQuery.of(context).size.width < 360)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: context.textMuted),
+              onSelected: (val) {
+                if (val == 'help') {
+                  RulesHelper.showRulesBottomSheet(context, 'spellingbee', 'Word Hive');
+                } else if (val == 'reset') {
+                  _reset();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'help',
+                  child: Row(
+                    children: [
+                      Icon(Icons.help_outline, size: 20),
+                      SizedBox(width: 8),
+                      Text('Rules'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'reset',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, size: 20),
+                      SizedBox(width: 8),
+                      Text('Reset'),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.help_outline, size: 20),
+              color: context.textMuted,
+              onPressed: () => RulesHelper.showRulesBottomSheet(context, 'spellingbee', 'Word Hive'),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 20),
+              onPressed: _reset,
+              color: context.textMuted,
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: Text(
-                _playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}',
+                _isTutorialMode
+                    ? 'Tutorial'
+                    : _playDailyMode 
+                        ? 'Daily' 
+                        : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
                 style: AppTheme.numberStyle(color: accentColor, fontSize: context.scale(13)),
               ),
             ),
@@ -1087,7 +1166,7 @@ _hintCount == 0 ? '+' : '$_hintCount',
             ),
             const SizedBox(height: 24),
               // Action button - backspace only (drag auto-submits, tap guess to submit)
-              if (!_won)
+              if (!_won && !_tutorialCompleted)
                 Center(
                   child: IconButton(
                     icon: Icon(Icons.backspace_outlined, size: context.scale(22)),
@@ -1095,7 +1174,7 @@ _hintCount == 0 ? '+' : '$_hintCount',
                     color: context.textSecondary,
                   ),
                 ),
-              if (_won) ...[
+              if (_won && !_isTutorialMode) ...[
                 const SizedBox(height: 12),
                 Center(
                   child: AutoNextCountdown(
@@ -1117,6 +1196,15 @@ _hintCount == 0 ? '+' : '$_hintCount',
               Navigator.pop(context, true);
             },
           ),
+        ),
+      if (_isTutorialMode)
+        InteractiveTutorialOverlay(
+          instruction: _tutorialCompleted
+              ? "Nice! You successfully found all required words."
+              : "Swipe and connect letters to form words. Every word must contain the center letter at least once, and be at least 4 letters long!",
+          isCompleted: _tutorialCompleted,
+          onSkip: _finishTutorial,
+          onStartGame: _finishTutorial,
         ),
       ],
     ),

@@ -18,12 +18,44 @@ class _TicTacToeBetaScreenState extends State<TicTacToeBetaScreen> {
     super.initState();
     _loadLevel();
   }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
       _board = List.filled(9, "");
     });
   }
+
+  void _showHint() {
+    int best = _board.indexOf("");
+    if (best != -1) {
+      setState(() {
+        _board[best] = "X";
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hint placed!')));
+    }
+  }
+
+  void _showInstructions() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Instructions', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Text(
+          'Make 3 in a row to win against the AI.',
+          style: GoogleFonts.outfit(color: context.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Got it', style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _onLevelCleared() async {
     final prefs = await SharedPreferences.getInstance();
     int highest = prefs.getInt('beta_level_tictactoe') ?? 0;
@@ -32,6 +64,7 @@ class _TicTacToeBetaScreenState extends State<TicTacToeBetaScreen> {
     }
     setState(() => _isSuccess = true);
   }
+
   void _nextLevel() {
     if (_currentLevel < 4) {
       setState(() {
@@ -42,6 +75,7 @@ class _TicTacToeBetaScreenState extends State<TicTacToeBetaScreen> {
       Navigator.pop(context);
     }
   }
+
   bool _checkWinner(String player) {
     var lines = [
       [0,1,2],[3,4,5],[6,7,8],
@@ -53,6 +87,51 @@ class _TicTacToeBetaScreenState extends State<TicTacToeBetaScreen> {
     }
     return false;
   }
+
+  int _getBestMove() {
+    var lines = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+    
+    // 1. Can AI win?
+    for (var l in lines) {
+      int countO = 0;
+      int emptyIdx = -1;
+      for (int cell in l) {
+        if (_board[cell] == "O") countO++;
+        if (_board[cell] == "") emptyIdx = cell;
+      }
+      if (countO == 2 && emptyIdx != -1) return emptyIdx;
+    }
+
+    // 2. Can player win (block)?
+    for (var l in lines) {
+      int countX = 0;
+      int emptyIdx = -1;
+      for (int cell in l) {
+        if (_board[cell] == "X") countX++;
+        if (_board[cell] == "") emptyIdx = cell;
+      }
+      if (countX == 2 && emptyIdx != -1) return emptyIdx;
+    }
+
+    // 3. Take center if empty
+    if (_board[4] == "") return 4;
+
+    // 4. Take any empty spot
+    List<int> empties = [];
+    for (int i = 0; i < 9; i++) {
+      if (_board[i] == "") empties.add(i);
+    }
+    if (empties.isNotEmpty) {
+      empties.shuffle();
+      return empties.first;
+    }
+    return -1;
+  }
+
   void _makeMove(int idx) {
     if (_board[idx].isNotEmpty || _isSuccess) return;
     setState(() {
@@ -61,8 +140,7 @@ class _TicTacToeBetaScreenState extends State<TicTacToeBetaScreen> {
         _onLevelCleared();
         return;
       }
-      // Simple AI move
-      int aiIdx = _board.indexOf("");
+      int aiIdx = _getBestMove();
       if (aiIdx != -1) {
         _board[aiIdx] = "O";
         if (_checkWinner("O")) {
@@ -81,6 +159,16 @@ class _TicTacToeBetaScreenState extends State<TicTacToeBetaScreen> {
         title: Text('Tic Tac Toe', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Instructions',
+            onPressed: _showInstructions,
+          ),
+          IconButton(
+            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Hint',
+            onPressed: _showHint,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(child: Text('Level ${_currentLevel + 1}/5', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),

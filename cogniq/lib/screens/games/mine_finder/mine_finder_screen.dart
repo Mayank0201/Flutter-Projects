@@ -11,6 +11,8 @@ import '../../../utils/rules_helper.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class MineFinderScreen extends StatefulWidget {
@@ -33,6 +35,9 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   bool _won = false;
   bool _lost = false;
   bool _flagMode = false; // Toggle: false = Dig, true = Flag
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
 
   int _hintCount = 0;
   String _message = '';
@@ -81,16 +86,26 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     }
     final savedLevel = prefs.getInt('level_minesweeper') ?? 0;
     final active = await ShuffleManager.isActive();
+
+    final tutorialKey = 'has_seen_tutorial_minesweeper';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_playDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
  
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
         _loadLevel();
       });
     }
 
-    if (!_playDailyMode) {
+    if (!_playDailyMode && !_isTutorialMode) {
       Future.delayed(Duration.zero, () async {
         if (!mounted) return;
         final savedStateStr = prefs.getString('normal_minesweeper_state');
@@ -162,6 +177,18 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         }
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_minesweeper';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
   }
 
   Future<void> _saveNormalState() async {
@@ -567,10 +594,18 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     }
 
     if (hasWon) {
-      _won = true;
-      _message = 'Safe path cleared! Level complete.';
-      AudioManager.playSuccess();
-      _savePersistedLevel(_levelIndex);
+      if (_isTutorialMode) {
+        setState(() {
+          _tutorialCompleted = true;
+          _message = 'Safe path cleared! Tutorial complete.';
+        });
+        AudioManager.playSuccess();
+      } else {
+        _won = true;
+        _message = 'Safe path cleared! Level complete.';
+        AudioManager.playSuccess();
+        _savePersistedLevel(_levelIndex);
+      }
       // Auto-flag all mines
       for (int r = 0; r < _gridSize; r++) {
         for (int c = 0; c < _gridSize; c++) {
@@ -661,7 +696,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
         title: Text(
-          'Mine Finder',
+          _isTutorialMode ? 'Tutorial' : 'Mine Finder',
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.w700,
             color: context.textPrimary,
@@ -669,21 +704,12 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         ),
         centerTitle: true,
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'minesweeper'),
             ),
-          IconButton(
-            icon: const Icon(Icons.help_outline, size: 20),
-            color: context.textMuted,
-            onPressed: () => RulesHelper.showRulesBottomSheet(
-              context,
-              'minesweeper',
-              'Mine Finder',
-            ),
-          ),
           IconButton(
             icon: Row(
               mainAxisSize: MainAxisSize.min,
@@ -703,7 +729,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                 ),
               ],
             ),
-            onPressed: !_won && !_lost
+            onPressed: !_won && !_lost && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useHint();
@@ -720,16 +746,64 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                   }
                 : null,
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 20),
-            onPressed: _reset,
-            color: context.textMuted,
-          ),
+          if (MediaQuery.of(context).size.width < 360)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: context.textMuted),
+              onSelected: (val) {
+                if (val == 'help') {
+                  RulesHelper.showRulesBottomSheet(context, 'minesweeper', 'Mine Finder');
+                } else if (val == 'reset') {
+                  _reset();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'help',
+                  child: Row(
+                    children: [
+                      Icon(Icons.help_outline, size: 20),
+                      SizedBox(width: 8),
+                      Text('Rules'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'reset',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, size: 20),
+                      SizedBox(width: 8),
+                      Text('Reset'),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.help_outline, size: 20),
+              color: context.textMuted,
+              onPressed: () => RulesHelper.showRulesBottomSheet(
+                context,
+                'minesweeper',
+                'Mine Finder',
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 20),
+              onPressed: _reset,
+              color: context.textMuted,
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: Text(
-                _playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}',
+                _isTutorialMode
+                    ? 'Tutorial'
+                    : _playDailyMode 
+                        ? 'Daily' 
+                        : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
                 style: AppTheme.numberStyle(
                   color: accentColor,
                   fontSize: context.scale(13),
@@ -935,7 +1009,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      if (_won) ...[
+                      if (_won && !_isTutorialMode) ...[
                         const SizedBox(height: 16),
                         if (!_playDailyMode)
                           AutoNextCountdown(
@@ -1042,6 +1116,15 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
           onComplete: () {
             Navigator.pop(context, true);
           },
+        ),
+      if (_isTutorialMode)
+        InteractiveTutorialOverlay(
+          instruction: _tutorialCompleted
+              ? "Nice! You successfully cleared all safe cells."
+              : "Tap safe cells to reveal adjacent mine counts. Use Flag mode to mark suspected mines, and Dig mode to clear safe spaces!",
+          isCompleted: _tutorialCompleted,
+          onSkip: _finishTutorial,
+          onStartGame: _finishTutorial,
         ),
     ],
   ),

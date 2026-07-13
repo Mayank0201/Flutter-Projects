@@ -37,8 +37,9 @@ class SwipeTrailOverlay extends StatefulWidget {
   final Widget child;
   final Color accentColor;
 
-  static final ValueNotifier<String> styleNotifier = ValueNotifier<String>('accent');
-  static final ValueNotifier<bool> unlockedNotifier = ValueNotifier<bool>(false);
+  static final ValueNotifier<String> styleNotifier = ValueNotifier<String>('none');
+  static final ValueNotifier<bool> unlockedNotifier = ValueNotifier<bool>(true);
+  static final ValueNotifier<String?> customColorNotifier = ValueNotifier<String?>(null);
 
   const SwipeTrailOverlay({
     super.key,
@@ -56,7 +57,8 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
   final List<_TrailPoint> _points = [];
   final List<_TapRipple> _ripples = [];
   bool _unlocked = false;
-  String _style = 'accent'; // 'accent', 'pastel', 'rainbow', 'sparkle'
+  String _style = 'none'; // 'none', 'accent', 'pastel', etc.
+  Color? _customColor;
   final Random _random = Random();
 
   @override
@@ -70,6 +72,7 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
 
     SwipeTrailOverlay.styleNotifier.addListener(_onStyleChanged);
     SwipeTrailOverlay.unlockedNotifier.addListener(_onUnlockedChanged);
+    SwipeTrailOverlay.customColorNotifier.addListener(_onCustomColorChanged);
   }
 
   void _onStyleChanged() {
@@ -88,14 +91,22 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
     }
   }
 
+  void _onCustomColorChanged() {
+    _loadSettings();
+  }
+
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final style = prefs.getString('swipe_trail_style') ?? 'accent';
+    final style = prefs.getString('swipe_trail_style') ?? 'none';
+    final customColorHex = prefs.getString('swipe_trail_custom_color');
 
     int requiredClears = 0;
     switch (style) {
-      case 'accent':
+      case 'none':
         requiredClears = 0;
+        break;
+      case 'accent':
+        requiredClears = 30;
         break;
       case 'pastel':
         requiredClears = 60;
@@ -118,11 +129,20 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
 
     SwipeTrailOverlay.styleNotifier.value = style;
     SwipeTrailOverlay.unlockedNotifier.value = isUnlocked;
+    SwipeTrailOverlay.customColorNotifier.value = customColorHex;
+
+    Color? parsedColor;
+    if (customColorHex != null && customColorHex.isNotEmpty) {
+      try {
+        parsedColor = Color(int.parse(customColorHex));
+      } catch (_) {}
+    }
 
     if (mounted) {
       setState(() {
         _unlocked = isUnlocked;
         _style = style;
+        _customColor = parsedColor;
       });
     }
   }
@@ -131,6 +151,7 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
   void dispose() {
     SwipeTrailOverlay.styleNotifier.removeListener(_onStyleChanged);
     SwipeTrailOverlay.unlockedNotifier.removeListener(_onUnlockedChanged);
+    SwipeTrailOverlay.customColorNotifier.removeListener(_onCustomColorChanged);
     _ticker.dispose();
     super.dispose();
   }
@@ -170,7 +191,7 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
   }
 
   void _addPoint(Offset position) {
-    if (!_unlocked) return;
+    if (!_unlocked || _style == 'none') return;
     final now = DateTime.now().millisecondsSinceEpoch;
 
     if (_style == 'sparkle') {
@@ -214,7 +235,7 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
   }
 
   void _addRipple(Offset position) {
-    if (!_unlocked) return;
+    if (!_unlocked || _style == 'none') return;
     final now = DateTime.now().millisecondsSinceEpoch;
 
     Color rippleColor;
@@ -237,7 +258,7 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
 
   @override
   Widget build(BuildContext context) {
-    if (!_unlocked) {
+    if (!_unlocked || _style == 'none') {
       return widget.child;
     }
 
@@ -260,7 +281,9 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
                 points: _points,
                 ripples: _ripples,
                 style: _style,
-                accentColor: widget.accentColor,
+                accentColor: _style == 'accent' && _customColor != null
+                    ? _customColor!
+                    : widget.accentColor,
               ),
             ),
           ),
@@ -285,6 +308,7 @@ class _TrailPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (style == 'none') return;
     final now = DateTime.now().millisecondsSinceEpoch;
 
     // Paint ripples first (under the trail)

@@ -4,6 +4,7 @@ import 'shuffle_manager.dart';
 import 'point_manager.dart';
 import 'achievement_manager.dart';
 import '../widgets/achievement_toast.dart';
+import '../widgets/trail_unlock_toast.dart';
 import '../main.dart';
 
 class HintManager {
@@ -50,10 +51,25 @@ class HintManager {
     final globalCount = (prefs.getInt(globalKey) ?? 0) + 1;
     await prefs.setInt(globalKey, globalCount);
 
-    // Show interstitial ad according to progression rules:
-    // Ads shown at level clears of 15, 30, 40, 50, 60, 70...
-    if (count == 15 || (count >= 30 && count % 10 == 0)) {
+    // Show interstitial ad strictly every 20 levels cleared in the active game mode
+    if (count > 0 && count % 20 == 0) {
       AdManager.showInterstitialAd();
+    }
+
+    // Check and trigger swipe trail unlock slide-down toast notifications
+    if (globalCount == 60 || globalCount == 120 || globalCount == 200 || globalCount == 250 || globalCount == 300) {
+      String name = "";
+      String emoji = "";
+      if (globalCount == 60) { name = "Pastel Glow"; emoji = "🌸"; }
+      else if (globalCount == 120) { name = "Sparkle Stars"; emoji = "✨"; }
+      else if (globalCount == 200) { name = "Neon Glow"; emoji = "⚡"; }
+      else if (globalCount == 250) { name = "Rainbow Neon"; emoji = "🌈"; }
+      else if (globalCount == 300) { name = "Fire Trail"; emoji = "🔥"; }
+
+      final context = navigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        TrailUnlockToast.show(context, name, emoji);
+      }
     }
 
     // Award 10 points on every level clear

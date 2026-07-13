@@ -23,9 +23,7 @@ const Map<String, IconData> _gameIcons = {
   'memory':      Icons.style_outlined,
   'spellingbee': Icons.hive_outlined,
   'sudoku':      Icons.grid_on_outlined,
-  'wordsearch':  Icons.search_outlined,
   'minesweeper': Icons.dangerous_outlined,
-  'nonogram':    Icons.apps_rounded,
   'numbermemory': Icons.pin_outlined,
   'sequence':    Icons.pattern_outlined,
   'oddcolor':    Icons.palette_outlined,
@@ -336,12 +334,16 @@ class _DailyScreenState extends State<DailyScreen> {
                   children: [
                     const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 18),
                     const SizedBox(width: 6),
-                    Text(
-                      '$_streak Day Streak',
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: context.textPrimary,
+                    Flexible(
+                      child: Text(
+                        '$_streak Day Streak',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: context.textPrimary,
+                        ),
                       ),
                     ),
                   ],
@@ -351,12 +353,16 @@ class _DailyScreenState extends State<DailyScreen> {
                   children: [
                     const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
                     const SizedBox(width: 6),
-                    Text(
-                      '$_perfectDays Perfect Days',
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: context.textPrimary,
+                    Flexible(
+                      child: Text(
+                        '$_perfectDays Perfect Days',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: context.textPrimary,
+                        ),
                       ),
                     ),
                   ],
@@ -372,33 +378,32 @@ class _DailyScreenState extends State<DailyScreen> {
   Widget _buildWeeklyDayItem(DateTime day) {
     final dateStr = "${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}";
     final isToday = dateStr == _dateStr;
+    final dayName = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day.weekday - 1];
 
-    return FutureBuilder<int>(
-      future: DailyChallengeManager.getCompletedCountForDate(dateStr),
-      builder: (context, snapshot) {
-        final count = snapshot.data ?? 0;
-        Widget statusIndicator;
-        if (count == 3) {
-          statusIndicator = const Text('★', style: TextStyle(color: Color(0xFFFFD700), fontSize: 13, fontWeight: FontWeight.bold));
-        } else if (count == 2) {
-          statusIndicator = const Text('★', style: TextStyle(color: Color(0xFFC0C0C0), fontSize: 13, fontWeight: FontWeight.bold));
-        } else if (count == 1) {
-          statusIndicator = const Text('★', style: TextStyle(color: Color(0xFFCD7F32), fontSize: 13, fontWeight: FontWeight.bold));
-        } else {
-          statusIndicator = Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: context.textMuted.withAlpha(55),
-              shape: BoxShape.circle,
-            ),
-          );
-        }
+    return Expanded(
+      child: FutureBuilder<int>(
+        future: DailyChallengeManager.getCompletedCountForDate(dateStr),
+        builder: (context, snapshot) {
+          final count = snapshot.data ?? 0;
+          Widget statusIndicator;
+          if (count == 3) {
+            statusIndicator = const Text('★', style: TextStyle(color: Color(0xFFFFD700), fontSize: 13, fontWeight: FontWeight.bold));
+          } else if (count == 2) {
+            statusIndicator = const Text('★', style: TextStyle(color: Color(0xFFC0C0C0), fontSize: 13, fontWeight: FontWeight.bold));
+          } else if (count == 1) {
+            statusIndicator = const Text('★', style: TextStyle(color: Color(0xFFCD7F32), fontSize: 13, fontWeight: FontWeight.bold));
+          } else {
+            statusIndicator = Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: context.textMuted.withAlpha(55),
+                shape: BoxShape.circle,
+              ),
+            );
+          }
 
-        final dayName = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day.weekday - 1];
-
-        return Expanded(
-          child: Container(
+          return Container(
             margin: const EdgeInsets.symmetric(horizontal: 2),
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
@@ -432,9 +437,9 @@ class _DailyScreenState extends State<DailyScreen> {
                 ),
               ],
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -488,7 +493,10 @@ class _DailyScreenState extends State<DailyScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
                           '${challenge.difficulty} Challenge',
@@ -499,7 +507,6 @@ class _DailyScreenState extends State<DailyScreen> {
                             letterSpacing: 0.8,
                           ),
                         ),
-                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
@@ -583,6 +590,54 @@ class _DailyScreenState extends State<DailyScreen> {
   }
 
   Widget _buildBody(BuildContext context) {
+    if (_activeDay > 14) {
+      return ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        children: [
+          const SizedBox(height: 40),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: context.bgCard,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: AppTheme.cardShadow,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '🏆',
+                    style: TextStyle(fontSize: 64),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Challenges Completed!',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: context.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'You have completed all available daily challenges. We will add more challenges soon!\n\nKeep training your mind in the regular game modes.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      color: context.textSecondary,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       children: [

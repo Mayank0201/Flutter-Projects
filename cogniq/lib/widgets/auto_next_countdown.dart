@@ -77,11 +77,13 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final isSmall = MediaQuery.of(context).size.width < 360;
+
     return InkWell(
       onTap: widget.onNext,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        padding: EdgeInsets.symmetric(horizontal: isSmall ? 16 : 24, vertical: 16),
         decoration: BoxDecoration(
           color: widget.accentColor.withAlpha((255 * 0.05).round()),
           borderRadius: BorderRadius.circular(16),
@@ -121,28 +123,30 @@ class _AutoNextCountdownState extends State<AutoNextCountdown>
               ],
             ),
             const SizedBox(width: 16),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Level Cleared!',
-                  style: GoogleFonts.outfit(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Level Cleared!',
+                    style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Next level in ${remainingSeconds}s... Tap to skip',
-                  style: GoogleFonts.outfit(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                    color: isDark ? Colors.white60 : Colors.black54,
+                  const SizedBox(height: 2),
+                  Text(
+                    'Next level in ${remainingSeconds}s... Tap to skip',
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

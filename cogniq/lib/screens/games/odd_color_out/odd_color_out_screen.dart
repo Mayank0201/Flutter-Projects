@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../../utils/rules_helper.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
@@ -13,6 +12,7 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../widgets/buy_hints_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 
@@ -28,6 +28,9 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   bool _shuffleActive = false;
   int _hintCount = 0;
   bool _isHintShowing = false;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
   bool _levelCleared = false;
   bool _isDailyMode = false;
   String _dailyModifierType = '';
@@ -275,13 +278,36 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     }
     final savedLevel = prefs.getInt('level_oddcolor') ?? 0;
     final active = await ShuffleManager.isActive();
+
+    final tutorialKey = 'has_seen_tutorial_oddcolor';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_isDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
+
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
         _generateLevelColors();
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_oddcolor';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _isDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _generateLevelColors();
+    });
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
@@ -322,6 +348,13 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     if (r == _oddRow && c == _oddCol) {
       // Correct!
       AudioManager.playSuccess();
+      if (_isTutorialMode) {
+        setState(() {
+          _levelCleared = true;
+          _tutorialCompleted = true;
+        });
+        return;
+      }
       setState(() {
         _levelCleared = true;
       });
@@ -330,6 +363,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
         return;
       }
     } else {
+      if (_isTutorialMode) return;
       // Wrong cell - form a new color grid with same difficulty
       AudioManager.playFail();
       setState(() {
@@ -422,11 +456,11 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       backgroundColor: context.bgDark,
       appBar: AppBar(
         title: Text(
-          'Odd Color Out',
+          _isTutorialMode ? 'Tutorial' : 'Odd Color Out',
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(18)),
         ),
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
@@ -451,7 +485,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                 ),
               ],
             ),
-            onPressed: !_levelCleared && !_gameOver && !_isHintShowing
+            onPressed: !_levelCleared && !_gameOver && !_isHintShowing && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useHint();
@@ -483,10 +517,21 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
               accentColor: accentColor,
             ),
           SafeArea(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                children: [
+            child: Center(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: MediaQuery.of(context).size.height -
+                        kToolbarHeight -
+                        MediaQuery.of(context).padding.top -
+                        MediaQuery.of(context).padding.bottom -
+                        40,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
                 if (_isDailyMode)
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
@@ -503,12 +548,15 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                           children: [
                             const Icon(Icons.star, color: Colors.amber, size: 18),
                             const SizedBox(width: 8),
-                            Text(
-                              'DAILY CHALLENGE: ${_dailyModifierName.toUpperCase()}',
-                              style: GoogleFonts.outfit(
-                                color: Colors.amber,
-                                fontWeight: FontWeight.bold,
-                                fontSize: context.scale(12),
+                            Flexible(
+                              child: Text(
+                                'DAILY CHALLENGE: ${_dailyModifierName.toUpperCase()}',
+                                style: GoogleFonts.outfit(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: context.scale(12),
+                                ),
+                                textAlign: TextAlign.center,
                               ),
                             ),
                           ],
@@ -562,7 +610,16 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (!_isDailyMode)
+                          if (_isTutorialMode)
+                            Text(
+                              'Tutorial',
+                              style: GoogleFonts.outfit(
+                                fontWeight: FontWeight.bold,
+                                fontSize: context.scale(20),
+                                color: context.textPrimary,
+                              ),
+                            )
+                          else if (!_isDailyMode)
                             AnimatedLevelIndicator(
                               level: _levelIndex + 1,
                               accentColor: context.textPrimary,
@@ -687,26 +744,38 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (_levelCleared && !_isDailyMode)
+                if (_levelCleared && !_isDailyMode && !_isTutorialMode)
                   AutoNextCountdown(
                     onNext: _nextLevel,
                     accentColor: accentColor,
                   ),
                 const SizedBox(height: 24),
-          ],
-        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (_levelCleared && _isDailyMode)
+            ChallengeClearedOverlay(
+              accentColor: accentColor,
+              onComplete: () {
+                Navigator.pop(context, true);
+              },
+            ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully spotted the odd color tile."
+                  : "A grid of colored tiles will appear. Identify and tap the one tile that has a slightly different shade or color compared to the rest!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
+            ),
+        ],
       ),
-    ),
-    if (_levelCleared && _isDailyMode)
-        ChallengeClearedOverlay(
-          accentColor: accentColor,
-          onComplete: () {
-            Navigator.pop(context, true);
-          },
-        ),
-    ],
-  ),
-);
+    );
   }
 }
 

@@ -13,16 +13,13 @@ import '../utils/recently_played_manager.dart';
 import 'package:home_widget/home_widget.dart';
 import '../utils/daily_challenge_manager.dart';
 import 'daily_screen.dart';
-import 'beta/beta_games_screen.dart';
 import 'achievements_screen.dart';
 import 'trails_screen.dart';
 import '../widgets/buy_hints_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
 // import 'daily_challenge_test_screen.dart';
+import 'beta/beta_games_screen.dart';
 import '../utils/activity_tracker.dart';
-import '../utils/notification_manager.dart';
-import '../utils/shuffle_manager.dart';
-import '../main.dart';
 import '../utils/notification_manager.dart';
 import '../utils/shuffle_manager.dart';
 import '../main.dart';
@@ -35,15 +32,12 @@ const Map<String, IconData> _gameIcons = {
   'crossclimb': Icons.trending_up_outlined,
   'queens': Icons.star_outline_rounded,
   'chimp': Icons.psychology_outlined,
-  'connections': Icons.hub_outlined,
   'flagle': Icons.flag_outlined,
   'wordbuilder': Icons.spellcheck_outlined,
   'memory': Icons.style_outlined,
   'spellingbee': Icons.hive_outlined,
   'sudoku': Icons.grid_on_outlined,
-  'wordsearch': Icons.search_outlined,
   'minesweeper': Icons.dangerous_outlined,
-  'nonogram': Icons.apps_rounded,
   'numbermemory': Icons.pin_outlined,
   'sequence': Icons.pattern_outlined,
   'oddcolor': Icons.palette_outlined,
@@ -58,20 +52,16 @@ const Map<String, List<String>> _categories = {
   'All': [],
   'Word': [
     'spellingbee',
-    'wordsearch',
   ],
   'Logic': [
     'sudoku',
     'queens',
     'zip',
-    'connections',
     'minesweeper',
     'oddcolor',
     'hue',
-    'nonogram',
     'colour_link',
     'color_flood',
-    'block_escape',
     'circuit_guide',
   ],
   'Memory': [
@@ -378,6 +368,7 @@ class _HomeScreenState extends State<HomeScreen>
       );
       final game = await ShuffleManager.pickNextGame('');
       AudioManager.fadeOutMusic();
+      await DailyChallengeManager.clearDailyModifier();
       if (mounted) {
         Navigator.pushNamed(context, game.routeName);
       }
@@ -405,6 +396,7 @@ class _HomeScreenState extends State<HomeScreen>
     final seed = now.year * 10000 + now.month * 100 + now.day;
     _todaysGame = kAllGames[seed % kAllGames.length];
 
+    DailyChallengeManager.clearDailyModifier();
     _loadDailyChallengeInfo();
     _loadShuffleState();
     settingsNotifier.addListener(_onSettingsChanged);
@@ -532,6 +524,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didPopNext() async {
     await ShuffleManager.setInactive();
+    await DailyChallengeManager.clearDailyModifier();
     _loadDailyChallengeInfo();
     _loadShuffleState();
   }
@@ -568,14 +561,14 @@ class _HomeScreenState extends State<HomeScreen>
       _todaysGame = challenges[0].game;
     } else {
       final dailyGames = kAllGames
-          .where((g) => ['zip', 'oddcolor', 'nonogram', 'hue'].contains(g.id))
+          .where((g) => ['zip', 'oddcolor', 'sudoku', 'hue'].contains(g.id))
           .toList();
       _todaysGame = dailyGames[seed % dailyGames.length];
     }
 
     // Compute total exercises completed and favorite game
     int completed = 0;
-    String favGame = 'Categories';
+    String favGame = 'Grid Path';
     int maxLvl = 0;
 
     for (final g in kAllGames) {
@@ -659,10 +652,10 @@ class _HomeScreenState extends State<HomeScreen>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final totalWidth = constraints.maxWidth;
-          final tabWidth = totalWidth / 4;
+          final tabWidth = totalWidth / 5;
 
           return SizedBox(
-            height: 48,
+            height: 52,
             child: Stack(
               children: [
                 // Sliding Capsule Background
@@ -685,31 +678,35 @@ class _HomeScreenState extends State<HomeScreen>
                 // Row of Tabs
                 Row(
                   children: [
-                    _buildNavItem(0, Icons.home_outlined, Icons.home, 'Home'),
+                    _buildNavItem(0, Icons.home_outlined, Icons.home, 'Home', tabWidth),
                     _buildNavItem(
                       1,
                       Icons.calendar_today_outlined,
                       Icons.calendar_today,
                       'Daily',
+                      tabWidth,
                     ),
                     _buildNavItem(
                       2,
                       Icons.bar_chart_outlined,
                       Icons.bar_chart,
                       'Stats',
+                      tabWidth,
                     ),
                     _buildNavItem(
                       3,
                       Icons.person_outlined,
                       Icons.person,
                       'Profile',
+                      tabWidth,
                     ),
-                    // _buildNavItem(
-                    //   4,
-                    //   Icons.bug_report_outlined,
-                    //   Icons.bug_report,
-                    //   'Beta',
-                    // ),
+                    _buildNavItem(
+                      4,
+                      Icons.bug_report_outlined,
+                      Icons.bug_report,
+                      'Beta',
+                      tabWidth,
+                    ),
                   ],
                 ),
               ],
@@ -725,6 +722,7 @@ class _HomeScreenState extends State<HomeScreen>
     IconData outlineIcon,
     IconData solidIcon,
     String label,
+    double tabWidth,
   ) {
     final isSelected = _currentTab == index;
     final activeColor = AppTheme.dustyMauve;
@@ -758,12 +756,17 @@ class _HomeScreenState extends State<HomeScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const SizedBox(width: 6),
-                            Text(
-                              label,
-                              style: GoogleFonts.outfit(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: activeColor,
+                            SizedBox(
+                              width: tabWidth - 36,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: activeColor,
+                                ),
                               ),
                             ),
                           ],
@@ -812,36 +815,36 @@ class _HomeScreenState extends State<HomeScreen>
         // Premium Spacious Header (Zen style)
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'How are you feeling today?',
-                      style: GoogleFonts.outfit(
-                        fontSize: context.scale(22),
-                        fontWeight: FontWeight.w600,
-                        color: context.textPrimary,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Cultivate your daily mindfulness & focus',
-                      style: GoogleFonts.outfit(
-                        fontSize: context.scale(12),
-                        color: context.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Row(
+          child: Builder(
+            builder: (context) {
+              final isSmall = MediaQuery.of(context).size.width < 360;
+              final headerContent = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   GestureDetector(
+                  Text(
+                    'How are you feeling today?',
+                    style: GoogleFonts.outfit(
+                      fontSize: isSmall ? 18 : context.scale(22),
+                      fontWeight: FontWeight.w600,
+                      color: context.textPrimary,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Cultivate your daily mindfulness & focus',
+                    style: GoogleFonts.outfit(
+                      fontSize: isSmall ? 11 : context.scale(12),
+                      color: context.textSecondary,
+                    ),
+                  ),
+                ],
+              );
+
+              final actionsRow = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
                     onTap: () => BuyHintsDialog.show(context, initialGameId: 'zip', onPurchaseComplete: _loadDailyChallengeInfo),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -910,15 +913,38 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 ],
-              ),
-            ],
+              );
+
+              if (isSmall) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    headerContent,
+                    const SizedBox(height: 12),
+                    actionsRow,
+                  ],
+                );
+              } else {
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(child: headerContent),
+                    actionsRow,
+                  ],
+                );
+              }
+            },
           ),
         ),
 
         // Expanded Scrollable Content
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          child: Builder(
+            builder: (context) {
+              final isSmall = MediaQuery.of(context).size.width < 360;
+              final paddingVal = isSmall ? 16.0 : 24.0;
+              return ListView(
+                padding: EdgeInsets.fromLTRB(paddingVal, 8, paddingVal, 24),
             children: [
               // 1. Mindful Report Dashboard
               _buildProgressReportCard()
@@ -985,11 +1011,11 @@ class _HomeScreenState extends State<HomeScreen>
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 14,
                     mainAxisSpacing: 14,
-                    childAspectRatio: 1.15,
+                    childAspectRatio: MediaQuery.of(context).size.width < 360 ? 0.92 : 1.15,
                   ),
                   itemCount: filteredGames.length,
                   itemBuilder: (ctx, idx) {
@@ -1007,11 +1033,13 @@ class _HomeScreenState extends State<HomeScreen>
                   },
                 ),
             ],
-          ),
-        ),
-      ],
-    );
-  }
+          );
+        },
+      ),
+    ),
+  ],
+);
+}
 
   Widget _buildSearchBar() {
     return Container(
@@ -1106,8 +1134,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildProgressReportCard() {
+    final isSmall = MediaQuery.of(context).size.width < 360;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isSmall ? 12 : 20),
       decoration: BoxDecoration(
         color: context.bgCard,
         borderRadius: BorderRadius.circular(20),
@@ -1170,20 +1199,25 @@ class _HomeScreenState extends State<HomeScreen>
     IconData icon,
     Color color,
   ) {
+    final isSmall = MediaQuery.of(context).size.width < 360;
     return Expanded(
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 14, color: color),
-              const SizedBox(width: 6),
-              Text(
-                value,
-                style: GoogleFonts.outfit(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: context.textPrimary,
+              Icon(icon, size: isSmall ? 11 : 14, color: color),
+              SizedBox(width: isSmall ? 3 : 6),
+              Flexible(
+                child: Text(
+                  value,
+                  style: GoogleFonts.outfit(
+                    fontSize: isSmall ? 10 : 14,
+                    fontWeight: FontWeight.bold,
+                    color: context.textPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -1192,9 +1226,11 @@ class _HomeScreenState extends State<HomeScreen>
           Text(
             label,
             style: GoogleFonts.outfit(
-              fontSize: 10,
+              fontSize: isSmall ? 8 : 10,
               color: context.textSecondary,
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -1306,6 +1342,7 @@ class _RecentGameCardState extends State<_RecentGameCard> {
         setState(() => _pressed = false);
         AudioManager.fadeOutMusic();
         await ShuffleManager.setInactive();
+        await DailyChallengeManager.clearDailyModifier();
         RecentlyPlayedManager.addGame(widget.game.id);
         ActivityTracker.trackGamePlay(widget.game.id);
         if (mounted) {
@@ -1445,6 +1482,7 @@ class _GameCardState extends State<_GameCard> {
         setState(() => _pressed = false);
         AudioManager.fadeOutMusic();
         await ShuffleManager.setInactive();
+        await DailyChallengeManager.clearDailyModifier();
         RecentlyPlayedManager.addGame(widget.game.id);
         ActivityTracker.trackGamePlay(widget.game.id);
         if (mounted) {
@@ -1466,7 +1504,7 @@ class _GameCardState extends State<_GameCard> {
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(MediaQuery.of(context).size.width < 360 ? 12 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1496,6 +1534,8 @@ class _GameCardState extends State<_GameCard> {
                         fontWeight: FontWeight.w600,
                         color: context.textPrimary,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1633,22 +1673,26 @@ class _StatsTabState extends State<_StatsTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Progress Log',
-                  style: GoogleFonts.outfit(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: context.textPrimary,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Progress Log',
+                    style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: context.textPrimary,
+                    ),
                   ),
-                ),
-                Text(
-                  'A record of your daily focus and exercises.',
-                  style: GoogleFonts.outfit(fontSize: 13, color: context.textSecondary),
-                ),
-              ],
+                  Text(
+                    'A record of your daily focus and exercises.',
+                    style: GoogleFonts.outfit(fontSize: 13, color: context.textSecondary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -1710,14 +1754,17 @@ class _StatsTabState extends State<_StatsTab> {
               return Column(
                 children: [
                   InkWell(
-                    onTap: () {
+                    onTap: () async {
                       AudioManager.fadeOutMusic();
+                      await DailyChallengeManager.clearDailyModifier();
                       RecentlyPlayedManager.addGame(g.id);
                       ActivityTracker.trackGamePlay(g.id);
-                      Navigator.pushNamed(context, g.routeName).then((_) {
-                        AudioManager.fadeInMusic();
-                        _loadStats();
-                      });
+                      if (mounted) {
+                        Navigator.pushNamed(context, g.routeName).then((_) {
+                          AudioManager.fadeInMusic();
+                          _loadStats();
+                        });
+                      }
                     },
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
@@ -1728,32 +1775,39 @@ class _StatsTabState extends State<_StatsTab> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: accent.withAlpha(25),
-                                  borderRadius: BorderRadius.circular(8),
+                          Expanded(
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: accent.withAlpha(25),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    _gameIcons[g.id] ?? Icons.gamepad_outlined,
+                                    size: 16,
+                                    color: accent,
+                                  ),
                                 ),
-                                child: Icon(
-                                  _gameIcons[g.id] ?? Icons.gamepad_outlined,
-                                  size: 16,
-                                  color: accent,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    g.name,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: context.textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                g.name,
-                                style: GoogleFonts.outfit(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: context.textPrimary,
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
+                          const SizedBox(width: 12),
                           Text(
                             'Level $lvl${strk > 0 ? ' • Streak $strk' : ''}',
                             style: GoogleFonts.outfit(
@@ -1862,34 +1916,7 @@ class _ProfileTab extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Divider(
-                    color: context.textMuted.withAlpha(40),
-                    height: 1,
-                    thickness: 0.8,
-                  ),
-                  _ProfileTile(
-                    icon: Icons.volume_up_outlined,
-                    title: 'SFX (loss, win, and tile tapping)',
-                    trailing: Switch.adaptive(
-                      value: settingsNotifier.soundEnabled,
-                      onChanged: (val) => settingsNotifier.setSound(val),
-                      activeColor: AppTheme.dustyMauve,
-                    ),
-                  ),
-                  Divider(
-                    color: context.textMuted.withAlpha(40),
-                    height: 1,
-                    thickness: 0.8,
-                  ),
-                  _ProfileTile(
-                    icon: Icons.music_note_outlined,
-                    title: 'Bg music',
-                    trailing: Switch.adaptive(
-                      value: settingsNotifier.musicEnabled,
-                      onChanged: (val) => settingsNotifier.setMusic(val),
-                      activeColor: AppTheme.dustyMauve,
-                    ),
-                  ),
+
                 ],
               ),
             ),

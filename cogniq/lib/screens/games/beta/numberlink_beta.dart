@@ -286,12 +286,14 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     int lastIdx = activePath.last;
     if (lastIdx == idx) return;
 
-    // Undo by dragging backwards
-    if (activePath.length >= 2 && activePath[activePath.length - 2] == idx) {
-      settingsNotifier.hapticTap();
-      setState(() {
-        activePath.removeLast();
-      });
+    // Undo by dragging backwards (only to the immediate previous cell)
+    if (activePath.contains(idx)) {
+      if (activePath.length >= 2 && activePath[activePath.length - 2] == idx) {
+        settingsNotifier.hapticTap();
+        setState(() {
+          activePath.removeLast();
+        });
+      }
       return;
     }
 
@@ -300,6 +302,14 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     for (int cell in listCells) {
       if (_isCellOccupiedByOther(cell, _dragColor)) break;
       if (activePath.contains(cell)) continue;
+
+      // Adjacency check to block diagonal paths
+      int last = activePath.last;
+      int r1 = last ~/ _gridSize, c1 = last % _gridSize;
+      int r2 = cell ~/ _gridSize, c2 = cell % _gridSize;
+      if ((r1 - r2).abs() + (c1 - c2).abs() != 1) {
+        break; // Stop extending path if a diagonal jump occurs
+      }
 
       int cellVal = _grid[cell];
       if (cellVal == 0 || (cellVal == _dragColor && cell != activePath.first)) {
@@ -589,13 +599,16 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                         ),
                         const SizedBox(height: 24),
                         RepaintBoundary(
-                          child: Container(
-                            width: 280, height: 280,
-                            decoration: BoxDecoration(
-                              color: context.bgCard,
-                              border: Border.all(color: context.textMuted, width: 2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                          child: Builder(
+                            builder: (context) {
+                              final double boardSize = min(MediaQuery.of(context).size.width - 32, 400.0);
+                              return Container(
+                                width: boardSize, height: boardSize,
+                                decoration: BoxDecoration(
+                                  color: context.bgCard,
+                                  border: Border.all(color: context.textMuted, width: 2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(10),
                               child: LayoutBuilder(
@@ -619,8 +632,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                                 }
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
+                      ),
+                    ),
                         const SizedBox(height: 36),
                       ],
                     ),

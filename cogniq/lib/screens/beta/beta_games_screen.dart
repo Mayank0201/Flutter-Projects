@@ -1,3 +1,4 @@
+import 'logic_grid_placeholder_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,20 +13,21 @@ import '../games/beta/sumplete_beta.dart';
 import '../games/beta/light_up_beta.dart';
 import '../games/beta/nurikabe_beta.dart';
 import '../games/beta/cipher_decoder_beta.dart';
-import '../games/beta/chess_puzzles_beta.dart';
 import '../games/beta/hashi_beta.dart';
 import '../games/beta/masyu_beta.dart';
 import '../games/beta/slitherlink_beta.dart';
-import '../games/beta/sliding_tile_beta.dart';
 import '../games/beta/math_sprint_beta.dart';
 import '../games/beta/mental_math_blocks_beta.dart';
 import '../games/beta/map_memory_beta.dart';
 import '../games/beta/buzzer_beta.dart';
-import '../games/categories/categories_screen.dart';
-import '../games/beta/rush_hour_beta.dart';
-import '../games/beta/word_salad_beta.dart';
-import '../games/nonogram/nonogram_screen.dart';
-import '../games/word_search/word_search_screen.dart';
+import '../games/beta/tent_and_trees_beta.dart';
+import '../games/beta/kakurasu_beta.dart';
+import '../games/beta/hitori_beta.dart';
+import '../games/beta/shakashaka_beta.dart';
+import '../games/beta/thermometers_beta.dart';
+import '../games/beta/tic_tac_toe_beta.dart';
+
+import '../../utils/daily_challenge_manager.dart';
 
 class BetaGameInfo {
   final String id;
@@ -157,14 +159,7 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         icon: Icons.lock_open_outlined,
         builder: const CipherDecoderBetaScreen(),
       ),
-      BetaGameInfo(
-        id: 'chesspuzzles',
-        name: 'Chess Puzzles',
-        description: 'Find the tactical moves to achieve checkmate in 1 or 2.',
-        category: 'Logic Grids',
-        icon: Icons.extension_outlined,
-        builder: const ChessPuzzlesBetaScreen(),
-      ),
+
 
       // --- PATHS & LOOPS ---
       BetaGameInfo(
@@ -191,14 +186,7 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         icon: Icons.grid_3x3_outlined,
         builder: const SlitherlinkBetaScreen(),
       ),
-      BetaGameInfo(
-        id: 'slidingtile',
-        name: 'Sliding Tile',
-        description: 'Reorder numbered tiles sequentially by sliding into the gap.',
-        category: 'Movement & Sliding',
-        icon: Icons.grid_view_outlined,
-        builder: const SlidingTileBetaScreen(),
-      ),
+
       // --- MATH & CALCULATION ---
       BetaGameInfo(
         id: 'mathsprint',
@@ -235,46 +223,626 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
         builder: const BuzzerBetaScreen(),
       ),
       BetaGameInfo(
-        id: 'connections',
-        name: 'Categories',
-        description: 'Group 16 words into 4 categories.',
-        category: 'Word & Vocabulary',
-        icon: Icons.hub_outlined,
-        builder: const CategoriesScreen(),
+        id: 'tentandtrees',
+        name: 'Tent & Trees',
+        description: 'Attach one tent orthogonally to each tree. Tents cannot touch.',
+        category: 'Object Placement',
+        icon: Icons.forest_outlined,
+        builder: const TentAndTreesBetaScreen(),
       ),
       BetaGameInfo(
-        id: 'block_escape',
-        name: 'Block Escape',
-        description: 'Slide blocks to escape the red block.',
-        category: 'Movement & Sliding',
-        icon: Icons.door_sliding_outlined,
-        builder: const RushHourBetaScreen(),
+        id: 'kakurasu',
+        name: 'Kakurasu',
+        description: 'Shade cells matching weighted row/column target sums.',
+        category: 'Math & Calculation',
+        icon: Icons.calculate_outlined,
+        builder: const KakurasuBetaScreen(),
       ),
       BetaGameInfo(
-        id: 'word_salad',
-        name: 'Word Salad',
-        description: 'Unscramble letters to find words in target categories.',
-        category: 'Word & Vocabulary',
-        icon: Icons.restaurant_menu_outlined,
-        builder: const WordSaladBetaScreen(),
-      ),
-      BetaGameInfo(
-        id: 'nonogram',
-        name: 'Nonogram',
-        description: 'Fill grid cells to match row/column clues.',
+        id: 'hitori',
+        name: 'Hitori',
+        description: 'Shade duplicate numbers. Shaded cells cannot be adjacent.',
         category: 'Logic Grids',
-        icon: Icons.apps_rounded,
-        builder: const NonogramScreen(),
+        icon: Icons.grid_on_outlined,
+        builder: const HitoriBetaScreen(),
       ),
       BetaGameInfo(
-        id: 'wordsearch',
-        name: 'Word Search',
-        description: 'Find target words hidden in grid.',
-        category: 'Word & Vocabulary',
-        icon: Icons.search_outlined,
-        builder: const WordSearchScreen(),
+        id: 'shakashaka',
+        name: 'Shakashaka',
+        description: 'Place half-cell triangles to form rectangular white areas.',
+        category: 'Logic Grids',
+        icon: Icons.border_all_outlined,
+        builder: const ShakashakaBetaScreen(),
       ),
-    ];
+      BetaGameInfo(
+        id: 'thermometers',
+        name: 'Thermometers',
+        description: 'Fill thermometers from the bulb up to match row/col target counts.',
+        category: 'Object Placement',
+        icon: Icons.thermostat_outlined,
+        builder: const ThermometersBetaScreen(),
+      ),
+      BetaGameInfo(
+        id: 'tictactoe',
+        name: 'Tic Tac Toe',
+        description: 'Complete the classic grid without repeating marks in any line.',
+        category: 'Memory & Reflex',
+        icon: Icons.close_rounded,
+        builder: const TicTacToeBetaScreen(),
+      ),
+          BetaGameInfo(
+        id: 'tapa',
+        name: 'Tapa',
+        description: 'Shade contiguous cells satisfying adjacent run-length clues.',
+        category: 'Logic Grids',
+        icon: Icons.grid_on,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Tapa',
+          description: 'Shade contiguous cells satisfying adjacent run-length clues.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'lits',
+        name: 'LITS',
+        description: 'Shade one tetromino in each region; all shading connects.',
+        category: 'Logic Grids',
+        icon: Icons.grid_4x4,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'LITS',
+          description: 'Shade one tetromino in each region; all shading connects.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'norinori',
+        name: 'Norinori',
+        description: 'Shade exactly two cells per region to form 2x1 dominoes.',
+        category: 'Logic Grids',
+        icon: Icons.space_dashboard_outlined,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Norinori',
+          description: 'Shade exactly two cells per region to form 2x1 dominoes.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'yinyang',
+        name: 'Yin-Yang',
+        description: 'Fill every cell black or white forming connected groups.',
+        category: 'Logic Grids',
+        icon: Icons.contrast,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Yin-Yang',
+          description: 'Fill every cell black or white forming connected groups.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'kuromasu',
+        name: 'Kuromasu',
+        description: 'Shade cells to block line-of-sight counts from numbered cells.',
+        category: 'Logic Grids',
+        icon: Icons.visibility_off,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Kuromasu',
+          description: 'Shade cells to block line-of-sight counts from numbered cells.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'heyawake',
+        name: 'Heyawake',
+        description: 'Shade cells per room count with no adjacent shading.',
+        category: 'Logic Grids',
+        icon: Icons.door_sliding_outlined,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Heyawake',
+          description: 'Shade cells per room count with no adjacent shading.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'nurimisaki',
+        name: 'Nurimisaki',
+        description: 'Shade grid so unshaded cells form a path with circle capes.',
+        category: 'Logic Grids',
+        icon: Icons.navigation_outlined,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Nurimisaki',
+          description: 'Shade grid so unshaded cells form a path with circle capes.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'kurotto',
+        name: 'Kurotto',
+        description: 'Circles state the total size of shaded blobs touching them.',
+        category: 'Logic Grids',
+        icon: Icons.lens_blur,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Kurotto',
+          description: 'Circles state the total size of shaded blobs touching them.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'mosaic',
+        name: 'Mosaic',
+        description: 'Minesweeper logic where clues count shaded cells in 3x3.',
+        category: 'Logic Grids',
+        icon: Icons.blur_on,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Mosaic',
+          description: 'Minesweeper logic where clues count shaded cells in 3x3.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'cave',
+        name: 'Cave (Corral)',
+        description: 'Draw a single closed cave region containing all clues.',
+        category: 'Logic Grids',
+        icon: Icons.panorama_fish_eye,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Cave (Corral)',
+          description: 'Draw a single closed cave region containing all clues.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'fillomino',
+        name: 'Fillomino',
+        description: 'Divide grid into polyominoes equal to their cell number.',
+        category: 'Paths & Loops',
+        icon: Icons.grid_view,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Fillomino',
+          description: 'Divide grid into polyominoes equal to their cell number.',
+          category: 'Paths & Loops',
+          uiType: 'region',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'galaxies',
+        name: 'Galaxies',
+        description: 'Divide grid into 180-degree rotationally symmetric regions.',
+        category: 'Paths & Loops',
+        icon: Icons.brightness_low,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Galaxies',
+          description: 'Divide grid into 180-degree rotationally symmetric regions.',
+          category: 'Paths & Loops',
+          uiType: 'region',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'ripple_effect',
+        name: 'Ripple Effect',
+        description: 'Fill region of size N with 1..N. Duplicates must be spaced N cells apart.',
+        category: 'Math & Calculation',
+        icon: Icons.waves,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Ripple Effect',
+          description: 'Fill region of size N with 1..N. Duplicates must be spaced N cells apart.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'araf',
+        name: 'Araf',
+        description: 'Divide into regions containing 2 clues of size strictly between them.',
+        category: 'Paths & Loops',
+        icon: Icons.pivot_table_chart,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Araf',
+          description: 'Divide into regions containing 2 clues of size strictly between them.',
+          category: 'Paths & Loops',
+          uiType: 'region',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'sashigane',
+        name: 'Sashigane',
+        description: 'Divide grid into L-shaped pieces matching arrow directions.',
+        category: 'Paths & Loops',
+        icon: Icons.south_east,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Sashigane',
+          description: 'Divide grid into L-shaped pieces matching arrow directions.',
+          category: 'Paths & Loops',
+          uiType: 'region',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'dominosa',
+        name: 'Dominosa',
+        description: 'Recover a unique domino set hidden in a grid of numbers.',
+        category: 'Logic Grids',
+        icon: Icons.casino_outlined,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Dominosa',
+          description: 'Recover a unique domino set hidden in a grid of numbers.',
+          category: 'Logic Grids',
+          uiType: 'region',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'battleships',
+        name: 'Battleships',
+        description: 'Place a hidden fleet matching row/column segment counts.',
+        category: 'Object Placement',
+        icon: Icons.directions_boat,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Battleships',
+          description: 'Place a hidden fleet matching row/column segment counts.',
+          category: 'Object Placement',
+          uiType: 'object',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'statue_park',
+        name: 'Statue Park',
+        description: 'Place polyominoes without touching orthogonally to cover black dots.',
+        category: 'Object Placement',
+        icon: Icons.category,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Statue Park',
+          description: 'Place polyominoes without touching orthogonally to cover black dots.',
+          category: 'Object Placement',
+          uiType: 'object',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'aquarium',
+        name: 'Aquarium',
+        description: 'Fill tank regions with water obeying gravity to match target counts.',
+        category: 'Object Placement',
+        icon: Icons.water,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Aquarium',
+          description: 'Fill tank regions with water obeying gravity to match target counts.',
+          category: 'Object Placement',
+          uiType: 'object',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'snake',
+        name: 'Snake',
+        description: 'Draw a non-self-touching snake between endpoints of target length.',
+        category: 'Object Placement',
+        icon: Icons.gesture,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Snake',
+          description: 'Draw a non-self-touching snake between endpoints of target length.',
+          category: 'Object Placement',
+          uiType: 'object',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'yajilin',
+        name: 'Yajilin',
+        description: 'Arrows count shaded cells. Draw loop through non-shaded cells.',
+        category: 'Paths & Loops',
+        icon: Icons.loop,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Yajilin',
+          description: 'Arrows count shaded cells. Draw loop through non-shaded cells.',
+          category: 'Paths & Loops',
+          uiType: 'loop',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'shingoki',
+        name: 'Shingoki',
+        description: 'Draw closed loop: white circles = go straight, black = turn.',
+        category: 'Paths & Loops',
+        icon: Icons.traffic,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Shingoki',
+          description: 'Draw closed loop: white circles = go straight, black = turn.',
+          category: 'Paths & Loops',
+          uiType: 'loop',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'castle_wall',
+        name: 'Castle Wall',
+        description: 'Draw loop. Black clues are inside, white clues outside.',
+        category: 'Paths & Loops',
+        icon: Icons.fort,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Castle Wall',
+          description: 'Draw loop. Black clues are inside, white clues outside.',
+          category: 'Paths & Loops',
+          uiType: 'loop',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'country_road',
+        name: 'Country Road',
+        description: 'Draw loop visiting each bordered region exactly once.',
+        category: 'Paths & Loops',
+        icon: Icons.explore,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Country Road',
+          description: 'Draw loop visiting each bordered region exactly once.',
+          category: 'Paths & Loops',
+          uiType: 'loop',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'hidato',
+        name: 'Hidato',
+        description: 'Place consecutive numbers 1..N adjacent orthogonally/diagonally.',
+        category: 'Paths & Loops',
+        icon: Icons.format_list_numbered,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Hidato',
+          description: 'Place consecutive numbers 1..N adjacent orthogonally/diagonally.',
+          category: 'Paths & Loops',
+          uiType: 'loop',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'suguru',
+        name: 'Suguru',
+        description: 'Fill region of size N with 1..N. Same numbers cannot touch.',
+        category: 'Math & Calculation',
+        icon: Icons.looks_5,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Suguru',
+          description: 'Fill region of size N with 1..N. Same numbers cannot touch.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'kropki',
+        name: 'Kropki',
+        description: 'Latin square. White dots indicate consecutive, black indicate doubles.',
+        category: 'Math & Calculation',
+        icon: Icons.radio_button_checked,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Kropki',
+          description: 'Latin square. White dots indicate consecutive, black indicate doubles.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'renzoku',
+        name: 'Renzoku',
+        description: 'Latin square where dots mark consecutive neighbors.',
+        category: 'Math & Calculation',
+        icon: Icons.grain,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Renzoku',
+          description: 'Latin square where dots mark consecutive neighbors.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'sandwich_sudoku',
+        name: 'Sandwich Sudoku',
+        description: 'Sudoku where outside clues sum digits between 1 and 9.',
+        category: 'Math & Calculation',
+        icon: Icons.lunch_dining,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Sandwich Sudoku',
+          description: 'Sudoku where outside clues sum digits between 1 and 9.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'thermo_sudoku',
+        name: 'Thermo Sudoku',
+        description: 'Sudoku where digits increase along thermometer shapes.',
+        category: 'Math & Calculation',
+        icon: Icons.thermostat,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Thermo Sudoku',
+          description: 'Sudoku where digits increase along thermometer shapes.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'arrow_sudoku',
+        name: 'Arrow Sudoku',
+        description: 'Sudoku where shaft digits sum to the digit in the circle.',
+        category: 'Math & Calculation',
+        icon: Icons.trending_flat,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Arrow Sudoku',
+          description: 'Sudoku where shaft digits sum to the digit in the circle.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'schrodinger_cell',
+        name: 'Schrödinger-Cell',
+        description: 'Sudoku where select cells can hold two values simultaneously.',
+        category: 'Math & Calculation',
+        icon: Icons.science,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Schrödinger-Cell',
+          description: 'Sudoku where select cells can hold two values simultaneously.',
+          category: 'Math & Calculation',
+          uiType: 'latin_square',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'cryptarithms',
+        name: 'Cryptarithms',
+        description: 'Verbal arithmetic where letters stand for unique digits.',
+        category: 'Math & Calculation',
+        icon: Icons.abc,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Cryptarithms',
+          description: 'Verbal arithmetic where letters stand for unique digits.',
+          category: 'Math & Calculation',
+          uiType: 'word',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'mathler',
+        name: 'Mathler',
+        description: 'Guess the 6-character equation that equals target number.',
+        category: 'Math & Calculation',
+        icon: Icons.equalizer,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Mathler',
+          description: 'Guess the 6-character equation that equals target number.',
+          category: 'Math & Calculation',
+          uiType: 'word',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'waffle',
+        name: 'Waffle',
+        description: 'Swap scrambled letters to solve crossing words.',
+        category: 'Word & Vocabulary',
+        icon: Icons.grid_goldenratio,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Waffle',
+          description: 'Swap scrambled letters to solve crossing words.',
+          category: 'Word & Vocabulary',
+          uiType: 'word',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'semantle',
+        name: 'Semantle',
+        description: 'Guess target word based on semantic similarity score.',
+        category: 'Word & Vocabulary',
+        icon: Icons.compare,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Semantle',
+          description: 'Guess target word based on semantic similarity score.',
+          category: 'Word & Vocabulary',
+          uiType: 'word',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'anagram_hive',
+        name: 'Anagram Hive',
+        description: 'Find all words using 7 honeycomb letters including center.',
+        category: 'Word & Vocabulary',
+        icon: Icons.hive,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Anagram Hive',
+          description: 'Find all words using 7 honeycomb letters including center.',
+          category: 'Word & Vocabulary',
+          uiType: 'word',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'cell_tower',
+        name: 'Cell Tower',
+        description: 'Divide letter grid into regions spelling valid words.',
+        category: 'Word & Vocabulary',
+        icon: Icons.domain,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Cell Tower',
+          description: 'Divide letter grid into regions spelling valid words.',
+          category: 'Word & Vocabulary',
+          uiType: 'word',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'slant',
+        name: 'Slant',
+        description: 'Fill every cell with diagonal slashes avoiding closed loops.',
+        category: 'Logic Grids',
+        icon: Icons.horizontal_rule_rounded,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Slant',
+          description: 'Fill every cell with diagonal slashes avoiding closed loops.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'stitches',
+        name: 'Stitches',
+        description: 'Connect adjacent regions with exactly one stitch pair.',
+        category: 'Logic Grids',
+        icon: Icons.difference,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Stitches',
+          description: 'Connect adjacent regions with exactly one stitch pair.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'tatamibari',
+        name: 'Tatamibari',
+        description: 'Divide grid into rectangles matching orientation clues.',
+        category: 'Paths & Loops',
+        icon: Icons.table_bar,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Tatamibari',
+          description: 'Divide grid into rectangles matching orientation clues.',
+          category: 'Paths & Loops',
+          uiType: 'region',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'aqre',
+        name: 'Aqre',
+        description: 'Shade cells per region counts with no 4-in-a-row constraint.',
+        category: 'Logic Grids',
+        icon: Icons.compress,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Aqre',
+          description: 'Shade cells per region counts with no 4-in-a-row constraint.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'static_minesweeper',
+        name: 'Static Minesweeper',
+        description: 'Fixed Minesweeper board solvable by pure logical deduction.',
+        category: 'Logic Grids',
+        icon: Icons.warning_amber,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Static Minesweeper',
+          description: 'Fixed Minesweeper board solvable by pure logical deduction.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+      BetaGameInfo(
+        id: 'nurimaze',
+        name: 'Nurimaze',
+        description: 'Shade rooms to form a maze with a path from S to G.',
+        category: 'Logic Grids',
+        icon: Icons.alt_route,
+        builder: const LogicGridPlaceholderScreen(
+          gameName: 'Nurimaze',
+          description: 'Shade rooms to form a maze with a path from S to G.',
+          category: 'Logic Grids',
+          uiType: 'shading',
+        ),
+      ),
+];
   }
 
   @override
@@ -398,6 +966,8 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
                             child: InkWell(
                               borderRadius: BorderRadius.circular(16),
                               onTap: () async {
+                                await DailyChallengeManager.clearDailyModifier();
+                                if (!context.mounted) return;
                                 await Navigator.push(
                                   context,
                                   MaterialPageRoute(builder: (_) => game.builder),

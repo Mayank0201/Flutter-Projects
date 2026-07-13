@@ -10,6 +10,7 @@ import'../../../widgets/challenge_cleared_overlay.dart';
 import'../../../widgets/auto_next_countdown.dart';
 import'../../../widgets/game_tutorial_dialog.dart';
 import'../../../widgets/buy_hints_dialog.dart';
+import'../../../widgets/interactive_tutorial_overlay.dart';
 // Chimp Test: numbers appear, tap 1 to hide them, then tap in order from memory.
 // Grid and number count grow each level.
 import '../../../utils/shuffle_manager.dart';
@@ -54,6 +55,9 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   bool _isHintShowing = false;
   bool _shuffleActive = false;
   int _hintCount = 0;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
 
   @override
   void initState() {
@@ -73,14 +77,36 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     }
     final savedLevel = prefs.getInt('level_chimp') ?? 0;
     final active = await ShuffleManager.isActive();
+
+    final tutorialKey = 'has_seen_tutorial_chimp';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_playDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
  
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
         _loadLevel();
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_chimp';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
@@ -199,9 +225,14 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
         _nextToTap++;
         _correctTapCount++;
         if (_nextToTap > _n) {
-          _won = true;
-          AudioManager.playSuccess();
-          _savePersistedLevel(_levelIndex + 1);
+          if (_isTutorialMode) {
+            _tutorialCompleted = true;
+            AudioManager.playSuccess();
+          } else {
+            _won = true;
+            AudioManager.playSuccess();
+            _savePersistedLevel(_levelIndex + 1);
+          }
         } else {
           _applyDailyPositionModifier();
           AudioManager.playClick();
@@ -293,10 +324,10 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       backgroundColor: context.bgDark,
       appBar: AppBar(
         backgroundColor: context.bgDark, foregroundColor: context.textPrimary,
-        title: Text('Chimp Test', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        title: Text(_isTutorialMode ? 'Tutorial' : 'Chimp Test', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
@@ -321,7 +352,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                 ),
               ],
             ),
-            onPressed: !_won && !_failed && !_isHintShowing
+            onPressed: !_won && !_failed && !_isHintShowing && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useHint();
@@ -347,9 +378,11 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
             padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: Text(
-                _playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}', 
+                _isTutorialMode
+                    ? 'Tutorial'
+                    : (_playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}'),
                 style: AppTheme.numberStyle(
-                  color: AppTheme.patchesTeal, 
+                  color: AppTheme.patchesTeal,
                   fontSize: context.scale(13),
                 ),
               ),
@@ -486,7 +519,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      if (_won && !_playDailyMode) 
+                      if (_won && !_playDailyMode && !_isTutorialMode) 
                         AutoNextCountdown(
                           onNext: _nextLevel,
                           accentColor: AppTheme.patchesTeal,
@@ -505,6 +538,15 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
               onComplete: () {
                 Navigator.pop(context, true);
               },
+            ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully memorized and tapped all numbers."
+                  : "Watch the numbers closely. Tapping 1 will hide them, then you must tap the remaining tiles in order from memory!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
             ),
         ],
       ),

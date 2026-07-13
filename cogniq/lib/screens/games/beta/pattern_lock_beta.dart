@@ -40,7 +40,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   int _actualGameLevel = 0;
 
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
-  static const double _boardSize = 260;
+  double get _boardSize => min(MediaQuery.of(context).size.width - 48, 400.0);
 
   int get _gridN {
     if (_currentLevel < 5) return 3;
@@ -464,7 +464,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                               child: Stack(
                                 children: [
                                   CustomPaint(
-                                    size: const Size(_boardSize, _boardSize),
+                                    size: Size(_boardSize, _boardSize),
                                     painter: PatternPainter(
                                       pattern: _isMemorizing ? _targetPattern : _userPattern,
                                       lineColor: _isMemorizing ? Colors.amber.withOpacity(0.6) : AppTheme.dustyMauve,

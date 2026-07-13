@@ -113,7 +113,7 @@ class SettingsNotifier extends ChangeNotifier {
     try {
       await HomeWidget.saveWidgetData('daily_streak', 0);
       await HomeWidget.saveWidgetData('total_solved', 0);
-      await HomeWidget.saveWidgetData('favorite_game', 'Categories');
+      await HomeWidget.saveWidgetData('favorite_game', 'Grid Path');
       await HomeWidget.saveWidgetData('todays_puzzle_name', 'Puzzle');
       await HomeWidget.saveWidgetData('todays_puzzle_desc', 'Train your mind');
       await HomeWidget.updateWidget(

@@ -46,7 +46,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   Future<void> _initLevelState() async {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
-    final savedLvl = prefs.getInt('level_circuit_guide') ?? 0;
+    int savedLvl = prefs.getInt('level_circuit_guide') ?? 0;
     final active = await ShuffleManager.isActive();
     final hintCount = await HintManager.getHints('circuit_guide');
     
@@ -174,6 +174,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           }
         }
         
+        final Map<int, int> targetNeighbors = {};
         List<List<int>> connections = List.generate(W * W, (_) => <int>[]);
         
         bool success = false;
@@ -187,14 +188,30 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           connections[srcIdx].add(srcNeighbor);
           connections[srcNeighbor].add(srcIdx);
           
+          targetNeighbors.clear();
           final List<int> tNeighbors = [];
           for (int t in tgts) {
-            int tNeighbor;
-            if (t ~/ W == 0) tNeighbor = t + W;
-            else if (t ~/ W == W - 1) tNeighbor = t - W;
-            else if (t % W == 0) tNeighbor = t + 1;
-            else tNeighbor = t - 1;
+            int tNeighbor = -1;
+            List<int> candidates = [];
+            int r = t ~/ W;
+            int c = t % W;
+            if (r == 0) candidates.add(t + W);
+            if (r == W - 1) candidates.add(t - W);
+            if (c == 0) candidates.add(t + 1);
+            if (c == W - 1) candidates.add(t - 1);
             
+            candidates.removeWhere((n) => tgts.contains(n) || n == srcIdx);
+            
+            if (candidates.isNotEmpty) {
+              tNeighbor = candidates[0];
+            } else {
+              if (r == 0) tNeighbor = t + W;
+              else if (r == W - 1) tNeighbor = t - W;
+              else if (c == 0) tNeighbor = t + 1;
+              else tNeighbor = t - 1;
+            }
+            
+            targetNeighbors[t] = tNeighbor;
             tNeighbors.add(tNeighbor);
             connections[t].add(tNeighbor);
             connections[tNeighbor].add(t);
@@ -223,6 +240,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
               if (c < W - 1) neighbors.add(current + 1);
               
               neighbors.removeWhere((n) => n == srcIdx || tgts.contains(n));
+              neighbors.removeWhere((n) => treeNodes.contains(n) && (connections[n].length >= 3));
               
               if (neighbors.isEmpty) break;
               
@@ -269,11 +287,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           }
           if (tgts.contains(i)) {
             _wireTypes[i] = "TGT";
-            int tNeighbor;
-            if (i ~/ W == 0) tNeighbor = i + W;
-            else if (i ~/ W == W - 1) tNeighbor = i - W;
-            else if (i % W == 0) tNeighbor = i + 1;
-            else tNeighbor = i - 1;
+            int tNeighbor = targetNeighbors[i] ?? (i + 1);
 
             int diff = tNeighbor - i;
             if (diff == -W) _rotations[i] = 0;
@@ -344,7 +358,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
   List<int> _getConnections(int idx) {
     final type = _wireTypes[idx];
-    final rot = _rotations[idx];
+    final rot = _rotations[idx] % 4;
 
     if (type == "SRC" || type == "TGT") {
       return [rot];
@@ -449,7 +463,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     AudioManager.playClick();
     settingsNotifier.hapticTap();
     setState(() {
-      _rotations[idx] = (_rotations[idx] + 1) % 4;
+      _rotations[idx]++;
     });
 
     _checkConnections();
@@ -523,7 +537,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     List<int> wrongIndices = [];
     for (int i = 0; i < _wireTypes.length; i++) {
       if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT" && _wireTypes[i] != "EMPTY") {
-        if (_rotations[i] != _solutionRotations[i]) {
+        if ((_rotations[i] % 4) != (_solutionRotations[i] % 4)) {
           wrongIndices.add(i);
         }
       }
@@ -814,7 +828,7 @@ class AnimatedCircuitNode extends StatelessWidget {
             : TweenAnimationBuilder<double>(
                 tween: Tween<double>(end: targetAngle),
                 duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
+                curve: Curves.easeOutCubic,
                 builder: (context, angle, child) {
                   return CustomPaint(
                     painter: WirePainter(

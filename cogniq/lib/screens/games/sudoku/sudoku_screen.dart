@@ -13,6 +13,8 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 class SudokuLevel {
   final int size; // 4, 6, or 9
@@ -1133,6 +1135,9 @@ class _SudokuScreenState extends State<SudokuScreen> {
   int _selectedCol = -1;
   String _message = '';
   bool _won = false;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
   int _dailyGridSize = 9;
@@ -1251,7 +1256,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       _dailyRadius = 1.5;
     }
 
-    if (!_playDailyMode) {
+    if (!_playDailyMode && !_isTutorialMode) {
       Future.delayed(Duration.zero, () async {
         if (!mounted) return;
         final savedStateStr = prefs.getString('normal_sudoku_state');
@@ -1341,14 +1346,36 @@ class _SudokuScreenState extends State<SudokuScreen> {
     }
     final savedLevel = prefs.getInt('level_sudoku') ?? 0;
     final active = await ShuffleManager.isActive();
+
+    final tutorialKey = 'has_seen_tutorial_sudoku';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_playDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
  
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
         _loadLevel();
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_sudoku';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel();
+    });
   }
 
   Future<void> _saveNormalState() async {
@@ -1721,15 +1748,25 @@ class _SudokuScreenState extends State<SudokuScreen> {
       }
     }
     if (correct) {
-      setState(() {
-        _won = true;
-        _selectedRow = -1;
-        _selectedCol = -1;
-        _message = 'Correct! Sudoku Solved!';
-        AudioManager.playSuccess();
-        _savePersistedLevel(_levelIndex + 1);
-      });
-      _clearNormalState();
+      if (_isTutorialMode) {
+        setState(() {
+          _tutorialCompleted = true;
+          _selectedRow = -1;
+          _selectedCol = -1;
+          _message = 'Correct! Tutorial complete.';
+          AudioManager.playSuccess();
+        });
+      } else {
+        setState(() {
+          _won = true;
+          _selectedRow = -1;
+          _selectedCol = -1;
+          _message = 'Correct! Sudoku Solved!';
+          AudioManager.playSuccess();
+          _savePersistedLevel(_levelIndex + 1);
+        });
+        _clearNormalState();
+      }
     } else {
       setState(() {
         _message = 'Some numbers are incorrect or missing!';
@@ -1819,7 +1856,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
         title: Text(
-          'Sudoku',
+          _isTutorialMode ? 'Tutorial' : 'Sudoku',
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.w700,
             color: context.textPrimary,
@@ -1827,18 +1864,12 @@ class _SudokuScreenState extends State<SudokuScreen> {
         ),
         centerTitle: true,
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'sudoku'),
             ),
-          IconButton(
-            icon: const Icon(Icons.help_outline, size: 20),
-            color: context.textMuted,
-            onPressed: () =>
-                RulesHelper.showRulesBottomSheet(context, 'sudoku', 'Sudoku'),
-          ),
           IconButton(
             icon: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1858,7 +1889,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                 ),
               ],
             ),
-            onPressed: !_won
+            onPressed: !_won && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useSudokuHint();
@@ -1875,16 +1906,60 @@ class _SudokuScreenState extends State<SudokuScreen> {
                   }
                 : null,
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 20),
-            onPressed: _reset,
-            color: context.textMuted,
-          ),
+          if (MediaQuery.of(context).size.width < 360)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: context.textMuted),
+              onSelected: (val) {
+                if (val == 'help') {
+                  RulesHelper.showRulesBottomSheet(context, 'sudoku', 'Sudoku');
+                } else if (val == 'reset') {
+                  _reset();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'help',
+                  child: Row(
+                    children: [
+                      Icon(Icons.help_outline, size: 20),
+                      SizedBox(width: 8),
+                      Text('Rules'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'reset',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, size: 20),
+                      SizedBox(width: 8),
+                      Text('Reset'),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.help_outline, size: 20),
+              color: context.textMuted,
+              onPressed: () => RulesHelper.showRulesBottomSheet(context, 'sudoku', 'Sudoku'),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 20),
+              onPressed: _reset,
+              color: context.textMuted,
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: Text(
-                _playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}',
+                _isTutorialMode
+                    ? 'Tutorial'
+                    : _playDailyMode 
+                        ? 'Daily' 
+                        : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
                 style: AppTheme.numberStyle(
                   color: accentColor,
                   fontSize: context.scale(13),
@@ -2093,7 +2168,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ),
                   const SizedBox(height: 16),
                   // Number Pad (1 to size)
-                  if (!_won) ...[
+                  if (!_won && !_tutorialCompleted) ...[
                     if (!(_playDailyMode && _dailyModifierType == 'eclipse' && _isScanPhase)) ...[
                       Wrap(
                         spacing: 10,
@@ -2176,7 +2251,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                       ),
                   ] else ...[
                     const SizedBox(height: 16),
-                    if (!_playDailyMode)
+                    if (!_playDailyMode && !_isTutorialMode)
                       AutoNextCountdown(
                         onNext: _nextLevel,
                         accentColor: accentColor,
@@ -2201,6 +2276,15 @@ class _SudokuScreenState extends State<SudokuScreen> {
           onComplete: () {
             Navigator.pop(context, true);
           },
+        ),
+      if (_isTutorialMode)
+        InteractiveTutorialOverlay(
+          instruction: _tutorialCompleted
+              ? "Nice! You successfully completed the Sudoku puzzle."
+              : "Fill the grid so that every row, column, and subgrid contains the numbers 1 to 4/6/9 without repetition!",
+          isCompleted: _tutorialCompleted,
+          onSkip: _finishTutorial,
+          onStartGame: _finishTutorial,
         ),
     ],
   ),

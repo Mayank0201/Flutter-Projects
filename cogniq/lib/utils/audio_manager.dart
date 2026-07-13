@@ -1,9 +1,6 @@
-import 'package:audioplayers/audioplayers.dart';
-import '../theme/settings_manager.dart';
-
 class AudioManager {
-  static final AudioPlayer _bgMusicPlayer = AudioPlayer()..setReleaseMode(ReleaseMode.loop);
-  static final AudioPlayer _sfxPlayer = AudioPlayer();
+  // static final AudioPlayer _bgMusicPlayer = AudioPlayer()..setReleaseMode(ReleaseMode.loop);
+  // static final AudioPlayer _sfxPlayer = AudioPlayer();
 
   static bool _initialized = false;
   static bool isGameActive = false;
@@ -12,6 +9,8 @@ class AudioManager {
     if (_initialized) return;
     _initialized = true;
 
+    // Disabled all audio players to resolve platform-channel latency and lagging.
+    /*
     try {
       final AudioContext audioContext = AudioContext(
         iOS: AudioContextIOS(
@@ -39,9 +38,12 @@ class AudioManager {
     if (settingsNotifier.musicEnabled) {
       await startMusic();
     }
+    */
   }
 
   static Future<void> playClick() async {
+    // Disabled SFX
+    /*
     if (!settingsNotifier.soundEnabled) return;
     try {
       await _sfxPlayer.stop();
@@ -50,9 +52,12 @@ class AudioManager {
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> playSuccess() async {
+    // Disabled SFX
+    /*
     if (!settingsNotifier.soundEnabled) return;
     try {
       await _sfxPlayer.stop();
@@ -61,9 +66,12 @@ class AudioManager {
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> playFail() async {
+    // Disabled SFX
+    /*
     if (!settingsNotifier.soundEnabled) return;
     try {
       await _sfxPlayer.stop();
@@ -72,9 +80,12 @@ class AudioManager {
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> startMusic() async {
+    // Disabled Music
+    /*
     try {
       await _bgMusicPlayer.stop();
       await _bgMusicPlayer.play(AssetSource('audio/bg_music.mp3'));
@@ -82,27 +93,36 @@ class AudioManager {
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> stopSfx() async {
+    // Disabled SFX
+    /*
     try {
       await _sfxPlayer.stop();
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> stopMusic() async {
     isGameActive = false;
+    // Disabled Music
+    /*
     try {
       await _bgMusicPlayer.stop();
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> fadeOutMusic() async {
     isGameActive = true;
+    // Disabled Music
+    /*
     try {
       final double startVol = settingsNotifier.musicEnabled ? 0.15 : 0.0;
       if (startVol > 0) {
@@ -115,65 +135,28 @@ class AudioManager {
     } catch (_) {
       // Ignore playback exceptions
     }
+    */
   }
 
   static Future<void> pauseMusic() async {
     isGameActive = true;
-    try {
-      final double startVol = settingsNotifier.musicEnabled ? 0.15 : 0.0;
-      if (startVol > 0) {
-        for (int i = 10; i >= 0; i--) {
-          await _bgMusicPlayer.setVolume(startVol * (i / 10.0));
-          await Future.delayed(const Duration(milliseconds: 25));
-        }
-      }
-    } catch (_) {
-      // Ignore playback exceptions
-    }
+    // Disabled Music
   }
 
   static Future<void> resumeMusic() async {
     isGameActive = false;
-    try {
-      if (settingsNotifier.musicEnabled) {
-        const double targetVol = 0.15;
-        // Keep volume at current low value or start from 0 if it was stopped/muted
-        for (int i = 0; i <= 10; i++) {
-          await _bgMusicPlayer.setVolume(targetVol * (i / 10.0));
-          await Future.delayed(const Duration(milliseconds: 25));
-        }
-      }
-    } catch (_) {
-      // Ignore playback exceptions
-    }
+    // Disabled Music
   }
 
   static Future<void> fadeInMusic() async {
-    try {
-      if (settingsNotifier.musicEnabled) {
-        const double targetVol = 0.15;
-        await _bgMusicPlayer.setVolume(0.0);
-        await _bgMusicPlayer.play(AssetSource('audio/bg_music.mp3'));
-        for (int i = 0; i <= 10; i++) {
-          await _bgMusicPlayer.setVolume(targetVol * (i / 10.0));
-          await Future.delayed(const Duration(milliseconds: 30));
-        }
-      }
-    } catch (_) {
-      // Ignore playback exceptions
-    }
+    // Disabled Music
   }
 
   static Future<void> updateMusicSetting(bool enabled) async {
-    if (enabled) {
-      await startMusic();
-    } else {
-      await _bgMusicPlayer.stop();
-    }
+    // Disabled Music
   }
 
   static void updateVolume() {
-    _bgMusicPlayer.setVolume(settingsNotifier.musicEnabled ? 0.15 : 0.0);
-    _sfxPlayer.setVolume(1.0);
+    // Disabled Music
   }
 }

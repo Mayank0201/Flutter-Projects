@@ -58,7 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ?'Normal'
                             :'Large',
                     trailing: SizedBox(
-                      width: 160,
+                      width: MediaQuery.of(context).size.width < 360 ? 100 : 140,
                       child: Slider(
                         value: settingsNotifier.fontScale,
                         min: 0.85,
@@ -73,36 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              // Sound & Gameplay Section
-              _SectionHeader(title:'Sound & Gameplay'),
-              const SizedBox(height: 8),
-              _SettingsCard(
-                children: [
-                  // Removed Mute All and Sound Level
-                  _SettingsTile(
-                    icon: Icons.volume_up_outlined,
-                    title: 'SFX (loss, win, and tile tapping)',
-                    subtitle:'Tap and win sounds',
-                    trailing: Switch.adaptive(
-                      value: settingsNotifier.soundEnabled,
-                      onChanged: (val) => settingsNotifier.setSound(val),
-                      activeColor: AppTheme.wordleGreen,
-                    ),
-                  ),
-                   _Divider(),
-                  _SettingsTile(
-                    icon: Icons.music_note_outlined,
-                    title: 'Bg music',
-                    subtitle:'Looping ambient background pads',
-                    trailing: Switch.adaptive(
-                      value: settingsNotifier.musicEnabled,
-                      onChanged: (val) => settingsNotifier.setMusic(val),
-                      activeColor: AppTheme.wordleGreen,
-                    ),
-                  ),
-                ],
-              ),
+
               const SizedBox(height: 24),
               // Premium & Ads Section
               _SectionHeader(title: 'Premium & Ads'),
@@ -308,32 +279,42 @@ class _SettingsTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon, color: titleColor ?? context.textSecondary, size: 22),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: GoogleFonts.outfit(
-                    color: titleColor ?? context.textPrimary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: context.scale(14),
-                  )),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle!, style: GoogleFonts.outfit(
-                      color: context.textMuted,
-                      fontSize: context.scale(11),
-                    )),
-                  ],
+        padding: EdgeInsets.symmetric(
+          horizontal: MediaQuery.of(context).size.width < 360 ? 10 : 16,
+          vertical: 14,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showIcon = constraints.maxWidth >= 230;
+            return Row(
+              children: [
+                if (showIcon) ...[
+                  Icon(icon, color: titleColor ?? context.textSecondary, size: 22),
+                  SizedBox(width: MediaQuery.of(context).size.width < 360 ? 8 : 14),
                 ],
-              ),
-            ),
-            if (trailing != null) trailing!,
-          ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: GoogleFonts.outfit(
+                        color: titleColor ?? context.textPrimary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: context.scale(14),
+                      )),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(subtitle!, style: GoogleFonts.outfit(
+                          color: context.textMuted,
+                          fontSize: context.scale(11),
+                        )),
+                      ],
+                    ],
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            );
+          }
         ),
       ),
     );

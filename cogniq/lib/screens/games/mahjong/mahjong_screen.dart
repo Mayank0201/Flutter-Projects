@@ -1197,25 +1197,62 @@ class _MahjongScreenState extends State<MahjongScreen> {
                   }
                 : null,
           ),
-          IconButton(
-            icon: const Icon(Icons.help_outline, size: 20),
-            color: context.textMuted,
-            onPressed: () => RulesHelper.showRulesBottomSheet(
-              context,
-              'memory',
-              'Mahjong Solitaire',
+          if (MediaQuery.of(context).size.width < 360)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: context.textMuted),
+              onSelected: (val) {
+                if (val == 'help') {
+                  RulesHelper.showRulesBottomSheet(context, 'memory', 'Mahjong Solitaire');
+                } else if (val == 'reset') {
+                  _reset();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'help',
+                  child: Row(
+                    children: [
+                      Icon(Icons.help_outline, size: 20),
+                      SizedBox(width: 8),
+                      Text('Rules'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'reset',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, size: 20),
+                      SizedBox(width: 8),
+                      Text('Reset'),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.help_outline, size: 20),
+              color: context.textMuted,
+              onPressed: () => RulesHelper.showRulesBottomSheet(
+                context,
+                'memory',
+                'Mahjong Solitaire',
+              ),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 20),
-            onPressed: _reset,
-            color: context.textMuted,
-          ),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 20),
+              onPressed: _reset,
+              color: context.textMuted,
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: Text(
-                _playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}',
+                _playDailyMode 
+                    ? 'Daily' 
+                    : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
                 style: AppTheme.numberStyle(
                   color: accentColor,
                   fontSize: context.scale(13),

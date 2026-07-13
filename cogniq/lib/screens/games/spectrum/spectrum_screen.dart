@@ -10,6 +10,7 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../widgets/buy_hints_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class HueTile {
@@ -40,6 +41,9 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
   bool _shuffleActive = false;
   int _hintCount = 0;
   bool _won = false;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
   bool _isDailyMode = false;
   String _dailyModifierType = '';
   bool _isInitializing = true;
@@ -415,10 +419,20 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     final savedLevel = prefs.getInt('level_hue') ?? 0;
     final active = await ShuffleManager.isActive();
 
+    final tutorialKey = 'has_seen_tutorial_hue';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_isDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
+
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
 
         final midLevelIndex = prefs.getInt('spectrum_mid_levelIndex');
         final midLayoutStr = prefs.getString('spectrum_mid_layout');
@@ -483,6 +497,18 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     }
   }
 
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_hue';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _isDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _generateSpectrum();
+    });
+  }
+
   Future<void> _savePersistedLevel(int lvl) async {
     if (_isDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
@@ -543,11 +569,19 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     }
 
     if (correct) {
-      _won = true;
-      _showingPreview = false;
-      AudioManager.playSuccess();
-      _savePersistedLevel(_levelIndex + 1);
-      _clearMidLevelState();
+      if (_isTutorialMode) {
+        setState(() {
+          _tutorialCompleted = true;
+          _showingPreview = false;
+        });
+        AudioManager.playSuccess();
+      } else {
+        _won = true;
+        _showingPreview = false;
+        AudioManager.playSuccess();
+        _savePersistedLevel(_levelIndex + 1);
+        _clearMidLevelState();
+      }
     }
   }
 
@@ -637,21 +671,21 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       backgroundColor: context.bgDark,
       appBar: AppBar(
         title: Text(
-          'Spectrum',
+          _isTutorialMode ? 'Tutorial' : 'Spectrum',
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.bold,
             fontSize: context.scale(18),
           ),
         ),
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'hue'),
             ),
           // Preview button
-          if (!_won)
+          if (!_won && !_isTutorialMode)
             IconButton(
               tooltip: 'Toggle correct tiles preview',
               icon: Icon(
@@ -679,7 +713,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                 ),
               ],
             ),
-            onPressed: !_won
+            onPressed: !_won && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useHint();
@@ -741,9 +775,11 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _isDailyMode
-                                ? 'Daily Challenge  •  ${_rows}×${_cols}'
-                                : 'Level ${_levelIndex + 1}  •  ${_rows}×${_cols}',
+                            _isTutorialMode
+                                ? 'Tutorial  •  ${_rows}×${_cols}'
+                                : _isDailyMode
+                                    ? 'Daily Challenge  •  ${_rows}×${_cols}'
+                                    : 'Level ${_levelIndex + 1}  •  ${_rows}×${_cols}',
                             style: AppTheme.numberStyle(
                               fontSize: context.scale(14),
                               fontWeight: FontWeight.bold,
@@ -752,15 +788,17 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            _won
-                                ? '✓ Solved!'
-                                : 'Swap tiles · tap 👁 to preview',
+                            _isTutorialMode
+                                ? (_tutorialCompleted ? '✓ Solved!' : 'Drag/Swap tiles to order the spectrum')
+                                : _won
+                                    ? '✓ Solved!'
+                                    : 'Swap tiles · tap 👁 to preview',
                             style: GoogleFonts.outfit(
                               fontSize: context.scale(11),
-                              color: _won
+                              color: (_won || _tutorialCompleted)
                                   ? Colors.green
                                   : context.textSecondary,
-                              fontWeight: _won
+                              fontWeight: (_won || _tutorialCompleted)
                                   ? FontWeight.bold
                                   : FontWeight.normal,
                             ),
@@ -935,7 +973,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                     horizontal: 24,
                     vertical: 24,
                   ),
-                  child: _won
+                  child: (_won && !_isTutorialMode)
                       ? Center(
                           child: _isDailyMode
                               ? const SizedBox.shrink()
@@ -957,6 +995,15 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                   Navigator.pop(context, true);
                 },
               ),
+            ),
+          if (_isTutorialMode)
+            InteractiveTutorialOverlay(
+              instruction: _tutorialCompleted
+                  ? "Nice! You successfully arranged the colors in order."
+                  : "Tap a tile, then tap an adjacent tile to swap them. Arrange all tiles so they form a smooth color gradient from corner to corner. The circles represent locked guide tiles!",
+              isCompleted: _tutorialCompleted,
+              onSkip: _finishTutorial,
+              onStartGame: _finishTutorial,
             ),
         ],
       ),

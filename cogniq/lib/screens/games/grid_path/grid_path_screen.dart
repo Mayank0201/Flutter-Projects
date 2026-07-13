@@ -12,6 +12,8 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class ZipLevel {
@@ -32,6 +34,9 @@ class GridPathScreen extends StatefulWidget {
 class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProviderStateMixin {
   int _levelIndex = 0;
   late ZipLevel _level;
+  bool _isTutorialMode = false;
+  bool _tutorialCompleted = false;
+  int _actualGameLevel = 0;
   final List<(int, int)> _path = [];
   int _nextWaypoint = 1;
   bool _won = false;
@@ -68,15 +73,38 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     if (_isDailyMode) {
       _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
     }
-    final savedLevel = prefs.getInt('level_zip') ?? 0;
+    int savedLevel = prefs.getInt('level_zip') ?? 0;
     final active = await ShuffleManager.isActive();
+
+    final tutorialKey = 'has_seen_tutorial_zip';
+    final hasSeen = prefs.getBool(tutorialKey) ?? false;
+    if (!hasSeen && !_isDailyMode) {
+      _isTutorialMode = true;
+      _actualGameLevel = savedLevel;
+      _levelIndex = 0;
+    } else {
+      _isTutorialMode = false;
+      _levelIndex = savedLevel;
+    }
+
     if (mounted) {
       setState(() {
         _shuffleActive = active;
-        _levelIndex = savedLevel;
         _loadLevel(prefs);
       });
     }
+  }
+
+  Future<void> _finishTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialKey = 'has_seen_tutorial_zip';
+    await prefs.setBool(tutorialKey, true);
+    setState(() {
+      _isTutorialMode = false;
+      _tutorialCompleted = false;
+      _levelIndex = _isDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
+      _loadLevel(prefs);
+    });
   }
 
   Future<void> _saveState() async {
@@ -209,12 +237,22 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
       final targetLastWp = _isReversePath ? 1 : _level.maxWaypoint;
       if (lastCellWp == targetLastWp && _path.length == _level.totalCellsToVisit) {
-        _won = true;
-        _msg = 'Path complete!';
-        AudioManager.playSuccess();
-        settingsNotifier.hapticError(); // equivalent to heavyImpact
-        _savePersistedLevel(_levelIndex + 1);
-        _clearState();
+        if (_isTutorialMode) {
+          if (!_tutorialCompleted) {
+            AudioManager.playSuccess();
+            settingsNotifier.hapticError();
+            setState(() {
+              _tutorialCompleted = true;
+            });
+          }
+        } else {
+          _won = true;
+          _msg = 'Path complete!';
+          AudioManager.playSuccess();
+          settingsNotifier.hapticError(); // equivalent to heavyImpact
+          _savePersistedLevel(_levelIndex + 1);
+          _clearState();
+        }
       } else {
         _msg = 'Hint added to path!';
         AudioManager.playClick();
@@ -576,20 +614,30 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   }
 
   void _checkWin() {
-    if (_won) return;
+    if (_won || _tutorialCompleted) return;
     if (_path.isNotEmpty) {
       final lastCellWp = _level.waypoints[_path.last.$1][_path.last.$2];
       final targetLastWp = _isReversePath ? 1 : _level.maxWaypoint;
       if (lastCellWp == targetLastWp) {
         if (_path.length == _level.totalCellsToVisit) {
-          setState(() {
-            _won = true;
-            _msg = 'Path complete!';
-            AudioManager.playSuccess();
-            settingsNotifier.hapticError(); // heavyImpact
-            _savePersistedLevel(_levelIndex + 1);
-            _clearState();
-          });
+          if (_isTutorialMode) {
+            if (!_tutorialCompleted) {
+              AudioManager.playSuccess();
+              settingsNotifier.hapticError(); // heavyImpact
+              setState(() {
+                _tutorialCompleted = true;
+              });
+            }
+          } else {
+            setState(() {
+              _won = true;
+              _msg = 'Path complete!';
+              AudioManager.playSuccess();
+              settingsNotifier.hapticError(); // heavyImpact
+              _savePersistedLevel(_levelIndex + 1);
+              _clearState();
+            });
+          }
         } else {
           setState(() {
             _msg = 'Not all cells filled!';
@@ -657,10 +705,10 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       backgroundColor: context.bgDark,
       appBar: AppBar(
         backgroundColor: context.bgDark, foregroundColor: context.textPrimary,
-        title: Text('Grid Path', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        title: Text(_isTutorialMode ? 'Tutorial' : 'Grid Path', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
         centerTitle: true,
         actions: [
-          if (_shuffleActive)
+          if (_shuffleActive && !_isTutorialMode)
             IconButton(
               icon: const Icon(Icons.skip_next_rounded),
               tooltip: 'Skip Game',
@@ -685,7 +733,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                 ),
               ],
             ),
-            onPressed: !_won
+            onPressed: !_won && !_isTutorialMode
                 ? () async {
                     if (_hintCount > 0) {
                       _useHint();
@@ -710,19 +758,28 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: _isDailyMode
+            child: _isTutorialMode
                 ? Text(
-                    'Daily Challenge',
+                    'Tutorial',
                     style: GoogleFonts.outfit(
                       color: AppTheme.zipPink,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
                     ),
                   )
-                : AnimatedLevelIndicator(
-                    level: _levelIndex + 1,
-                    accentColor: AppTheme.zipPink,
-                  ),
+                : _isDailyMode
+                    ? Text(
+                        'Daily Challenge',
+                        style: GoogleFonts.outfit(
+                          color: AppTheme.zipPink,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                    : AnimatedLevelIndicator(
+                        level: _levelIndex + 1,
+                        accentColor: AppTheme.zipPink,
+                      ),
           ),
         ],
       ),
@@ -747,13 +804,16 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                         children: [
                           const Icon(Icons.star, color: Colors.amber, size: 18),
                           const SizedBox(width: 8),
-                          Text(
-                            _isReversePath ? 'DAILY CHALLENGE: REVERSE PATH MODE' : 'DAILY CHALLENGE',
-                            style: GoogleFonts.outfit(
-                              color: Colors.amber,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              letterSpacing: 1.2,
+                          Flexible(
+                            child: Text(
+                              _isReversePath ? 'DAILY CHALLENGE: REVERSE PATH MODE' : 'DAILY CHALLENGE',
+                              style: GoogleFonts.outfit(
+                                color: Colors.amber,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                letterSpacing: 1.2,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
                           ),
                         ],
@@ -828,8 +888,14 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                                 }
                               } else {
                                 if (_path.contains(c)) {
-                                  _dragActive = true;
-                                  _truncatePathTo(c);
+                                  if (c == _path.last) {
+                                    _dragActive = true;
+                                  } else if (_path.length >= 2 && c == _path[_path.length - 2]) {
+                                    _dragActive = true;
+                                    _truncatePathTo(c);
+                                  } else {
+                                    _dragActive = false;
+                                  }
                                 } else if (_isAdjacent(_path.last, c) && !_path.contains(c)) {
                                   _dragActive = true;
                                   _addCell(c.$1, c.$2);
@@ -847,7 +913,9 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             if (c != null) {
                               if (_path.isNotEmpty && c == _path.last) return; // Ignore duplicate cell updates to prevent lag
                               if (_path.contains(c)) {
-                                _truncatePathTo(c);
+                                if (_path.length >= 2 && c == _path[_path.length - 2]) {
+                                  _truncatePathTo(c);
+                                }
                               } else if (_path.isNotEmpty) {
                                 final last = _path.last;
                                 final lineCells = _interpolatePath(last, c);
@@ -891,6 +959,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                                   visitedWpColor: AppTheme.softSage,
                                   modifierType: _dailyModifierType,
                                   hideWaypoints: _hideGridPathElements,
+                                  isDarkMode: Theme.of(context).brightness == Brightness.dark,
                                 ),
                             ),
                           ),
@@ -922,17 +991,26 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         ),
       ),
       if (_won && _isDailyMode)
-            Positioned.fill(
-              child: ChallengeClearedOverlay(
-                accentColor: AppTheme.zipPink,
-                onComplete: () {
-                  Navigator.pop(context, true);
-                },
-              ),
-            ),
-        ],
-      ),
-      );
+        Positioned.fill(
+          child: ChallengeClearedOverlay(
+            accentColor: AppTheme.zipPink,
+            onComplete: () {
+              Navigator.pop(context, true);
+            },
+          ),
+        ),
+      if (_isTutorialMode)
+        InteractiveTutorialOverlay(
+          instruction: _tutorialCompleted
+              ? "Nice! You successfully traced the path and filled the grid."
+              : "Touch the starting tile and drag your finger to trace a continuous path. Visit the waypoints in order!",
+          isCompleted: _tutorialCompleted,
+          onSkip: _finishTutorial,
+          onStartGame: _finishTutorial,
+        ),
+    ],
+  ),
+);
   }
 }
 
@@ -949,6 +1027,7 @@ class _ZipPainter extends CustomPainter {
   final Color visitedWpColor;
   final String modifierType;
   final bool hideWaypoints;
+  final bool isDarkMode;
 
   _ZipPainter({
     required this.level,
@@ -964,6 +1043,7 @@ class _ZipPainter extends CustomPainter {
     required this.visitedWpColor,
     required this.modifierType,
     required this.hideWaypoints,
+    required this.isDarkMode,
   }) : super();
 
   Offset _ctr(int r, int c) => Offset(c * cellW + cellW / 2, r * cellH + cellH / 2);
@@ -997,7 +1077,11 @@ class _ZipPainter extends CustomPainter {
           final wallBorder = Paint()..color = gridColor.withAlpha(isRetro ? 10 : 45)..style = PaintingStyle.stroke..strokeWidth = 1.0;
           canvas.drawRRect(rr, wallBorder);
           
-          final crossPaint = Paint()..color = gridColor.withAlpha(isRetro ? 15 : 35)..style = PaintingStyle.stroke..strokeWidth = 1.5;
+          final Color xColor = isDarkMode ? Colors.white : Colors.black;
+          final crossPaint = Paint()
+            ..color = xColor.withAlpha(isRetro ? 120 : 200)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.0;
           final cx = rect.center.dx;
           final cy = rect.center.dy;
           final size = cellW * 0.15;

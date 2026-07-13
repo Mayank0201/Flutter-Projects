@@ -363,24 +363,7 @@ class _GameTutorialDialogState extends State<GameTutorialDialog> {
             illustrationEmoji: '⏱️',
           ),
         ];
-      case 'nonogram':
-        return [
-          const TutorialStep(
-            title: '🧩 Grid Clues',
-            description: 'Fill cells in the grid to reveal a hidden picture based on the row and column number clues.',
-            illustrationEmoji: '🧩',
-          ),
-          const TutorialStep(
-            title: '🔢 Block Sizes',
-            description: 'Numbers represent sizes of consecutive filled cells (e.g. "3 1" means a group of 3 filled cells, then an empty space, then 1 filled cell).',
-            illustrationEmoji: '🔢',
-          ),
-          const TutorialStep(
-            title: '✏️ Pencil & X Modes',
-            description: 'Switch to Pencil mode to fill cells, or X mode to mark cells that you know are empty.',
-            illustrationEmoji: '✏️',
-          ),
-        ];
+
       case 'numbermemory':
         return [
           const TutorialStep(
@@ -453,24 +436,6 @@ class _GameTutorialDialogState extends State<GameTutorialDialog> {
             illustrationEmoji: '🧠',
           ),
         ];
-      case 'connections':
-        return [
-          const TutorialStep(
-            title: '🗂️ Find 4 Groups',
-            description: 'Group 16 words into 4 sets of 4 words that share a common category link.',
-            illustrationEmoji: '🗂️',
-          ),
-          const TutorialStep(
-            title: '🧠 Select & Submit',
-            description: 'Select 4 words and tap "Submit" to check if they form a valid group. Each category has its own theme!',
-            illustrationEmoji: '🧠',
-          ),
-          const TutorialStep(
-            title: '⚠️ Mistake Tracker',
-            description: 'You have a limited number of incorrect attempts. Watch out for words that seem to fit multiple categories!',
-            illustrationEmoji: '⚠️',
-          ),
-        ];
       case 'flagle':
         return [
           const TutorialStep(
@@ -487,60 +452,6 @@ class _GameTutorialDialogState extends State<GameTutorialDialog> {
             title: '🏆 Proximity Clues',
             description: 'Proximity indicators show how close your guess was to the target country. Find it in as few guesses as possible!',
             illustrationEmoji: '🏆',
-          ),
-        ];
-      case 'wordsearch':
-        return [
-          const TutorialStep(
-            title: '🔍 Word Search',
-            description: 'Find a list of hidden target words inside a grid of letters.',
-            illustrationEmoji: '🔍',
-          ),
-          const TutorialStep(
-            title: '↗️ Multi-Directional',
-            description: 'Words can be positioned in any direction: horizontally, vertically, diagonally, or backwards.',
-            illustrationEmoji: '↗️',
-          ),
-          const TutorialStep(
-            title: '✍️ Swipe to Highlight',
-            description: 'Drag your finger from the first letter to the last letter of a hidden word to highlight and clear it.',
-            illustrationEmoji: '✍️',
-          ),
-        ];
-      case 'block_escape':
-        return [
-          const TutorialStep(
-            title: '🚪 Escape the Grid',
-            description: 'Your goal is to slide block obstacles out of the way so the red block can exit on the right.',
-            illustrationEmoji: '🚪',
-          ),
-          const TutorialStep(
-            title: '↕️ Block Movement',
-            description: 'Vertical blocks can only slide up/down, and horizontal blocks can only slide left/right. Blocks cannot rotate.',
-            illustrationEmoji: '↔️',
-          ),
-          const TutorialStep(
-            title: '🧠 Solve the Jam',
-            description: 'Plan your moves carefully to unlock the red block and slide it completely out of the escape slot!',
-            illustrationEmoji: '🧠',
-          ),
-        ];
-      case 'word_salad':
-        return [
-          const TutorialStep(
-            title: '🥗 Unscramble Letters',
-            description: 'A circular salad bowl of letters will appear. Your goal is to unscramble them to spell words.',
-            illustrationEmoji: '🥗',
-          ),
-          const TutorialStep(
-            title: '🅰️ Tap to Spell',
-            description: 'Tap letters in the bowl to spell. If you make a mistake, tap a letter in the target slots to remove it and try again.',
-            illustrationEmoji: '🅰️',
-          ),
-          const TutorialStep(
-            title: '🎯 Check off Target Words',
-            description: 'Find all target words matching the category shown at the top of the level to win!',
-            illustrationEmoji: '🎯',
           ),
         ];
       default:

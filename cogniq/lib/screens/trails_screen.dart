@@ -22,6 +22,13 @@ class TrailStyle {
 
 const List<TrailStyle> kAllTrails = [
   TrailStyle(
+    id: 'none',
+    name: 'No Trail',
+    description: 'Disables swipe trails entirely.',
+    emoji: '🚫',
+    previewColors: [Colors.transparent, Colors.transparent, Colors.transparent],
+  ),
+  TrailStyle(
     id: 'accent',
     name: 'Game Accent',
     description: 'Matches the active game\'s signature color. A clean, single-tone trail.',
@@ -80,9 +87,20 @@ class TrailsScreen extends StatefulWidget {
 }
 
 class _TrailsScreenState extends State<TrailsScreen> {
-  String _activeStyle = 'accent';
+  String _activeStyle = 'none';
   bool _loading = true;
   int _globalClears = 0;
+  String? _customColorHex;
+
+  final List<Color> _accentColors = const [
+    Color(0xFFA68B8A), // Original Mauve (default)
+    Color(0xFF8F9A86), // Sage
+    Color(0xFFE57373), // Coral/Red
+    Color(0xFF4FC3F7), // Light Blue
+    Color(0xFF81C784), // Light Green
+    Color(0xFFFFD54F), // Amber
+    Color(0xFFBA68C8), // Violet
+  ];
 
   @override
   void initState() {
@@ -92,8 +110,10 @@ class _TrailsScreenState extends State<TrailsScreen> {
 
   int getRequiredClears(String styleId) {
     switch (styleId) {
-      case 'accent':
+      case 'none':
         return 0;
+      case 'accent':
+        return 30;
       case 'pastel':
         return 60;
       case 'sparkle':
@@ -112,12 +132,14 @@ class _TrailsScreenState extends State<TrailsScreen> {
   Future<void> _loadState() async {
     final prefs = await SharedPreferences.getInstance();
     final clears = prefs.getInt('global_level_cleared_count') ?? 0;
-    final style = prefs.getString('swipe_trail_style') ?? 'accent';
+    final style = prefs.getString('swipe_trail_style') ?? 'none';
+    final hex = prefs.getString('swipe_trail_custom_color');
 
     if (mounted) {
       setState(() {
         _globalClears = clears;
         _activeStyle = style;
+        _customColorHex = hex;
         _loading = false;
       });
     }
@@ -137,6 +159,18 @@ class _TrailsScreenState extends State<TrailsScreen> {
       });
     }
     SwipeTrailOverlay.styleNotifier.value = styleId;
+  }
+
+  Future<void> _selectCustomColor(Color color) async {
+    final prefs = await SharedPreferences.getInstance();
+    final hexString = color.value.toString();
+    await prefs.setString('swipe_trail_custom_color', hexString);
+    if (mounted) {
+      setState(() {
+        _customColorHex = hexString;
+      });
+    }
+    SwipeTrailOverlay.customColorNotifier.value = hexString;
   }
 
   @override
@@ -283,12 +317,18 @@ class _TrailsScreenState extends State<TrailsScreen> {
                     borderRadius: BorderRadius.circular(12),
                     gradient: trail.id == 'sparkle'
                         ? null
-                        : LinearGradient(
-                            colors: trail.previewColors,
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                    color: trail.id == 'sparkle' ? const Color(0xFF2A2520) : null,
+                        : (trail.id == 'accent' && _customColorHex != null
+                            ? null
+                            : LinearGradient(
+                                colors: trail.previewColors,
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )),
+                    color: trail.id == 'sparkle'
+                        ? const Color(0xFF2A2520)
+                        : (trail.id == 'accent' && _customColorHex != null
+                            ? Color(int.parse(_customColorHex!))
+                            : null),
                   ),
                   child: trail.id == 'sparkle'
                       ? Center(
@@ -348,6 +388,68 @@ class _TrailsScreenState extends State<TrailsScreen> {
                           height: 1.3,
                         ),
                       ),
+                      if (trail.id == 'accent' && isActive) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Choose Accent Color:',
+                          style: GoogleFonts.outfit(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: context.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          height: 32,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _accentColors.length,
+                            separatorBuilder: (ctx, idx) => const SizedBox(width: 8),
+                            itemBuilder: (context, cIdx) {
+                              final color = _accentColors[cIdx];
+                              final isSelected = _customColorHex == color.value.toString() ||
+                                  (_customColorHex == null && cIdx == 0);
+                              return GestureDetector(
+                                onTap: () => _selectCustomColor(color),
+                                child: Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? (Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.white
+                                              : Colors.black)
+                                          : Colors.transparent,
+                                      width: 2.0,
+                                    ),
+                                    boxShadow: isSelected
+                                        ? [
+                                            BoxShadow(
+                                              color: color.withOpacity(0.4),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            )
+                                          ]
+                                        : null,
+                                  ),
+                                  child: isSelected
+                                      ? Icon(
+                                          Icons.done,
+                                          color: color.computeLuminance() > 0.6
+                                              ? Colors.black87
+                                              : Colors.white,
+                                          size: 16,
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

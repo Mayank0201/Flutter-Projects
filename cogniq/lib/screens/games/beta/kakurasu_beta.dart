@@ -9,34 +9,83 @@ class KakurasuBetaScreen extends StatefulWidget {
   State<KakurasuBetaScreen> createState() => _KakurasuBetaScreenState();
 }
 class _KakurasuBetaScreenState extends State<KakurasuBetaScreen> {
+  final List<List<bool>> _solutions = [
+    [false, false, true, false, false, true, true, true, true],
+    [false, false, true, false, true, false, true, false, false],
+    [false, false, true, false, true, false, true, false, true],
+    [false, false, true, false, true, false, true, true, false],
+    [false, false, true, false, true, false, true, true, true]
+  ];
+
   int _currentLevel = 0;
   bool _isSuccess = false;
   List<bool> _shaded = List.filled(9, false);
-  List<int> _rowTargets = [3, 2, 4];
-  List<int> _colTargets = [2, 3, 4];
+  List<int> _rowTargets = [3, 3, 6];
+  List<int> _colTargets = [3, 3, 6];
 
   @override
   void initState() {
     super.initState();
     _loadLevel();
   }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
       _shaded = List.filled(9, false);
       if (_currentLevel == 0) {
-        _rowTargets = [3, 2, 4]; _colTargets = [2, 3, 4];
+        _rowTargets = [3, 3, 6]; _colTargets = [3, 3, 6];
       } else if (_currentLevel == 1) {
-        _rowTargets = [1, 5, 2]; _colTargets = [4, 1, 3];
+        _rowTargets = [3, 2, 1]; _colTargets = [3, 2, 1];
       } else if (_currentLevel == 2) {
-        _rowTargets = [4, 2, 5]; _colTargets = [3, 5, 3];
+        _rowTargets = [3, 2, 4]; _colTargets = [3, 2, 4];
       } else if (_currentLevel == 3) {
-        _rowTargets = [2, 4, 3]; _colTargets = [5, 2, 2];
+        _rowTargets = [3, 2, 3]; _colTargets = [3, 5, 1];
       } else {
-        _rowTargets = [3, 3, 3]; _colTargets = [3, 3, 3];
+        _rowTargets = [3, 2, 6]; _colTargets = [3, 5, 4];
       }
     });
   }
+
+  void _showHint() {
+    final sol = _solutions[_currentLevel];
+    int hintCell = -1;
+    for (int i = 0; i < _shaded.length; i++) {
+      if (_shaded[i] != sol[i]) {
+        hintCell = i;
+        break;
+      }
+    }
+    if (hintCell != -1) {
+      setState(() {
+        _shaded[hintCell] = sol[hintCell];
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hint placed!')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Board matches correct solution!')));
+    }
+  }
+
+  void _showInstructions() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Instructions', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Text(
+          '1. Shade cells so that weighted row and column targets match.\n\n2. Column weights are 1, 2, 3 (from left to right).\n\n3. Row weights are 1, 2, 3 (from top to bottom).',
+          style: GoogleFonts.outfit(color: context.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Got it', style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _onLevelCleared() async {
     final prefs = await SharedPreferences.getInstance();
     int highest = prefs.getInt('beta_level_kakurasu') ?? 0;
@@ -45,16 +94,7 @@ class _KakurasuBetaScreenState extends State<KakurasuBetaScreen> {
     }
     setState(() => _isSuccess = true);
   }
-  void _nextLevel() {
-    if (_currentLevel < 4) {
-      setState(() {
-        _currentLevel++;
-        _loadLevel();
-      });
-    } else {
-      Navigator.pop(context);
-    }
-  }
+
   void _checkSolution() {
     bool isValid = true;
     for (int r = 0; r < 3; r++) {
@@ -74,7 +114,18 @@ class _KakurasuBetaScreenState extends State<KakurasuBetaScreen> {
     if (isValid) {
       _onLevelCleared();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Target sums not matched!')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sums do not match targets!')));
+    }
+  }
+
+  void _nextLevel() {
+    if (_currentLevel < 4) {
+      setState(() {
+        _currentLevel++;
+        _loadLevel();
+      });
+    } else {
+      Navigator.pop(context);
     }
   }
 
@@ -86,6 +137,16 @@ class _KakurasuBetaScreenState extends State<KakurasuBetaScreen> {
         title: Text('Kakurasu', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Instructions',
+            onPressed: _showInstructions,
+          ),
+          IconButton(
+            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
+            tooltip: 'Hint',
+            onPressed: _showHint,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(child: Text('Level ${_currentLevel + 1}/5', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),
@@ -115,22 +176,23 @@ class _KakurasuBetaScreenState extends State<KakurasuBetaScreen> {
                             itemCount: 25,
                             itemBuilder: (context, idx) {
                               int r = idx ~/ 5; int c = idx % 5;
-                              // Row indices: Col 1-3 has values 1-3. Col 4 is target, Col 0 is indicator.
                               if (r == 0 || r == 4 || c == 0 || c == 4) {
                                 if (r == 0 && c > 0 && c < 4) return Center(child: Text('$c', style: GoogleFonts.spaceGrotesk(color: Colors.grey)));
+                                if (r == 4 && c > 0 && c < 4) return Center(child: Text('${_colTargets[c - 1]}', style: GoogleFonts.spaceGrotesk(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve)));
                                 if (c == 0 && r > 0 && r < 4) return Center(child: Text('$r', style: GoogleFonts.spaceGrotesk(color: Colors.grey)));
-                                if (r > 0 && r < 4 && c == 4) return Center(child: Text('${_rowTargets[r - 1]}', style: GoogleFonts.spaceGrotesk(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold)));
-                                if (c > 0 && c < 4 && r == 4) return Center(child: Text('${_colTargets[c - 1]}', style: GoogleFonts.spaceGrotesk(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold)));
+                                if (c == 4 && r > 0 && r < 4) return Center(child: Text('${_rowTargets[r - 1]}', style: GoogleFonts.spaceGrotesk(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve)));
                                 return const SizedBox.shrink();
                               }
                               int gridIdx = (r - 1) * 3 + (c - 1);
-                              bool shade = _shaded[gridIdx];
+                              final isShaded = _shaded[gridIdx];
                               return GestureDetector(
-                                onTap: () => setState(() => _shaded[gridIdx] = !_shaded[gridIdx]),
+                                onTap: () => setState(() {
+                                  _shaded[gridIdx] = !isShaded;
+                                }),
                                 child: Container(
                                   margin: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: shade ? AppTheme.dustyMauve : context.bgSurface,
+                                    color: isShaded ? AppTheme.dustyMauve : context.bgSurface,
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(color: Colors.grey.shade800),
                                   ),
@@ -139,45 +201,36 @@ class _KakurasuBetaScreenState extends State<KakurasuBetaScreen> {
                             },
                           ),
                         ),
+                        const SizedBox(height: 32),
+                        ElevatedButton(
+                          onPressed: _checkSolution,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.dustyMauve,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                          ),
+                          child: Text('Check Grid', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                        ),
                       ],
                     ),
                   ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: context.bgCard, foregroundColor: context.textPrimary),
-                      onPressed: _loadLevel, icon: const Icon(Icons.refresh), label: const Text('Reset'),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve, foregroundColor: Colors.white),
-                      onPressed: _checkSolution, icon: const Icon(Icons.check), label: const Text('Check'),
-                    ),
-                  ],
                 ),
               ],
             ),
           ),
           if (_isSuccess)
-            Container(
-              color: Colors.black.withOpacity(0.6),
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withOpacity(0.8),
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                      const SizedBox(height: 16),
-                      Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
+                      Text('Correct!', style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.softSage)),
+                      const SizedBox(height: 24),
                       ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve, foregroundColor: Colors.white),
                         onPressed: _nextLevel,
-                        child: Text(_currentLevel < 4 ? 'Next Level' : 'Finish'),
+                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+                        child: Text('Next Level', style: GoogleFonts.outfit(color: Colors.white)),
                       ),
                     ],
                   ),

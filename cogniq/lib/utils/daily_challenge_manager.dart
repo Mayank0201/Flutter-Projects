@@ -132,11 +132,11 @@ class DailyChallengeManager {
         modifierType: 'mirror',
       ),
       hard: _ChallengeData(
-        gameId: 'nonogram',
+        gameId: 'queens',
         difficulty: 'Hard',
-        levelIndex: 41,
+        levelIndex: 10,
         modifierName: 'Reflected Matrix',
-        modifierDescription: 'The row and column clues are flipped (left-to-right and top-to-bottom). Deduce the grid pattern.',
+        modifierDescription: 'The grid is visually flipped left-to-right. Place stars avoiding overlaps.',
         modifierType: 'mirror',
       ),
     ),
@@ -292,11 +292,11 @@ class DailyChallengeManager {
         modifierType: 'zoom',
       ),
       medium: _ChallengeData(
-        gameId: 'nonogram',
+        gameId: 'sudoku',
         difficulty: 'Medium',
-        levelIndex: 42,
+        levelIndex: 10,
         modifierName: 'Cropped Clues',
-        modifierDescription: 'Clue headers are only shown for the active row and column. You must solve it without seeing all headers at once.',
+        modifierDescription: 'A small portion of the board is zoomed in. Solve the grid.',
         modifierType: 'zoom',
       ),
       hard: _ChallengeData(
@@ -341,11 +341,11 @@ class DailyChallengeManager {
     _DayData(
       theme: 'Spy Day',
       easy: _ChallengeData(
-        gameId: 'wordsearch',
+        gameId: 'spellingbee',
         difficulty: 'Easy',
         levelIndex: 1,
         modifierName: 'Encrypted Words',
-        modifierDescription: 'Target words are written backwards in the list. Scan and find them in the grid.',
+        modifierDescription: 'Words in the list are scrambled. Scan and solve them inside the Hive.',
         modifierType: 'spy',
       ),
       medium: _ChallengeData(
@@ -498,11 +498,11 @@ class DailyChallengeManager {
         modifierType: 'gravity',
       ),
       hard: _ChallengeData(
-        gameId: 'nonogram',
+        gameId: 'sudoku',
         difficulty: 'Hard',
-        levelIndex: 43,
+        levelIndex: 12,
         modifierName: 'Sinking Clues',
-        modifierDescription: 'The row/column clues fall to the bottom edge of their rows/columns. Solve the board.',
+        modifierDescription: 'Solve the grid while numbers sink downwards.',
         modifierType: 'gravity',
       ),
     ),
@@ -566,11 +566,11 @@ class DailyChallengeManager {
     _DayData(
       theme: 'Spotlight Day',
       easy: _ChallengeData(
-        gameId: 'wordsearch',
+        gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
         modifierName: 'Flashlight Hunt',
-        modifierDescription: 'The word search board is pitch black except for a circular beam centered on your touch pointer. Find all words.',
+        modifierDescription: 'The board is pitch black except for a circular beam centered on your touch pointer. Find the odd color.',
         modifierType: 'spotlight',
         extraParams: {'radius': 80.0},
       ),
@@ -709,11 +709,11 @@ class DailyChallengeManager {
     _DayData(
       theme: 'Encryption Day',
       easy: _ChallengeData(
-        gameId: 'wordsearch',
+        gameId: 'sudoku',
         difficulty: 'Easy',
         levelIndex: 1,
         modifierName: 'Rot13 Search',
-        modifierDescription: 'Words in the target list are encrypted with a simple alphabetical shift. Decrypt and find them.',
+        modifierDescription: 'Solve the Sudoku grid with encrypted clues.',
         modifierType: 'encryption',
       ),
       medium: _ChallengeData(
@@ -745,11 +745,11 @@ class DailyChallengeManager {
         modifierType: 'spotlight2',
       ),
       medium: _ChallengeData(
-        gameId: 'wordsearch',
+        gameId: 'spellingbee',
         difficulty: 'Medium',
         levelIndex: 12,
         modifierName: 'Spotlight Scanner',
-        modifierDescription: 'Scan the board using only a moving spotlight that sweeps horizontally back and forth.',
+        modifierDescription: 'Scan the honeycomb letters using only a moving spotlight that sweeps horizontally.',
         modifierType: 'spotlight2',
       ),
       hard: _ChallengeData(
@@ -781,11 +781,11 @@ class DailyChallengeManager {
         modifierType: 'mutation',
       ),
       hard: _ChallengeData(
-        gameId: 'nonogram',
+        gameId: 'sudoku',
         difficulty: 'Hard',
         levelIndex: 5,
         modifierName: 'Mutating Clues',
-        modifierDescription: 'Marking an incorrect cell greys out (dims) the clue number for that row, making it unreadable. Avoid mistakes to keep your clues visible.',
+        modifierDescription: 'Making a mistake dims the number hints. Avoid errors to keep hints visible.',
         modifierType: 'mutation',
       ),
     ),
@@ -877,11 +877,11 @@ class DailyChallengeManager {
     _DayData(
       theme: 'Matrix Day',
       easy: _ChallengeData(
-        gameId: 'nonogram',
+        gameId: 'chimp',
         difficulty: 'Easy',
         levelIndex: 1,
         modifierName: 'Binary Board',
-        modifierDescription: 'Column and row clues are shown in binary notation (e.g. 11 instead of 3).',
+        modifierDescription: 'The numbers are shown in binary notation (e.g. 11 instead of 3).',
         modifierType: 'matrix',
       ),
       medium: _ChallengeData(

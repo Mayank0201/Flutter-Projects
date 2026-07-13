@@ -97,20 +97,17 @@ class AppTheme {
       case 'crossclimb':  return dustyMauve;
       case 'queens':      return deepLavender;
       case 'chimp':       return terracotta;
-      case 'connections': return dustyMauve;
       case 'flagle':      return slateBlue;
       case 'wordbuilder': return softSage;
       case 'memory':      return roseGold;
       case 'spellingbee': return warmAmber;
       case 'sudoku':      return deepLavender;
-      case 'wordsearch':  return softSage;
       case 'minesweeper': return terracotta;
       case 'reaction':    return roseGold;
       case 'numbermemory': return slateBlue;
       case 'sequence':    return dustyMauve;
       case 'oddcolor':    return warmAmber;
       case 'hue':         return deepLavender;
-      case 'nonogram':    return softSage;
       case 'pattern_lock': return terracotta;
       case 'colour_link':  return roseGold;
       case 'color_flood':  return warmAmber;
@@ -205,8 +202,6 @@ const Map<String, GameColors> kGameColors = {
   'crossclimb':  GameColors(primary: AppTheme.dustyMauve,   dark: Color(0xFF5E4860), emoji: '', name: 'Word Climb',   description: ''),
   'queens':      GameColors(primary: AppTheme.deepLavender, dark: Color(0xFF4A4278), emoji: '♛', name: 'Star Battle',  description: ''),
   'chimp':       GameColors(primary: AppTheme.terracotta,   dark: Color(0xFF6E4838), emoji: '', name: 'Chimp Test',   description: ''),
-  'connections': GameColors(primary: AppTheme.dustyMauve,   dark: Color(0xFF5E4860), emoji: '', name: 'Categories',   description: ''),
   'oddcolor':    GameColors(primary: AppTheme.warmAmber,     dark: Color(0xFF8A6020), emoji: '🎨', name: 'Odd Color Out', description: ''),
   'hue':         GameColors(primary: AppTheme.deepLavender, dark: Color(0xFF4A4278), emoji: '🌈', name: 'Spectrum',    description: ''),
-  'nonogram':    GameColors(primary: AppTheme.softSage,      dark: Color(0xFF4B6B4E), emoji: '🧩', name: 'Nonogram',      description: 'Fill grid cells to match row and column clues'),
 };
