@@ -31,6 +31,10 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
   late List<int> _shadingState; // 0: empty, 1: shaded, 2: X
   late List<int> _objectState; // 0: empty, 1: tree, 2: tent, 3: water
 
+  // Stitches state
+  List<List<int>> _stitches = [];
+  int? _selectedStitchCell;
+
   // Word input demo state
   String _currentWord = "";
   final List<String> _submittedWords = [];
@@ -80,6 +84,8 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
       _isSuccess = false;
       _currentWord = "";
       _submittedWords.clear();
+      _stitches = [];
+      _selectedStitchCell = null;
 
       // Initialize grids from initialGrid or defaults
       _gridInt = List.filled(16, 0);
@@ -99,6 +105,14 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
         for (int i = 0; i < 16 && i < lvl.initialGrid.length; i++) {
           if (lvl.initialGrid[i] is int) {
             _objectState[i] = lvl.initialGrid[i] as int;
+          }
+        }
+      }
+
+      if (widget.uiType == 'yinyang' && lvl.initialGrid.isNotEmpty) {
+        for (int i = 0; i < 16 && i < lvl.initialGrid.length; i++) {
+          if (lvl.initialGrid[i] is int) {
+            _gridInt[i] = lvl.initialGrid[i] as int;
           }
         }
       }
@@ -133,6 +147,47 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
             break;
           }
         }
+      }
+    } else if (widget.uiType == 'yinyang') {
+      if (lvl.solution is List) {
+        final solList = lvl.solution as List;
+        correct = true;
+        for (int i = 0; i < 16; i++) {
+          if (_gridInt[i] != solList[i]) {
+            correct = false;
+            break;
+          }
+        }
+      }
+    } else if (widget.uiType == 'slant') {
+      if (lvl.solution is List) {
+        final solList = lvl.solution as List;
+        correct = true;
+        for (int i = 0; i < 16; i++) {
+          if (_gridInt[i] != solList[i]) {
+            correct = false;
+            break;
+          }
+        }
+      }
+    } else if (widget.uiType == 'stitches') {
+      if (lvl.solution is List) {
+        final solList = lvl.solution as List;
+        Set<String> solSet = {};
+        for (var pair in solList) {
+          if (pair is List && pair.length == 2) {
+            int a = pair[0] as int;
+            int b = pair[1] as int;
+            solSet.add(a < b ? "$a-$b" : "$b-$a");
+          }
+        }
+        Set<String> playerSet = {};
+        for (var pair in _stitches) {
+          int a = pair[0];
+          int b = pair[1];
+          playerSet.add(a < b ? "$a-$b" : "$b-$a");
+        }
+        correct = solSet.length == playerSet.length && solSet.containsAll(playerSet);
       }
     } else if (widget.uiType == 'latin_square') {
       if (lvl.solution is List) {
@@ -220,6 +275,50 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
           });
           placed = true;
           break;
+        }
+      }
+    } else if (widget.uiType == 'yinyang' && lvl.solution is List) {
+      final solList = lvl.solution as List;
+      for (int i = 0; i < 16; i++) {
+        if (_gridInt[i] != solList[i]) {
+          setState(() {
+            _gridInt[i] = solList[i] as int;
+          });
+          placed = true;
+          break;
+        }
+      }
+    } else if (widget.uiType == 'slant' && lvl.solution is List) {
+      final solList = lvl.solution as List;
+      for (int i = 0; i < 16; i++) {
+        if (_gridInt[i] != solList[i]) {
+          setState(() {
+            _gridInt[i] = solList[i] as int;
+          });
+          placed = true;
+          break;
+        }
+      }
+    } else if (widget.uiType == 'stitches' && lvl.solution is List) {
+      final solList = lvl.solution as List;
+      Set<String> playerSet = {};
+      for (var pair in _stitches) {
+        int a = pair[0];
+        int b = pair[1];
+        playerSet.add(a < b ? "$a-$b" : "$b-$a");
+      }
+      for (var pair in solList) {
+        if (pair is List && pair.length == 2) {
+          int a = pair[0] as int;
+          int b = pair[1] as int;
+          String key = a < b ? "$a-$b" : "$b-$a";
+          if (!playerSet.contains(key)) {
+            setState(() {
+              _stitches.add([a, b]);
+            });
+            placed = true;
+            break;
+          }
         }
       }
     } else if (widget.uiType == 'latin_square' && lvl.solution is List) {
@@ -319,33 +418,39 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
       case 'shading':
         return Column(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'Row Counts: ',
-                  style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: context.textSecondary),
-                ),
-                Text(
-                  lvl.rowCounts.join(', '),
-                  style: GoogleFonts.spaceGrotesk(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve),
-                ),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'Col Counts: ',
-                  style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: context.textSecondary),
-                ),
-                Text(
-                  lvl.colCounts.join(', '),
-                  style: GoogleFonts.spaceGrotesk(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
+            if (widget.gameName != 'Tapa' && widget.gameName != 'LITS' && widget.gameName != 'Norinori' &&
+                widget.gameName != 'Yin-Yang' && widget.gameName != 'Kuromasu' && widget.gameName != 'Heyawake' &&
+                widget.gameName != 'Nurimisaki' && widget.gameName != 'Kurotto' && widget.gameName != 'Mosaic' &&
+                widget.gameName != 'Cave (Corral)' && widget.gameName != 'Slant' && widget.gameName != 'Stitches' &&
+                widget.gameName != 'Aqre' && widget.gameName != 'Static Minesweeper' && widget.gameName != 'Nurimaze') ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Row Counts: ',
+                    style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: context.textSecondary),
+                  ),
+                  Text(
+                    lvl.rowCounts.join(', '),
+                    style: GoogleFonts.spaceGrotesk(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Col Counts: ',
+                    style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: context.textSecondary),
+                  ),
+                  Text(
+                    lvl.colCounts.join(', '),
+                    style: GoogleFonts.spaceGrotesk(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.dustyMauve),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
             SizedBox(
               width: 220,
               height: 220,
@@ -353,21 +458,181 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 4,
-                  mainAxisSpacing: 4,
-                  crossAxisSpacing: 4,
+                  mainAxisSpacing: 0,
+                  crossAxisSpacing: 0,
                 ),
                 itemCount: 16,
                 itemBuilder: (context, idx) {
                   final state = _shadingState[idx];
-                  Color cellBg = context.bgSurface;
+                  
+                  // Region borders
+                  Border? cellBorder;
+                  if (lvl.regions != null && lvl.regions!.length == 16) {
+                    final currentRegion = lvl.regions![idx];
+                    final double thickWidth = 2.5;
+                    final double thinWidth = 0.5;
+                    final Color borderColor = context.textPrimary;
+                    final Color thinColor = context.textMuted.withAlpha(40);
+
+                    final hasTop = idx < 4 || lvl.regions![idx - 4] != currentRegion;
+                    final hasBottom = idx >= 12 || lvl.regions![idx + 4] != currentRegion;
+                    final hasLeft = idx % 4 == 0 || lvl.regions![idx - 1] != currentRegion;
+                    final hasRight = idx % 4 == 3 || lvl.regions![idx + 1] != currentRegion;
+
+                    cellBorder = Border(
+                      top: BorderSide(color: hasTop ? borderColor : thinColor, width: hasTop ? thickWidth : thinWidth),
+                      bottom: BorderSide(color: hasBottom ? borderColor : thinColor, width: hasBottom ? thickWidth : thinWidth),
+                      left: BorderSide(color: hasLeft ? borderColor : thinColor, width: hasLeft ? thickWidth : thinWidth),
+                      right: BorderSide(color: hasRight ? borderColor : thinColor, width: hasRight ? thickWidth : thinWidth),
+                    );
+                  } else {
+                    cellBorder = Border.all(color: context.textMuted.withAlpha(40));
+                  }
+
+                  // Room Clue
+                  bool isRoomClueCell = false;
+                  String roomClueText = "";
+                  if (lvl.regions != null && lvl.regionClues != null) {
+                    final regionId = lvl.regions![idx];
+                    final regionIndices = [
+                      for (int i = 0; i < 16; i++)
+                        if (lvl.regions![i] == regionId) i
+                    ];
+                    if (regionIndices.isNotEmpty && regionIndices.first == idx) {
+                      if (lvl.regionClues!.containsKey(regionId)) {
+                        isRoomClueCell = true;
+                        roomClueText = lvl.regionClues![regionId]!;
+                      }
+                    }
+                  }
+
+                  // Check if cell is a locked clue
+                  final hasClue = lvl.initialGrid.isNotEmpty && idx < lvl.initialGrid.length &&
+                      lvl.initialGrid[idx] != 0 && lvl.initialGrid[idx] != "";
+                  final isLocked = hasClue && widget.gameName != 'Mosaic';
+
+                  Color cellBg = isLocked ? context.bgCard : context.bgSurface;
                   Widget? child;
+
                   if (state == 1) {
                     cellBg = AppTheme.dustyMauve;
                   } else if (state == 2) {
-                    child = Icon(Icons.close_rounded, size: 20, color: context.textPrimary);
+                    child = Icon(Icons.close_rounded, size: 16, color: context.textMuted);
                   }
+
+                  // Specific game cell contents
+                  if (hasClue) {
+                    final clueVal = lvl.initialGrid[idx];
+                    if (widget.gameName == 'Tapa') {
+                      child = Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: context.bgSurface,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppTheme.dustyMauve.withAlpha(80)),
+                        ),
+                        child: Center(
+                          child: Text(
+                            clueVal.toString(),
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: context.textPrimary,
+                            ),
+                          ),
+                        ),
+                      );
+                    } else if (widget.gameName == 'Kuromasu') {
+                      child = Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: context.textPrimary, width: 1.5),
+                        ),
+                        child: Center(
+                          child: Text(
+                            clueVal.toString(),
+                            style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: context.textPrimary,
+                            ),
+                          ),
+                        ),
+                      );
+                    } else if (widget.gameName == 'Nurimisaki' || widget.gameName == 'Kurotto') {
+                      child = Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppTheme.dustyMauve, width: 1.5),
+                        ),
+                        child: Center(
+                          child: Text(
+                            clueVal.toString(),
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.dustyMauve,
+                            ),
+                          ),
+                        ),
+                      );
+                    } else if (widget.gameName == 'Mosaic') {
+                      child = Center(
+                        child: Text(
+                          clueVal.toString(),
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: state == 1 ? Colors.white : context.textPrimary,
+                          ),
+                        ),
+                      );
+                    } else if (widget.gameName == 'Cave (Corral)') {
+                      child = Center(
+                        child: Text(
+                          clueVal.toString(),
+                          style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: context.textPrimary,
+                          ),
+                        ),
+                      );
+                    } else if (widget.gameName == 'Static Minesweeper') {
+                      child = Center(
+                        child: Text(
+                          clueVal.toString(),
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: clueVal == 1 ? Colors.blue : (clueVal == 2 ? Colors.green : Colors.red),
+                          ),
+                        ),
+                      );
+                    } else if (widget.gameName == 'Nurimaze') {
+                      if (clueVal == 'S') {
+                        child = Text('S', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 16));
+                      } else if (clueVal == 'G') {
+                        child = Text('G', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 16));
+                      } else if (clueVal == 'C') {
+                        child = Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: context.textMuted)),
+                        );
+                      } else if (clueVal == 'T') {
+                        cellBg = AppTheme.dustyMauve;
+                        child = const Icon(Icons.change_history, size: 12, color: Colors.white);
+                      }
+                    }
+                  }
+
                   return GestureDetector(
-                    onTap: () {
+                    onTap: isLocked ? null : () {
                       setState(() {
                         _shadingState[idx] = (_shadingState[idx] + 1) % 3;
                       });
@@ -375,16 +640,275 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
                     child: Container(
                       decoration: BoxDecoration(
                         color: cellBg,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: context.textMuted.withAlpha(40)),
+                        border: cellBorder,
                       ),
-                      child: Center(child: child),
+                      child: Stack(
+                        children: [
+                          if (isRoomClueCell)
+                            Positioned(
+                              top: 2,
+                              left: 2,
+                              child: Text(
+                                roomClueText,
+                                style: GoogleFonts.outfit(fontSize: 8, color: context.textSecondary, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          Center(child: child),
+                        ],
+                      ),
                     ),
                   );
                 },
               ),
             ),
           ],
+        );
+      case 'yinyang':
+        return SizedBox(
+          width: 220,
+          height: 220,
+          child: GridView.builder(
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+            ),
+            itemCount: 16,
+            itemBuilder: (context, idx) {
+              final val = _gridInt[idx];
+              final isGiven = lvl.initialGrid.isNotEmpty && idx < lvl.initialGrid.length && lvl.initialGrid[idx] != 0;
+
+              Widget? circle;
+              if (val == 1) {
+                circle = Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: context.textPrimary,
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 2, offset: const Offset(1, 1))
+                    ],
+                  ),
+                );
+              } else if (val == 2) {
+                circle = Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    border: Border.all(color: context.textPrimary, width: 2),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withAlpha(50), blurRadius: 2, offset: const Offset(1, 1))
+                    ],
+                  ),
+                );
+              }
+
+              return GestureDetector(
+                onTap: isGiven ? null : () {
+                  setState(() {
+                    _gridInt[idx] = (_gridInt[idx] + 1) % 3;
+                  });
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: context.bgSurface,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: context.textMuted.withAlpha(40)),
+                  ),
+                  child: Center(child: circle),
+                ),
+              );
+            },
+          ),
+        );
+      case 'slant':
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final double boardSize = 220.0;
+            final double cellWidth = boardSize / 4;
+            
+            return SizedBox(
+              width: boardSize,
+              height: boardSize,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4,
+                      mainAxisSpacing: 0,
+                      crossAxisSpacing: 0,
+                    ),
+                    itemCount: 16,
+                    itemBuilder: (context, idx) {
+                      final val = _gridInt[idx];
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _gridInt[idx] = (_gridInt[idx] + 1) % 3;
+                          });
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: context.bgSurface,
+                            border: Border.all(color: context.textMuted.withAlpha(40), width: 0.5),
+                          ),
+                          child: CustomPaint(
+                            painter: SlantPainter(val, AppTheme.dustyMauve),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  if (lvl.vertexClues != null)
+                    ...lvl.vertexClues!.entries.map((entry) {
+                      final vIdx = entry.key;
+                      final clue = entry.value;
+                      final vRow = vIdx ~/ 5;
+                      final vCol = vIdx % 5;
+                      
+                      final x = vCol * cellWidth;
+                      final y = vRow * cellWidth;
+                      
+                      return Positioned(
+                        left: x - 9,
+                        top: y - 9,
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: context.textPrimary, width: 1.5),
+                          ),
+                          child: Center(
+                            child: Text(
+                              clue.toString(),
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: context.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            );
+          }
+        );
+      case 'stitches':
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final double boardSize = 220.0;
+            final double cellWidth = boardSize / 4;
+            
+            return SizedBox(
+              width: boardSize,
+              height: boardSize,
+              child: Stack(
+                children: [
+                  GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4,
+                      mainAxisSpacing: 0,
+                      crossAxisSpacing: 0,
+                    ),
+                    itemCount: 16,
+                    itemBuilder: (context, idx) {
+                      Border? cellBorder;
+                      if (lvl.regions != null && lvl.regions!.length == 16) {
+                        final currentRegion = lvl.regions![idx];
+                        final double thickWidth = 2.5;
+                        final double thinWidth = 0.5;
+                        final Color borderColor = context.textPrimary;
+                        final Color thinColor = context.textMuted.withAlpha(40);
+
+                        final hasTop = idx < 4 || lvl.regions![idx - 4] != currentRegion;
+                        final hasBottom = idx >= 12 || lvl.regions![idx + 4] != currentRegion;
+                        final hasLeft = idx % 4 == 0 || lvl.regions![idx - 1] != currentRegion;
+                        final hasRight = idx % 4 == 3 || lvl.regions![idx + 1] != currentRegion;
+
+                        cellBorder = Border(
+                          top: BorderSide(color: hasTop ? borderColor : thinColor, width: hasTop ? thickWidth : thinWidth),
+                          bottom: BorderSide(color: hasBottom ? borderColor : thinColor, width: hasBottom ? thickWidth : thinWidth),
+                          left: BorderSide(color: hasLeft ? borderColor : thinColor, width: hasLeft ? thickWidth : thinWidth),
+                          right: BorderSide(color: hasRight ? borderColor : thinColor, width: hasRight ? thickWidth : thinWidth),
+                        );
+                      } else {
+                        cellBorder = Border.all(color: context.textMuted.withAlpha(40));
+                      }
+                      
+                      final isSelected = _selectedStitchCell == idx;
+                      
+                      return GestureDetector(
+                        onTap: () {
+                          if (_selectedStitchCell == null) {
+                            setState(() {
+                              _selectedStitchCell = idx;
+                            });
+                          } else if (_selectedStitchCell == idx) {
+                            setState(() {
+                              _selectedStitchCell = null;
+                            });
+                          } else {
+                            final a = _selectedStitchCell!;
+                            final b = idx;
+                            final rowA = a ~/ 4;
+                            final colA = a % 4;
+                            final rowB = b ~/ 4;
+                            final colB = b % 4;
+                            final isAdjacent = (rowA - rowB).abs() + (colA - colB).abs() == 1;
+                            final diffRegion = lvl.regions != null && lvl.regions![a] != lvl.regions![b];
+                            
+                            if (isAdjacent && diffRegion) {
+                              setState(() {
+                                final existingIdx = _stitches.indexWhere((pair) => 
+                                  (pair[0] == a && pair[1] == b) || (pair[0] == b && pair[1] == a));
+                                if (existingIdx != -1) {
+                                  _stitches.removeAt(existingIdx);
+                                } else {
+                                  _stitches.add([a, b]);
+                                }
+                                _selectedStitchCell = null;
+                              });
+                            } else {
+                              setState(() {
+                                _selectedStitchCell = idx;
+                              });
+                            }
+                          }
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.green.withAlpha(40) : context.bgSurface,
+                            border: cellBorder,
+                          ),
+                          child: isSelected 
+                            ? const Center(child: Icon(Icons.circle, size: 8, color: Colors.green))
+                            : null,
+                        ),
+                      );
+                    },
+                  ),
+                  IgnorePointer(
+                    child: CustomPaint(
+                      size: Size(boardSize, boardSize),
+                      painter: StitchPainter(_stitches, cellWidth, AppTheme.dustyMauve),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
         );
       case 'latin_square':
         return Column(
@@ -892,4 +1416,66 @@ class _LogicGridPlaceholderScreenState extends State<LogicGridPlaceholderScreen>
       ),
     );
   }
+}
+
+class SlantPainter extends CustomPainter {
+  final int type; // 0: empty, 1: /, 2: \
+  final Color color;
+  SlantPainter(this.type, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (type == 0) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+    if (type == 1) {
+      canvas.drawLine(Offset(0, size.height), Offset(size.width, 0), paint);
+    } else if (type == 2) {
+      canvas.drawLine(Offset(0, 0), Offset(size.width, size.height), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+class StitchPainter extends CustomPainter {
+  final List<List<int>> stitches;
+  final double cellWidth;
+  final Color color;
+  StitchPainter(this.stitches, this.cellWidth, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 4.0
+      ..strokeCap = StrokeCap.round;
+    final knotPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    for (final stitch in stitches) {
+      final a = stitch[0];
+      final b = stitch[1];
+      final rowA = a ~/ 4;
+      final colA = a % 4;
+      final rowB = b ~/ 4;
+      final colB = b % 4;
+
+      final xA = (colA + 0.5) * cellWidth;
+      final yA = (rowA + 0.5) * cellWidth;
+      final xB = (colB + 0.5) * cellWidth;
+      final yB = (rowB + 0.5) * cellWidth;
+
+      canvas.drawLine(Offset(xA, yA), Offset(xB, yB), paint);
+      canvas.drawCircle(Offset(xA, yA), 4.5, knotPaint);
+      canvas.drawCircle(Offset(xB, yB), 4.5, knotPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

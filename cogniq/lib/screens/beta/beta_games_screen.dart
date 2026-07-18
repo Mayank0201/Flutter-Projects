@@ -319,7 +319,7 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
           gameName: 'Yin-Yang',
           description: 'Fill every cell black or white forming connected groups.',
           category: 'Logic Grids',
-          uiType: 'shading',
+          uiType: 'yinyang',
         ),
       ),
       BetaGameInfo(
@@ -774,7 +774,7 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
           gameName: 'Slant',
           description: 'Fill every cell with diagonal slashes avoiding closed loops.',
           category: 'Logic Grids',
-          uiType: 'shading',
+          uiType: 'slant',
         ),
       ),
       BetaGameInfo(
@@ -787,7 +787,7 @@ class _BetaGamesScreenState extends State<BetaGamesScreen> {
           gameName: 'Stitches',
           description: 'Connect adjacent regions with exactly one stitch pair.',
           category: 'Logic Grids',
-          uiType: 'shading',
+          uiType: 'stitches',
         ),
       ),
       BetaGameInfo(

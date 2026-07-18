@@ -18,7 +18,6 @@ import 'trails_screen.dart';
 import '../widgets/buy_hints_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
 // import 'daily_challenge_test_screen.dart';
-import 'beta/beta_games_screen.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/notification_manager.dart';
 import '../utils/shuffle_manager.dart';
@@ -612,6 +611,7 @@ class _HomeScreenState extends State<HomeScreen>
           }
         })
         .whereType<GameInfo>()
+        .where((g) => !g.isStashed)
         .toList();
 
     _pointBalance = prefs.getInt('points') ?? 0;
@@ -652,7 +652,7 @@ class _HomeScreenState extends State<HomeScreen>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final totalWidth = constraints.maxWidth;
-          final tabWidth = totalWidth / 5;
+          final tabWidth = totalWidth / 4;
 
           return SizedBox(
             height: 52,
@@ -698,13 +698,6 @@ class _HomeScreenState extends State<HomeScreen>
                       Icons.person_outlined,
                       Icons.person,
                       'Profile',
-                      tabWidth,
-                    ),
-                    _buildNavItem(
-                      4,
-                      Icons.bug_report_outlined,
-                      Icons.bug_report,
-                      'Beta',
                       tabWidth,
                     ),
                   ],
@@ -791,8 +784,6 @@ class _HomeScreenState extends State<HomeScreen>
         return _StatsTab(key: ValueKey(_completedCount));
       case 3:
         return const _ProfileTab();
-      case 4:
-        return const BetaGamesScreen();
       default:
         return _buildHomeTab();
     }
