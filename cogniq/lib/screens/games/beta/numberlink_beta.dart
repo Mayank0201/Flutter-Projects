@@ -10,7 +10,6 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../widgets/swipe_trail_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/shuffle_manager.dart';
@@ -64,34 +63,15 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     final savedLvl = prefs.getInt('level_colour_link') ?? 0;
     final hCount = await HintManager.getHints('colour_link');
     
-    final tutorialKey = 'has_seen_tutorial_colour_link';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    
     if (mounted) {
       setState(() {
         _hintCount = hCount;
         _actualGameLevel = savedLvl;
-        if (!hasSeen) {
-          _isTutorialMode = true;
-          _currentLevel = 0;
-        } else {
-          _isTutorialMode = false;
-          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
-        }
+        _isTutorialMode = false;
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
     }
-  }
-
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_colour_link';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
   }
 
   void _loadLevel() {
@@ -678,15 +658,15 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                 },
               ),
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully connected the endpoints and filled the grid."
-                  : "Drag to connect the matching colored dots. Paths cannot cross, and every empty tile must be filled!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully connected the endpoints and filled the grid."
+          //         : "Drag to connect the matching colored dots. Paths cannot cross, and every empty tile must be filled!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     ),

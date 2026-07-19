@@ -5,6 +5,7 @@ import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../utils/rules_helper.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
@@ -12,8 +13,6 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../widgets/game_tutorial_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class ZipLevel {
@@ -69,23 +68,15 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   Future<void> _initLevel() async {
     _hintCount = await HintManager.getHints('zip');
     final prefs = await SharedPreferences.getInstance();
-    _isDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_isDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
     }
-    int savedLevel = prefs.getInt('level_zip') ?? 0;
+    int savedLevel = prefs.getInt(PrefsKeys.gameLevel('zip')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_zip';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_isDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
 
     if (mounted) {
       setState(() {
@@ -95,33 +86,21 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_zip';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _isDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel(prefs);
-    });
-  }
-
   Future<void> _saveState() async {
     final prefs = await SharedPreferences.getInstance();
     final pathStrings = _path.map((p) => '${p.$1},${p.$2}').toList();
-    await prefs.setStringList('zip_path_${_levelIndex}', pathStrings);
+    await prefs.setStringList(PrefsKeys.zipPath(_levelIndex), pathStrings);
   }
 
   Future<void> _clearState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('zip_path_${_levelIndex}');
+    await prefs.remove(PrefsKeys.zipPath(_levelIndex));
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
     if (_isDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_zip', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('zip'), lvl);
     final earned = await HintManager.onLevelCleared('zip');
     final newCount = await HintManager.getHints('zip');
     if (!mounted) return;
@@ -492,7 +471,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         : 'Drag through every cell — hit numbers in order';
     
     if (prefs != null) {
-      final pathStrings = prefs.getStringList('zip_path_${_levelIndex}');
+      final pathStrings = prefs.getStringList(PrefsKeys.zipPath(_levelIndex));
       if (pathStrings != null && pathStrings.isNotEmpty) {
         for (final s in pathStrings) {
           final parts = s.split(',');
@@ -999,15 +978,15 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
             },
           ),
         ),
-      if (_isTutorialMode)
-        InteractiveTutorialOverlay(
-          instruction: _tutorialCompleted
-              ? "Nice! You successfully traced the path and filled the grid."
-              : "Touch the starting tile and drag your finger to trace a continuous path. Visit the waypoints in order!",
-          isCompleted: _tutorialCompleted,
-          onSkip: _finishTutorial,
-          onStartGame: _finishTutorial,
-        ),
+      // if (_isTutorialMode)
+      //   InteractiveTutorialOverlay(
+      //     instruction: _tutorialCompleted
+      //         ? "Nice! You successfully traced the path and filled the grid."
+      //         : "Touch the starting tile and drag your finger to trace a continuous path. Visit the waypoints in order!",
+      //     isCompleted: _tutorialCompleted,
+      //     onSkip: _finishTutorial,
+      //     onStartGame: _finishTutorial,
+      //   ),
     ],
   ),
 );

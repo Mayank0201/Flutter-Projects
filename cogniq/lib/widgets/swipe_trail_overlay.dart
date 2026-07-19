@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/prefs_keys.dart';
 
 class _TrailPoint {
   Offset position;
@@ -97,8 +98,8 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final style = prefs.getString('swipe_trail_style') ?? 'none';
-    final customColorHex = prefs.getString('swipe_trail_custom_color');
+    final style = prefs.getString(PrefsKeys.swipeTrailStyle) ?? 'none';
+    final customColorHex = prefs.getString(PrefsKeys.swipeTrailCustomColor);
 
     int requiredClears = 0;
     switch (style) {
@@ -124,7 +125,7 @@ class _SwipeTrailOverlayState extends State<SwipeTrailOverlay>
         requiredClears = 300;
         break;
     }
-    final clears = prefs.getInt('global_level_cleared_count') ?? 0;
+    final clears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
     final isUnlocked = clears >= requiredClears;
 
     SwipeTrailOverlay.styleNotifier.value = style;

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_keys.dart';
 
 /// Detects if the app was restored from an Android Auto Backup (i.e. reinstalled)
 /// and resets the daily challenge timer accordingly:
@@ -22,14 +23,14 @@ class RestoreManager {
       if (!hasMarker) {
         // Marker is missing — either a fresh install or a restore from backup
         final prefs = await SharedPreferences.getInstance();
-        final day = prefs.getInt('daily_user_progress_day');
+        final day = prefs.getInt(PrefsKeys.dailyUserProgressDay);
 
         if (day != null) {
           // Challenge data exists but marker doesn't → RESTORE detected
           final now = DateTime.now().toUtc();
           final dateStr =
               '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-          final todayStar = prefs.getString('daily_star_for_date_$dateStr');
+          final todayStar = prefs.getString(PrefsKeys.dailyStarForDate(dateStr));
 
           if (todayStar != null) {
             // User has stars for today → give them 8 hours to finish
@@ -37,11 +38,11 @@ class RestoreManager {
             // For 8h remaining: startTime = now - 16h
             final newStart = now.subtract(const Duration(hours: 16));
             await prefs.setString(
-                'daily_challenge_start_time', newStart.toIso8601String());
+                PrefsKeys.dailyChallengeStartTime, newStart.toIso8601String());
           } else {
             // No stars for today → give a full fresh 24-hour window
             await prefs.setString(
-                'daily_challenge_start_time', now.toIso8601String());
+                PrefsKeys.dailyChallengeStartTime, now.toIso8601String());
           }
         }
 

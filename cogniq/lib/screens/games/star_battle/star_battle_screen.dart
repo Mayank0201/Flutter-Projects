@@ -7,12 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../utils/rules_helper.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../widgets/animated_level_indicator.dart';
-import '../../../widgets/game_tutorial_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 class QueensLevel {
   final int n;
@@ -20,7 +19,8 @@ class QueensLevel {
   const QueensLevel({required this.n, required this.regions});
 }
 
-const List<QueensLevel> _kLevels = [
+const List<QueensLevel> _kLevels = [];
+/* const List<QueensLevel> _kLevels_disabled = [
   // Easy (Size 4-5)
   QueensLevel(n: 4, regions: [[0,0,1,1],[0,0,1,1],[2,2,3,3],[2,2,3,3]]),
   QueensLevel(n: 4, regions: [[0,1,1,2],[0,1,2,2],[3,3,2,2],[3,3,3,3]]),
@@ -331,7 +331,7 @@ const List<QueensLevel> _kLevels = [
   QueensLevel(n: 6, regions: [[0,0,0,1,1,1],[0,2,2,1,1,3],[4,2,2,5,5,3],[4,4,2,5,5,3],[4,4,2,2,5,3],[4,4,4,2,5,5]]),
   QueensLevel(n: 7, regions: [[0,0,0,1,1,1,2],[3,0,0,1,4,2,2],[3,3,0,1,4,4,2],[3,3,5,5,4,4,2],[3,5,5,5,5,4,2],[3,6,6,6,6,4,2],[3,6,6,6,6,6,2]]),
   QueensLevel(n: 8, regions: [[0,0,0,0,1,1,1,1],[0,2,2,2,1,3,3,3],[0,2,4,4,1,3,5,5],[0,2,4,6,6,3,5,7],[0,2,4,6,6,3,5,7],[0,2,4,4,1,3,5,5],[0,2,2,2,1,3,3,3],[0,0,0,0,1,1,1,1]]),
-];
+]; */
 
 class StarBattleScreen extends StatefulWidget {
   final int? dailyLevelIndex;
@@ -509,11 +509,11 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   Future<void> _initLevel() async {
     _hintCount = await HintManager.getHints('queens');
     final prefs = await SharedPreferences.getInstance();
-    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
-      _dailyModifierName = prefs.getString('daily_modifier_name') ?? '';
-      _dailyModifierDesc = prefs.getString('daily_modifier_desc') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
     } else {
       _dailyModifierType = '';
       _dailyModifierName = '';
@@ -524,23 +524,15 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     if (widget.dailyLevelIndex != null) {
       targetLevel = widget.dailyLevelIndex!;
     } else {
-      targetLevel = prefs.getInt('level_queens') ?? 0;
+      targetLevel = prefs.getInt(PrefsKeys.gameLevel('queens')) ?? 0;
     }
 
 
 
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_queens';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_playDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = targetLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = targetLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = targetLevel;
 
     if (mounted) {
       setState(() {
@@ -552,7 +544,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     if (!_playDailyMode && !_isTutorialMode) {
       Future.delayed(Duration.zero, () async {
         if (!mounted) return;
-        final savedStateStr = prefs.getString('normal_queens_state');
+        final savedStateStr = prefs.getString(PrefsKeys.normalGameState('queens'));
         if (savedStateStr != null) {
           try {
             final data = jsonDecode(savedStateStr);
@@ -617,17 +609,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_queens';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
-  }
+
 
   Future<void> _saveNormalState() async {
     if (_playDailyMode || _won) return;
@@ -636,17 +618,17 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       'levelIndex': _levelIndex,
       'cells': _cells,
     };
-    await prefs.setString('normal_queens_state', jsonEncode(state));
+    await prefs.setString(PrefsKeys.normalGameState('queens'), jsonEncode(state));
   }
 
   Future<void> _clearNormalState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('normal_queens_state');
+    await prefs.remove(PrefsKeys.normalGameState('queens'));
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_queens', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('queens'), lvl);
     final earned = await HintManager.onLevelCleared('queens');
     final newCount = await HintManager.getHints('queens');
     setState(() {
@@ -756,8 +738,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       n = 7;
     } else if (_levelIndex < 50) {
       n = 8;
-    } else {
+    } else if (_levelIndex < 75) {
       n = 9;
+    } else {
+      n = 10;
     }
     _level = generateProceduralLevel(n, Random(_levelIndex + 8734));
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
@@ -1179,60 +1163,72 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                             ? regionColorsDark[regionId % regionColorsDark.length]
                                             : regionColorsLight[regionId % regionColorsLight.length];
 
-                                        return Container(
-                                          width: cellSize, height: cellSize,
-                                          decoration: BoxDecoration(
-                                            color: regionColor,
-                                            border: Border(
-                                              top: getTopBorder(),
-                                              left: getLeftBorder(),
-                                              right: getRightBorder(),
-                                              bottom: getBottomBorder(),
+                                        String cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}, Region ${regionId + 1}';
+                                        if (state == 1) {
+                                          cellLabel += ', X mark';
+                                        } else if (state == 2) {
+                                          cellLabel += ', Star';
+                                        } else {
+                                          cellLabel += ', empty';
+                                        }
+
+                                        return Semantics(
+                                          label: cellLabel,
+                                          child: Container(
+                                            width: cellSize, height: cellSize,
+                                            decoration: BoxDecoration(
+                                              color: regionColor,
+                                              border: Border(
+                                                top: getTopBorder(),
+                                                left: getLeftBorder(),
+                                                right: getRightBorder(),
+                                                bottom: getBottomBorder(),
+                                              ),
                                             ),
-                                          ),
-                                          child: Center(
-                                            child: AnimatedSwitcher(
-                                              duration: const Duration(milliseconds: 180),
-                                              transitionBuilder: (child, animation) {
-                                                return ScaleTransition(
-                                                  scale: animation,
-                                                  child: child,
-                                                );
-                                              },
-                                              child: state == 1
-                                                  ? Text(
-                                                      'X',
-                                                      key: const ValueKey('x_marker'),
-                                                      style: TextStyle(
-                                                        fontSize: cellSize * 0.38,
-                                                        color: context.isDarkMode ? Colors.white70 : Colors.black87,
-                                                        fontWeight: FontWeight.w900,
-                                                      ),
-                                                    )
-                                                  : state == 2
-                                                      ? Text(
-                                                          '★',
-                                                          key: const ValueKey('star_marker'),
-                                                          style: TextStyle(
-                                                            fontSize: cellSize * 0.52,
-                                                            color: AppTheme.warmAmber,
-                                                            shadows: const [
-                                                              Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))
-                                                            ],
-                                                          ),
-                                                        )
-                                                            .animate()
-                                                            .scale(
-                                                              begin: const Offset(0.3, 0.3),
-                                                              end: const Offset(1.0, 1.0),
-                                                              duration: 350.ms,
-                                                              curve: Curves.easeOutBack,
-                                                            )
-                                                            .shimmer(
-                                                              duration: 400.ms,
-                                                              color: Colors.white.withOpacity(0.4),
-                                                            )
-                                                      : const SizedBox(key: ValueKey('empty_marker')),
+                                            child: Center(
+                                              child: AnimatedSwitcher(
+                                                duration: const Duration(milliseconds: 180),
+                                                transitionBuilder: (child, animation) {
+                                                  return ScaleTransition(
+                                                    scale: animation,
+                                                    child: child,
+                                                  );
+                                                },
+                                                child: state == 1
+                                                    ? Text(
+                                                        'X',
+                                                        key: const ValueKey('x_marker'),
+                                                        style: TextStyle(
+                                                          fontSize: cellSize * 0.38,
+                                                          color: context.isDarkMode ? Colors.white70 : Colors.black87,
+                                                          fontWeight: FontWeight.w900,
+                                                        ),
+                                                      )
+                                                    : state == 2
+                                                        ? Text(
+                                                            '★',
+                                                            key: const ValueKey('star_marker'),
+                                                            style: TextStyle(
+                                                              fontSize: cellSize * 0.52,
+                                                              color: AppTheme.warmAmber,
+                                                              shadows: const [
+                                                                Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))
+                                                              ],
+                                                            ),
+                                                          )
+                                                              .animate()
+                                                              .scale(
+                                                                begin: const Offset(0.3, 0.3),
+                                                                end: const Offset(1.0, 1.0),
+                                                                duration: 350.ms,
+                                                                curve: Curves.easeOutBack,
+                                                              )
+                                                              .shimmer(
+                                                                duration: 400.ms,
+                                                                color: Colors.white.withOpacity(0.4),
+                                                              )
+                                                        : const SizedBox(key: ValueKey('empty_marker')),
+                                              ),
                                             ),
                                           ),
                                         );
@@ -1272,15 +1268,15 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               );
             }),
           ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully solved the Star Battle puzzle."
-                  : "Place exactly 1 star in every row, column, and colored region. Stars cannot touch each other, not even diagonally!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully solved the Star Battle puzzle."
+          //         : "Place exactly 1 star in every row, column, and colored region. Stars cannot touch each other, not even diagonally!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     );

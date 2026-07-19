@@ -30,6 +30,13 @@ import 'screens/games/beta/pattern_lock_beta.dart';
 import 'screens/games/beta/numberlink_beta.dart';
 import 'screens/games/beta/color_flood_beta.dart';
 import 'screens/games/beta/circuit_guide_beta.dart';
+import 'screens/games/kakuro/kakuro_screen.dart';
+import 'screens/games/cipher_decoder/cipher_decoder_screen.dart';
+import 'screens/games/hitori/hitori_screen.dart';
+import 'screens/games/slitherlink/slitherlink_screen.dart';
+import 'screens/games/masyu/masyu_screen.dart';
+import 'screens/games/bridges/bridges_screen.dart';
+import 'screens/games/sum_strike/sum_strike_screen.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_manager.dart';
 import 'utils/audio_manager.dart';
@@ -43,6 +50,7 @@ import 'utils/update_manager.dart';
 import 'utils/restore_manager.dart';
 import 'utils/notification_manager.dart';
 import 'widgets/swipe_trail_overlay.dart';
+import 'utils/prefs_keys.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -88,15 +96,15 @@ void main() async {
   try {
     final prefs = await SharedPreferences.getInstance();
 
-    final activeGame = prefs.getString('daily_backup_active_game');
+    final activeGame = prefs.getString(PrefsKeys.dailyBackupActiveGame);
     if (activeGame != null && activeGame.isNotEmpty) {
-      final backupLevel = prefs.getInt('daily_backup_$activeGame');
+      final backupLevel = prefs.getInt(PrefsKeys.dailyBackupGame(activeGame));
       if (backupLevel != null) {
-        await prefs.setInt('level_$activeGame', backupLevel);
+        await prefs.setInt(PrefsKeys.gameLevel(activeGame), backupLevel);
       }
-      await prefs.remove('daily_backup_active_game');
-      await prefs.remove('daily_backup_$activeGame');
-      await prefs.setBool('play_daily_mode', false);
+      await prefs.remove(PrefsKeys.dailyBackupActiveGame);
+      await prefs.remove(PrefsKeys.dailyBackupGame(activeGame));
+      await prefs.setBool(PrefsKeys.playDailyMode, false);
     }
   } catch (_) {}
 
@@ -208,6 +216,13 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
             '/colour_link': (ctx) => const NumberlinkBetaScreen(),
             '/color_flood': (ctx) => const ColorFloodBetaScreen(),
             '/circuit_guide': (ctx) => const CircuitGuideBetaScreen(),
+            '/kakuro': (ctx) => const KakuroScreen(),
+            '/cipher_decoder': (ctx) => const CipherDecoderScreen(),
+            '/hitori': (ctx) => const HitoriScreen(),
+            '/slitherlink': (ctx) => const SlitherlinkScreen(),
+            '/masyu': (ctx) => const MasyuScreen(),
+            '/bridges': (ctx) => const BridgesScreen(),
+            '/sumstrike': (ctx) => const SumStrikeScreen(),
           },
         );
       },

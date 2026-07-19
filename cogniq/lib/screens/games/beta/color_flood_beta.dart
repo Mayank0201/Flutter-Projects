@@ -10,7 +10,6 @@ import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/shuffle_manager.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../widgets/swipe_trail_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/achievement_manager.dart';
@@ -59,34 +58,15 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     final savedLvl = prefs.getInt('level_color_flood') ?? 0;
     final hCount = await HintManager.getHints('color_flood');
     
-    final tutorialKey = 'has_seen_tutorial_color_flood';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    
     if (mounted) {
       setState(() {
         _hintCount = hCount;
         _actualGameLevel = savedLvl;
-        if (!hasSeen) {
-          _isTutorialMode = true;
-          _currentLevel = 0;
-        } else {
-          _isTutorialMode = false;
-          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
-        }
+        _isTutorialMode = false;
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
     }
-  }
-
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_color_flood';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
   }
 
   void _loadLevel() {
@@ -665,15 +645,15 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                 },
               ),
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully flooded the entire board with a single color."
-                  : "Tap the color buttons below. Start at the top-left home tile and flood adjacent cells until everything is one color!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully flooded the entire board with a single color."
+          //         : "Tap the color buttons below. Start at the top-left home tile and flood adjacent cells until everything is one color!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     ),

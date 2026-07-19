@@ -28,6 +28,10 @@ const Map<String, IconData> _gameIcons = {
   'sequence':    Icons.pattern_outlined,
   'oddcolor':    Icons.palette_outlined,
   'hue':         Icons.color_lens_outlined,
+  'kakuro':      Icons.border_all_outlined,
+  'cipherdecoder': Icons.vpn_key_outlined,
+  'hitori':      Icons.grid_on_outlined,
+  'slitherlink': Icons.loop_outlined,
 };
 
 class DailyScreen extends StatefulWidget {

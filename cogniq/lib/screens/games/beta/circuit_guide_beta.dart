@@ -10,7 +10,6 @@ import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/shuffle_manager.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../widgets/swipe_trail_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/achievement_manager.dart';
@@ -50,35 +49,16 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     final active = await ShuffleManager.isActive();
     final hintCount = await HintManager.getHints('circuit_guide');
     
-    final tutorialKey = 'has_seen_tutorial_circuit_guide';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    
     if (mounted) {
       setState(() {
         _shuffleActive = active;
         _hintCount = hintCount;
         _actualGameLevel = savedLvl;
-        if (!hasSeen) {
-          _isTutorialMode = true;
-          _currentLevel = 0; // Force level 0 (simplest) for tutorial
-        } else {
-          _isTutorialMode = false;
-          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
-        }
+        _isTutorialMode = false;
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
     }
-  }
-
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_circuit_guide';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
   }
 
   void _loadLevel() {
@@ -127,9 +107,21 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         } else if (_currentLevel < 35) {
           _gridSize = 5;
           numTargets = 4;
-        } else {
+        } else if (_currentLevel < 42) {
           _gridSize = 6;
           numTargets = 4;
+        } else if (_currentLevel < 50) {
+          _gridSize = 6;
+          numTargets = 5;
+        } else if (_currentLevel < 60) {
+          _gridSize = 7;
+          numTargets = 5;
+        } else if (_currentLevel < 70) {
+          _gridSize = 7;
+          numTargets = 6;
+        } else {
+          _gridSize = 8;
+          numTargets = 6;
         }
         
         final int W = _gridSize;
@@ -772,15 +764,15 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                 },
               ),
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You completed the tutorial. Power successfully connects from the source to the lightbulb."
-                  : "Tap the wire tiles to rotate and align them so that power flows from the source to the bulb.",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You completed the tutorial. Power successfully connects from the source to the lightbulb."
+          //         : "Tap the wire tiles to rotate and align them so that power flows from the source to the bulb.",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     ),

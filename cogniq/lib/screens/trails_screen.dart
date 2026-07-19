@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/swipe_trail_overlay.dart';
+import '../utils/prefs_keys.dart';
 
 class TrailStyle {
   final String id;
@@ -91,6 +92,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
   bool _loading = true;
   int _globalClears = 0;
   String? _customColorHex;
+  List<String> _claimedStyles = ['none'];
 
   final List<Color> _accentColors = const [
     Color(0xFFA68B8A), // Original Mauve (default)
@@ -131,15 +133,17 @@ class _TrailsScreenState extends State<TrailsScreen> {
 
   Future<void> _loadState() async {
     final prefs = await SharedPreferences.getInstance();
-    final clears = prefs.getInt('global_level_cleared_count') ?? 0;
-    final style = prefs.getString('swipe_trail_style') ?? 'none';
-    final hex = prefs.getString('swipe_trail_custom_color');
-
+    final clears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
+    final style = prefs.getString(PrefsKeys.swipeTrailStyle) ?? 'none';
+    final hex = prefs.getString(PrefsKeys.swipeTrailCustomColor);
+    final claimed = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+ 
     if (mounted) {
       setState(() {
         _globalClears = clears;
         _activeStyle = style;
         _customColorHex = hex;
+        _claimedStyles = claimed;
         _loading = false;
       });
     }
@@ -147,12 +151,12 @@ class _TrailsScreenState extends State<TrailsScreen> {
 
   Future<void> _selectStyle(String styleId) async {
     if (_globalClears < getRequiredClears(styleId)) return;
-
+ 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('swipe_trail_style', styleId);
+    await prefs.setString(PrefsKeys.swipeTrailStyle, styleId);
     await prefs.setBool('swipe_trail_unlocked', true);
     SwipeTrailOverlay.unlockedNotifier.value = true;
-
+ 
     if (mounted) {
       setState(() {
         _activeStyle = styleId;
@@ -161,10 +165,33 @@ class _TrailsScreenState extends State<TrailsScreen> {
     SwipeTrailOverlay.styleNotifier.value = styleId;
   }
 
+  Future<void> _claimStyle(String styleId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final claimed = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+    if (!claimed.contains(styleId)) {
+      claimed.add(styleId);
+      await prefs.setStringList(PrefsKeys.claimedTrailStyles, claimed);
+    }
+    if (mounted) {
+      setState(() {
+        _claimedStyles = claimed;
+      });
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Claimed trail style: ${kAllTrails.firstWhere((t) => t.id == styleId).name}!',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: AppTheme.softSage,
+      ),
+    );
+  }
+
   Future<void> _selectCustomColor(Color color) async {
     final prefs = await SharedPreferences.getInstance();
     final hexString = color.value.toString();
-    await prefs.setString('swipe_trail_custom_color', hexString);
+    await prefs.setString(PrefsKeys.swipeTrailCustomColor, hexString);
     if (mounted) {
       setState(() {
         _customColorHex = hexString;
@@ -285,12 +312,17 @@ class _TrailsScreenState extends State<TrailsScreen> {
   Widget _buildTrailCard(TrailStyle trail) {
     final reqClears = getRequiredClears(trail.id);
     final isUnlocked = _globalClears >= reqClears;
-    final isActive = isUnlocked && _activeStyle == trail.id;
-
+    final isClaimed = _claimedStyles.contains(trail.id);
+    final isActive = isClaimed && _activeStyle == trail.id;
+ 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GestureDetector(
-        onTap: isUnlocked ? () => _selectStyle(trail.id) : null,
+        onTap: isUnlocked
+            ? (isClaimed
+                ? () => _selectStyle(trail.id)
+                : () => _claimStyle(trail.id))
+            : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
@@ -454,13 +486,35 @@ class _TrailsScreenState extends State<TrailsScreen> {
                   ),
                 ),
 
-                // Checkmark / Lock Icon
+                // Checkmark / Claim / Lock Icon
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
                   child: isUnlocked
-                      ? (isActive 
-                          ? const Icon(Icons.check_circle_rounded, color: AppTheme.softSage, size: 20)
-                          : const SizedBox.shrink())
+                      ? (isClaimed
+                          ? (isActive 
+                              ? const Icon(Icons.check_circle_rounded, color: AppTheme.softSage, size: 20)
+                              : const SizedBox.shrink())
+                          : ElevatedButton(
+                              onPressed: () => _claimStyle(trail.id),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.dustyMauve,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 0,
+                              ),
+                              child: Text(
+                                'Claim',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ))
                       : Icon(Icons.lock_outline_rounded, color: context.textSecondary.withOpacity(0.5), size: 18),
                 ),
               ],

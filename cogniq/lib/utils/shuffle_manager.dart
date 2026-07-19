@@ -2,9 +2,10 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/game_info.dart';
+import 'prefs_keys.dart';
 
 class ShuffleManager {
-  static const String _key = 'shuffle_mode';
+  static const String _key = PrefsKeys.shuffleMode;
 
   // Cached state so game screens can read synchronously after first load
   static bool _cachedActive = false;
@@ -37,13 +38,13 @@ class ShuffleManager {
   static Future<List<String>> getSelectedGames() async {
     final prefs = await SharedPreferences.getInstance();
     final activeGameIds = kAllGames.where((game) => !game.isStashed).map((g) => g.id).toList();
-    final selected = prefs.getStringList('shuffle_enabled_games') ?? activeGameIds;
+    final selected = prefs.getStringList(PrefsKeys.shuffleEnabledGames) ?? activeGameIds;
     return selected.where((id) => activeGameIds.contains(id)).toList();
   }
 
   static Future<void> setSelectedGames(List<String> gameIds) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('shuffle_enabled_games', gameIds);
+    await prefs.setStringList(PrefsKeys.shuffleEnabledGames, gameIds);
   }
 
   /// Combined check + pick + navigate in a single async chain.
@@ -67,7 +68,7 @@ class ShuffleManager {
     if (candidates.isEmpty) return false;
 
     // Read recently played from same prefs instance
-    final recentlyPlayed = prefs.getStringList('recently_played_games') ?? [];
+    final recentlyPlayed = prefs.getStringList(PrefsKeys.recentlyPlayedGames) ?? [];
 
     // Weighted random selection
     final List<double> weights = [];
@@ -116,7 +117,7 @@ class ShuffleManager {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final recentlyPlayed = prefs.getStringList('recently_played_games') ?? [];
+    final recentlyPlayed = prefs.getStringList(PrefsKeys.recentlyPlayedGames) ?? [];
 
     final List<double> weights = [];
     double totalWeight = 0.0;

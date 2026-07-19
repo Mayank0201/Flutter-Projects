@@ -6,6 +6,7 @@ import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/rules_helper.dart';
@@ -13,8 +14,6 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
-import '../../../widgets/game_tutorial_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 class SudokuLevel {
   final int size; // 4, 6, or 9
@@ -1226,16 +1225,16 @@ class _SudokuScreenState extends State<SudokuScreen> {
   Future<void> _initLevel() async {
     _hintCount = await HintManager.getHints('sudoku');
     final prefs = await SharedPreferences.getInstance();
-    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
-      final difficulty = prefs.getString('daily_modifier_difficulty') ?? 'Medium';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      final difficulty = prefs.getString(PrefsKeys.dailyModifierDifficulty) ?? 'Medium';
       if (difficulty.toLowerCase() == 'hard') {
         _dailyGridSize = 9;
       } else {
         _dailyGridSize = 6;
       }
-      final extraParamsStr = prefs.getString('daily_modifier_extra_params') ?? '';
+      final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
           final extraParams = jsonDecode(extraParamsStr) as Map<String, dynamic>;
@@ -1259,7 +1258,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
     if (!_playDailyMode && !_isTutorialMode) {
       Future.delayed(Duration.zero, () async {
         if (!mounted) return;
-        final savedStateStr = prefs.getString('normal_sudoku_state');
+        final savedStateStr = prefs.getString(PrefsKeys.normalGameState('sudoku'));
         if (savedStateStr != null) {
           try {
             final data = jsonDecode(savedStateStr);
@@ -1344,19 +1343,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
       }
       return;
     }
-    final savedLevel = prefs.getInt('level_sudoku') ?? 0;
+    final savedLevel = prefs.getInt(PrefsKeys.gameLevel('sudoku')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_sudoku';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_playDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
  
     if (mounted) {
       setState(() {
@@ -1366,17 +1357,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_sudoku';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
-  }
+
 
   Future<void> _saveNormalState() async {
     if (_playDailyMode || _won) return;
@@ -1388,18 +1369,18 @@ class _SudokuScreenState extends State<SudokuScreen> {
       'solution': _level.solution,
       'correctPlacementsCount': _correctPlacementsCount,
     };
-    await prefs.setString('normal_sudoku_state', jsonEncode(state));
+    await prefs.setString(PrefsKeys.normalGameState('sudoku'), jsonEncode(state));
   }
 
   Future<void> _clearNormalState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('normal_sudoku_state');
+    await prefs.remove(PrefsKeys.normalGameState('sudoku'));
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
     if (widget.dailyLevelIndex != null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_sudoku', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('sudoku'), lvl);
     final earned = await HintManager.onLevelCleared('sudoku');
     if (earned) {
       final newCount = await HintManager.getHints('sudoku');
@@ -1530,8 +1511,10 @@ class _SudokuScreenState extends State<SudokuScreen> {
     } else if (size == 9) {
       if (index < 40) {
         targetFilled = 25; // levels 26-40
+      } else if (index < 60) {
+        targetFilled = 21; // levels 41-60
       } else {
-        targetFilled = 21; // levels 41-50
+        targetFilled = 17; // levels 61+
       }
     } else if (size == 6) {
       // levels 11-25, scale from 18 down to 14
@@ -2112,37 +2095,46 @@ class _SudokuScreenState extends State<SudokuScreen> {
                                           );
                                   }
 
-                                  return GestureDetector(
-                                    onTap: () => _selectCell(r, c),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: isSel
-                                            ? accentColor.withAlpha(45)
-                                            : (_inRecallTest
-                                                ? context.bgCard
-                                                : (isOrig
-                                                    ? context.bgSurface
-                                                    : context.bgCard)),
-                                        border: Border(
-                                          right: borderRight,
-                                          bottom: borderBottom,
+                                  final cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}'
+                                      '${isOrig ? ", fixed clue" : ""}'
+                                      '${value != 0 ? ", value $value" : ", empty"}';
+
+                                  return Semantics(
+                                    label: cellLabel,
+                                    selected: isSel,
+                                    button: true,
+                                    child: GestureDetector(
+                                      onTap: () => _selectCell(r, c),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: isSel
+                                              ? accentColor.withAlpha(45)
+                                              : (_inRecallTest
+                                                  ? context.bgCard
+                                                  : (isOrig
+                                                      ? context.bgSurface
+                                                      : context.bgCard)),
+                                          border: Border(
+                                            right: borderRight,
+                                            bottom: borderBottom,
+                                          ),
                                         ),
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          _inRecallTest
-                                              ? (_recallCorrectSelections.contains((r, c)) ? '$value' : '')
-                                              : (value != 0 ? '$value' : ''),
-                                          style: AppTheme.numberStyle(
-                                            fontSize: context.scale(
-                                              size == 9 ? 15 : 18,
+                                        child: Center(
+                                          child: Text(
+                                            _inRecallTest
+                                                ? (_recallCorrectSelections.contains((r, c)) ? '$value' : '')
+                                                : (value != 0 ? '$value' : ''),
+                                            style: AppTheme.numberStyle(
+                                              fontSize: context.scale(
+                                                size == 9 ? 15 : 18,
+                                              ),
+                                              fontWeight: isOrig
+                                                  ? FontWeight.w900
+                                                  : FontWeight.w600,
+                                              color: isOrig
+                                                  ? context.textPrimary
+                                                  : accentColor,
                                             ),
-                                            fontWeight: isOrig
-                                                ? FontWeight.w900
-                                                : FontWeight.w600,
-                                            color: isOrig
-                                                ? context.textPrimary
-                                                : accentColor,
                                           ),
                                         ),
                                       ),
@@ -2277,15 +2269,15 @@ class _SudokuScreenState extends State<SudokuScreen> {
             Navigator.pop(context, true);
           },
         ),
-      if (_isTutorialMode)
-        InteractiveTutorialOverlay(
-          instruction: _tutorialCompleted
-              ? "Nice! You successfully completed the Sudoku puzzle."
-              : "Fill the grid so that every row, column, and subgrid contains the numbers 1 to 4/6/9 without repetition!",
-          isCompleted: _tutorialCompleted,
-          onSkip: _finishTutorial,
-          onStartGame: _finishTutorial,
-        ),
+      // if (_isTutorialMode)
+      //   InteractiveTutorialOverlay(
+      //     instruction: _tutorialCompleted
+      //       ? "Nice! You successfully completed the Sudoku puzzle."
+      //       : "Fill the grid so that every row, column, and subgrid contains the numbers 1 to 4/6/9 without repetition!",
+      //     isCompleted: _tutorialCompleted,
+      //     onSkip: _finishTutorial,
+      //     onStartGame: _finishTutorial,
+      //   ),
     ],
   ),
 );

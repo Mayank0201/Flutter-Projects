@@ -4,6 +4,7 @@ import 'package:home_widget/home_widget.dart';
 import '../models/game_info.dart';
 import 'hint_manager.dart';
 import 'notification_manager.dart';
+import 'prefs_keys.dart';
 
 class DailyChallenge {
   final String difficulty; // 'Easy', 'Medium', 'Hard'
@@ -935,20 +936,20 @@ class DailyChallengeManager {
   static Future<int> getActiveDay() async {
     final prefs = await SharedPreferences.getInstance();
 
-    if (!prefs.containsKey('daily_v2_migrated')) {
-      await prefs.setInt('daily_user_progress_day', 1);
-      await prefs.setBool('daily_v2_migrated', true);
+    if (!prefs.containsKey(PrefsKeys.dailyV2Migrated)) {
+      await prefs.setInt(PrefsKeys.dailyUserProgressDay, 1);
+      await prefs.setBool(PrefsKeys.dailyV2Migrated, true);
       await prefs.remove('daily_last_open_date');
-      await prefs.remove('daily_challenge_start_time');
+      await prefs.remove(PrefsKeys.dailyChallengeStartTime);
     }
 
-    int currentDay = prefs.getInt('daily_user_progress_day') ?? 1;
+    int currentDay = prefs.getInt(PrefsKeys.dailyUserProgressDay) ?? 1;
     final now = DateTime.now().toUtc();
-    final startTimeStr = prefs.getString('daily_challenge_start_time') ?? '';
+    final startTimeStr = prefs.getString(PrefsKeys.dailyChallengeStartTime) ?? '';
 
     if (startTimeStr.isEmpty) {
       // Set start time for the first time
-      await prefs.setString('daily_challenge_start_time', now.toIso8601String());
+      await prefs.setString(PrefsKeys.dailyChallengeStartTime, now.toIso8601String());
     } else {
       final startTime = DateTime.parse(startTimeStr);
       final diff = now.difference(startTime);
@@ -956,10 +957,10 @@ class DailyChallengeManager {
       if (diffHours >= 24) {
         final elapsedDays = diffHours ~/ 24;
         currentDay = ((currentDay - 1 + elapsedDays) % 30) + 1;
-        await prefs.setInt('daily_user_progress_day', currentDay);
+        await prefs.setInt(PrefsKeys.dailyUserProgressDay, currentDay);
         
         final newStartTime = startTime.add(Duration(hours: elapsedDays * 24));
-        await prefs.setString('daily_challenge_start_time', newStartTime.toIso8601String());
+        await prefs.setString(PrefsKeys.dailyChallengeStartTime, newStartTime.toIso8601String());
       }
     }
 
@@ -1023,7 +1024,7 @@ class DailyChallengeManager {
 
   static Future<bool> isChallengeCompleted(String difficulty, String dateStr) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('daily_v2_completed_${difficulty.toLowerCase()}_$dateStr') ?? false;
+    return prefs.getBool(PrefsKeys.dailyV2Completed(difficulty, dateStr)) ?? false;
   }
 
   static Future<int> getCompletedCountForDate(String dateStr) async {
@@ -1036,16 +1037,16 @@ class DailyChallengeManager {
 
   static Future<int> getOrUpdateStreak(String dateStr) async {
     final prefs = await SharedPreferences.getInstance();
-    final lastDate = prefs.getString('daily_v2_last_date') ?? '';
-    int streak = prefs.getInt('daily_v2_streak') ?? 0;
+    final lastDate = prefs.getString(PrefsKeys.dailyV2LastDate) ?? '';
+    int streak = prefs.getInt(PrefsKeys.dailyV2Streak) ?? 0;
 
     // Migrate from v1 if present
-    if (streak == 0 && prefs.containsKey('daily_streak')) {
-      streak = prefs.getInt('daily_streak') ?? 0;
-      await prefs.setInt('daily_v2_streak', streak);
-      final lastCompletedV1 = prefs.getString('daily_last_completed_date') ?? '';
+    if (streak == 0 && prefs.containsKey(PrefsKeys.dailyStreak)) {
+      streak = prefs.getInt(PrefsKeys.dailyStreak) ?? 0;
+      await prefs.setInt(PrefsKeys.dailyV2Streak, streak);
+      final lastCompletedV1 = prefs.getString(PrefsKeys.dailyLastCompletedDate) ?? '';
       if (lastCompletedV1.isNotEmpty) {
-        await prefs.setString('daily_v2_last_date', lastCompletedV1);
+        await prefs.setString(PrefsKeys.dailyV2LastDate, lastCompletedV1);
       }
     }
 
@@ -1056,7 +1057,7 @@ class DailyChallengeManager {
       final diff = todayUtc.difference(lastDateTime).inDays;
       if (diff > 1) {
         streak = 0;
-        await prefs.setInt('daily_v2_streak', 0);
+        await prefs.setInt(PrefsKeys.dailyV2Streak, 0);
       }
     }
     return streak;
@@ -1064,7 +1065,7 @@ class DailyChallengeManager {
 
   static Future<int> getPerfectDays() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt('daily_v2_perfect_days') ?? 0;
+    return prefs.getInt(PrefsKeys.dailyV2PerfectDays) ?? 0;
   }
 
   static Future<void> completeChallenge(String difficulty, String dateStr, String gameId) async {
@@ -1075,22 +1076,22 @@ class DailyChallengeManager {
     await prefs.setBool(key, true);
 
     // Update Star Reward Tracking
-    final starKey = 'daily_star_for_date_$dateStr';
+    final starKey = PrefsKeys.dailyStarForDate(dateStr);
     int completedCount = await getCompletedCountForDate(dateStr);
     
     // Decrement previous star count if any
     final prevStar = prefs.getString(starKey);
     if (prevStar == 'bronze') {
-      await prefs.setInt('daily_bronze_stars', (prefs.getInt('daily_bronze_stars') ?? 0) - 1);
+      await prefs.setInt(PrefsKeys.dailyBronzeStars, (prefs.getInt(PrefsKeys.dailyBronzeStars) ?? 0) - 1);
     } else if (prevStar == 'silver') {
-      await prefs.setInt('daily_silver_stars', (prefs.getInt('daily_silver_stars') ?? 0) - 1);
+      await prefs.setInt(PrefsKeys.dailySilverStars, (prefs.getInt(PrefsKeys.dailySilverStars) ?? 0) - 1);
     }
 
     // Assign new star
     String newStar = completedCount == 1 ? 'bronze' : completedCount == 2 ? 'silver' : 'gold';
     await prefs.setString(starKey, newStar);
 
-    final starCountKey = 'daily_${newStar}_stars';
+    final starCountKey = newStar == 'bronze' ? PrefsKeys.dailyBronzeStars : newStar == 'silver' ? PrefsKeys.dailySilverStars : PrefsKeys.dailyGoldStars;
     await prefs.setInt(starCountKey, (prefs.getInt(starCountKey) ?? 0) + 1);
 
     // Push stars to widget
@@ -1101,8 +1102,8 @@ class DailyChallengeManager {
     await HintManager.addHints(gameId, hintsToAward);
 
     // Update streak
-    int streak = prefs.getInt('daily_v2_streak') ?? 0;
-    final lastDate = prefs.getString('daily_v2_last_date') ?? '';
+    int streak = prefs.getInt(PrefsKeys.dailyV2Streak) ?? 0;
+    final lastDate = prefs.getString(PrefsKeys.dailyV2LastDate) ?? '';
 
     if (lastDate != dateStr) {
       if (lastDate.isEmpty) {
@@ -1118,17 +1119,17 @@ class DailyChallengeManager {
           streak = 1;
         }
       }
-      await prefs.setInt('daily_v2_streak', streak);
-      await prefs.setString('daily_v2_last_date', dateStr);
+      await prefs.setInt(PrefsKeys.dailyV2Streak, streak);
+      await prefs.setString(PrefsKeys.dailyV2LastDate, dateStr);
     }
 
     // Check if Perfect Day (all 3 completed)
     if (completedCount == 3) {
-      final perfectKey = 'daily_v2_perfect_$dateStr';
+      final perfectKey = PrefsKeys.dailyV2Perfect(dateStr);
       if (prefs.getBool(perfectKey) != true) {
         await prefs.setBool(perfectKey, true);
-        int perfectDays = prefs.getInt('daily_v2_perfect_days') ?? 0;
-        await prefs.setInt('daily_v2_perfect_days', perfectDays + 1);
+        int perfectDays = prefs.getInt(PrefsKeys.dailyV2PerfectDays) ?? 0;
+        await prefs.setInt(PrefsKeys.dailyV2PerfectDays, perfectDays + 1);
       }
     }
 
@@ -1138,9 +1139,9 @@ class DailyChallengeManager {
 
   static Future<void> syncStarsToWidget() async {
     final prefs = await SharedPreferences.getInstance();
-    final bronze = prefs.getInt('daily_bronze_stars') ?? 0;
-    final silver = prefs.getInt('daily_silver_stars') ?? 0;
-    final gold = prefs.getInt('daily_gold_stars') ?? 0;
+    final bronze = prefs.getInt(PrefsKeys.dailyBronzeStars) ?? 0;
+    final silver = prefs.getInt(PrefsKeys.dailySilverStars) ?? 0;
+    final gold = prefs.getInt(PrefsKeys.dailyGoldStars) ?? 0;
 
     try {
       await HomeWidget.saveWidgetData('daily_bronze_stars', bronze);
@@ -1156,25 +1157,25 @@ class DailyChallengeManager {
 
   static Future<void> setupDailyModifier(DailyChallenge challenge) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('play_daily_mode', true);
-    await prefs.setString('daily_modifier_type', challenge.modifierType ?? '');
-    await prefs.setString('daily_modifier_name', challenge.modifierName);
-    await prefs.setString('daily_modifier_desc', challenge.modifierDescription);
-    await prefs.setString('daily_modifier_difficulty', challenge.difficulty);
+    await prefs.setBool(PrefsKeys.playDailyMode, true);
+    await prefs.setString(PrefsKeys.dailyModifierType, challenge.modifierType ?? '');
+    await prefs.setString(PrefsKeys.dailyModifierName, challenge.modifierName);
+    await prefs.setString(PrefsKeys.dailyModifierDesc, challenge.modifierDescription);
+    await prefs.setString(PrefsKeys.dailyModifierDifficulty, challenge.difficulty);
     if (challenge.extraParams != null) {
-      await prefs.setString('daily_modifier_extra_params', jsonEncode(challenge.extraParams));
+      await prefs.setString(PrefsKeys.dailyModifierExtraParams, jsonEncode(challenge.extraParams));
     } else {
-      await prefs.remove('daily_modifier_extra_params');
+      await prefs.remove(PrefsKeys.dailyModifierExtraParams);
     }
   }
 
   static Future<void> clearDailyModifier() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('play_daily_mode', false);
-    await prefs.remove('daily_modifier_type');
-    await prefs.remove('daily_modifier_name');
-    await prefs.remove('daily_modifier_desc');
-    await prefs.remove('daily_modifier_difficulty');
-    await prefs.remove('daily_modifier_extra_params');
+    await prefs.setBool(PrefsKeys.playDailyMode, false);
+    await prefs.remove(PrefsKeys.dailyModifierType);
+    await prefs.remove(PrefsKeys.dailyModifierName);
+    await prefs.remove(PrefsKeys.dailyModifierDesc);
+    await prefs.remove(PrefsKeys.dailyModifierDifficulty);
+    await prefs.remove(PrefsKeys.dailyModifierExtraParams);
   }
 }

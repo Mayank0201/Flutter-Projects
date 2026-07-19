@@ -1,7 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_keys.dart';
 
 class PointManager {
-  static const String _key = 'points';
+  static const String _key = PrefsKeys.points;
 
   static Future<int> getPoints() async {
     final prefs = await SharedPreferences.getInstance();

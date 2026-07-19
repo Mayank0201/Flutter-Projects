@@ -3,13 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:home_widget/home_widget.dart';
 import '../utils/audio_manager.dart';
+import '../utils/prefs_keys.dart';
 
 class SettingsNotifier extends ChangeNotifier {
-  static const String _hapticKey = 'settings_haptic';
-  static const String _soundKey = 'settings_sound';
-  static const String _musicKey = 'settings_music';
-  static const String _fontScaleKey = 'settings_font_scale';
-  static const String _adsRemovedKey = 'settings_ads_removed';
+  static const String _hapticKey = PrefsKeys.hapticEnabled;
+  static const String _soundKey = PrefsKeys.soundEnabled;
+  static const String _musicKey = PrefsKeys.musicEnabled;
+  static const String _fontScaleKey = PrefsKeys.fontScale;
+  static const String _adsRemovedKey = PrefsKeys.adsRemoved;
 
   bool _hapticEnabled = true;
   bool _soundEnabled = true;
@@ -82,15 +83,15 @@ class SettingsNotifier extends ChangeNotifier {
 
   // Helper methods for haptics
   void hapticTap() {
-    if (_soundEnabled) HapticFeedback.lightImpact();
+    if (_hapticEnabled) HapticFeedback.lightImpact();
   }
 
   void hapticSuccess() {
-    if (_soundEnabled) HapticFeedback.mediumImpact();
+    if (_hapticEnabled) HapticFeedback.mediumImpact();
   }
 
   void hapticError() {
-    if (_soundEnabled) HapticFeedback.heavyImpact();
+    if (_hapticEnabled) HapticFeedback.heavyImpact();
   }
 
   Future<void> resetAllProgress() async {

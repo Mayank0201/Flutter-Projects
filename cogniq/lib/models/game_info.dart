@@ -41,4 +41,11 @@ const List<GameInfo> kAllGames = [
   GameInfo(id:'colour_link', name:'Colour Link', description:'Link matching colors without crossing', emoji:'🔗', routeName:'/colour_link'),
   GameInfo(id:'color_flood', name:'Color Flood', description:'Flood the grid with a single color', emoji:'💧', routeName:'/color_flood'),
   GameInfo(id:'circuit_guide', name:'Circuit Guide', description:'Rotate wires to power all Bulbs', emoji:'🔌', routeName:'/circuit_guide'),
+  GameInfo(id:'kakuro', name:'Kakuro', description:'Crossword-style addition grid puzzle', emoji:'🧩', routeName:'/kakuro'),
+  GameInfo(id:'cipherdecoder', name:'Cipher Decoder', description:'Decode the secret shifting phrase', emoji:'🔑', routeName:'/cipher_decoder'),
+  GameInfo(id:'hitori', name:'Hitori', description:'Shade duplicates in rows and columns', emoji:'🔲', routeName:'/hitori', isStashed: true),
+  GameInfo(id:'slitherlink', name:'Slitherlink', description:'Connect dots to form a single loop', emoji:'⭕', routeName:'/slitherlink', isStashed: true),
+  GameInfo(id:'masyu', name:'Masyu', description:'Draw a loop through black and white circles', emoji:'⭕', routeName:'/masyu'),
+  GameInfo(id:'bridges', name:'Bridges', description:'Connect islands with bridges', emoji:'🌉', routeName:'/bridges'),
+  GameInfo(id:'sumstrike', name:'Sum Strike', description:'Strike out numbers to match row and column sums', emoji:'➕', routeName:'/sumstrike'),
 ];

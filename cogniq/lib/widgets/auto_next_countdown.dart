@@ -11,7 +11,7 @@ class AutoNextCountdown extends StatefulWidget {
   const AutoNextCountdown({
     super.key,
     required this.onNext,
-    this.duration = const Duration(milliseconds: 2500),
+    this.duration = const Duration(milliseconds: 1000),
     required this.accentColor,
   });
 

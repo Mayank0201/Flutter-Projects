@@ -4,15 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
-import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../widgets/buy_hints_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
+import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 
@@ -30,7 +30,6 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   bool _isHintShowing = false;
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
-  int _actualGameLevel = 0;
   bool _levelCleared = false;
   bool _isDailyMode = false;
   String _dailyModifierType = '';
@@ -268,27 +267,19 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   Future<void> _loadPersistedLevel() async {
     _hintCount = await HintManager.getHints('oddcolor');
     final prefs = await SharedPreferences.getInstance();
-    _isDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_isDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
-      _dailyModifierName = prefs.getString('daily_modifier_name') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
     } else {
       _dailyModifierType = '';
       _dailyModifierName = '';
     }
-    final savedLevel = prefs.getInt('level_oddcolor') ?? 0;
+    final savedLevel = prefs.getInt(PrefsKeys.gameLevel('oddcolor')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_oddcolor';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_isDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
 
     if (mounted) {
       setState(() {
@@ -298,22 +289,10 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_oddcolor';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _isDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _generateLevelColors();
-    });
-  }
-
   Future<void> _savePersistedLevel(int lvl) async {
     if (_isDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_oddcolor', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('oddcolor'), lvl);
     final earned = await HintManager.onLevelCleared('oddcolor');
     final newCount = await HintManager.getHints('oddcolor');
     if (mounted) {
@@ -764,15 +743,15 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                 Navigator.pop(context, true);
               },
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully spotted the odd color tile."
-                  : "A grid of colored tiles will appear. Identify and tap the one tile that has a slightly different shade or color compared to the rest!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully spotted the odd color tile."
+          //         : "A grid of colored tiles will appear. Identify and tap the one tile that has a slightly different shade or color compared to the rest!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     );

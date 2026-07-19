@@ -13,6 +13,7 @@ class AchievementsScreen extends StatefulWidget {
 class _AchievementsScreenState extends State<AchievementsScreen> {
   String _selectedCategory = 'All';
   List<String> _unlockedIds = [];
+  List<String> _claimedIds = [];
   Map<String, double> _progressMap = {};
   bool _loading = true;
 
@@ -34,6 +35,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
   Future<void> _loadStats() async {
     await AchievementManager.checkAndUnlock('');
     final unlocked = await AchievementManager.getUnlockedIds();
+    final claimed = await AchievementManager.getClaimedIds();
     final Map<String, double> progress = {};
     for (final a in AchievementManager.allAchievements) {
       progress[a.id] = await AchievementManager.getProgress(a);
@@ -42,6 +44,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
     if (mounted) {
       setState(() {
         _unlockedIds = unlocked;
+        _claimedIds = claimed;
         _progressMap = progress;
         _loading = false;
       });
@@ -247,157 +250,255 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
 
   Widget _buildAchievementCard(Achievement a, bool isUnlocked, double progress) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isClaimed = _claimedIds.contains(a.id);
+    final canClaim = isUnlocked && !isClaimed;
+
+    Widget cardContent = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.zenCard(context),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Left: Achievement Icon
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: isUnlocked
+                  ? AppTheme.dustyMauve.withAlpha(20)
+                  : (isDark ? Colors.white10 : Colors.black12),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: isUnlocked
+                  ? Text(
+                      a.icon,
+                      style: const TextStyle(fontSize: 24),
+                    )
+                  : Icon(
+                      Icons.lock_outline_rounded,
+                      size: 20,
+                      color: context.textSecondary.withAlpha(150),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // Middle: Name, description & progress bar
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  a.name,
+                  style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: context.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  a.description,
+                  style: GoogleFonts.outfit(
+                    fontSize: 12,
+                    color: context.textSecondary,
+                  ),
+                ),
+                if (!isUnlocked && progress > 0.0 && progress < 1.0) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(1),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 2,
+                            backgroundColor: isDark ? Colors.white10 : Colors.black12,
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              AppTheme.dustyMauve,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${(progress * 100).toInt()}%',
+                        style: GoogleFonts.outfit(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: context.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // Right: Claim button or Rewards badge
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isUnlocked) ...[
+                if (isClaimed) ...[
+                  // Claimed State
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle_outline, color: AppTheme.softSage, size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Claimed',
+                        style: GoogleFonts.outfit(
+                          color: AppTheme.softSage,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  // Unlocked but unclaimed state: show Claim button + reward hint
+                  if (a.rewardPoints > 0) ...[
+                    Text(
+                      '+${a.rewardPoints} IQ',
+                      style: GoogleFonts.outfit(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.dustyMauve,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  ElevatedButton(
+                    onPressed: () async {
+                      final success = await AchievementManager.claim(a.id);
+                      if (success) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Claimed reward: ${a.name}!',
+                                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                              ),
+                              backgroundColor: AppTheme.softSage,
+                            ),
+                          );
+                          _loadStats();
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.dustyMauve,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      'Claim',
+                      style: GoogleFonts.outfit(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ] else ...[
+                // Locked State: show prospective rewards
+                if (a.rewardPoints > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.dustyMauve.withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.dustyMauve.withAlpha(50), width: 0.5),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.monetization_on_rounded,
+                          size: 10,
+                          color: AppTheme.dustyMauve,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '+${a.rewardPoints}',
+                          style: GoogleFonts.outfit(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.dustyMauve,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (a.rewardTitle != null || a.rewardTrailStyle != null) ...[
+                  if (a.rewardPoints > 0) const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.dustyMauve.withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.dustyMauve.withAlpha(50), width: 0.5),
+                    ),
+                    child: Text(
+                      a.rewardTitle ?? 'Cosmetic',
+                      style: GoogleFonts.outfit(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.dustyMauve,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+
+    if (canClaim) {
+      cardContent = InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () async {
+          final success = await AchievementManager.claim(a.id);
+          if (success) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Claimed reward: ${a.name}!',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                  ),
+                  backgroundColor: AppTheme.softSage,
+                ),
+              );
+              _loadStats();
+            }
+          }
+        },
+        child: cardContent,
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Opacity(
         opacity: isUnlocked ? 1.0 : 0.65,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: AppTheme.zenCard(context),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Left: Achievement Icon
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: isUnlocked
-                      ? AppTheme.dustyMauve.withAlpha(20)
-                      : (isDark ? Colors.white10 : Colors.black12),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: isUnlocked
-                      ? Text(
-                          a.icon,
-                          style: const TextStyle(fontSize: 24),
-                        )
-                      : Icon(
-                          Icons.lock_outline_rounded,
-                          size: 20,
-                          color: context.textSecondary.withAlpha(150),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 16),
-
-              // Middle: Name, description & progress bar
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      a.name,
-                      style: GoogleFonts.outfit(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: context.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      a.description,
-                      style: GoogleFonts.outfit(
-                        fontSize: 12,
-                        color: context.textSecondary,
-                      ),
-                    ),
-                    if (!isUnlocked && progress > 0.0 && progress < 1.0) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(1),
-                              child: LinearProgressIndicator(
-                                value: progress,
-                                minHeight: 2,
-                                backgroundColor: isDark ? Colors.white10 : Colors.black12,
-                                valueColor: const AlwaysStoppedAnimation<Color>(
-                                  AppTheme.dustyMauve,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${(progress * 100).toInt()}%',
-                            style: GoogleFonts.outfit(
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: context.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              // Right: Rewards badge
-              if (a.rewardPoints > 0 || a.rewardTitle != null || a.rewardTrailStyle != null) ...[
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (a.rewardPoints > 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.dustyMauve.withAlpha(25),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppTheme.dustyMauve.withAlpha(50), width: 0.5),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.monetization_on_rounded,
-                              size: 10,
-                              color: AppTheme.dustyMauve,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              '+${a.rewardPoints}',
-                              style: GoogleFonts.outfit(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.dustyMauve,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    if (a.rewardTitle != null || a.rewardTrailStyle != null) ...[
-                      if (a.rewardPoints > 0) const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.dustyMauve.withAlpha(25),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppTheme.dustyMauve.withAlpha(50), width: 0.5),
-                        ),
-                        child: Text(
-                          a.rewardTitle ?? 'Cosmetic',
-                          style: GoogleFonts.outfit(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.dustyMauve,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
+        child: cardContent,
       ),
     );
   }

@@ -11,7 +11,6 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../widgets/swipe_trail_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/shuffle_manager.dart';
@@ -45,7 +44,9 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   int get _gridN {
     if (_currentLevel < 5) return 3;
     if (_currentLevel < 10) return 4;
-    return 5;
+    if (_currentLevel < 20) return 5;
+    if (_currentLevel < 35) return 6;
+    return 7;
   }
   double get _spacing => _boardSize / _gridN;
 
@@ -67,35 +68,16 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     final active = await ShuffleManager.isActive();
     final hintCount = await HintManager.getHints('pattern_lock');
     
-    final tutorialKey = 'has_seen_tutorial_pattern_lock';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    
     if (mounted) {
       setState(() {
         _shuffleActive = active;
         _hintCount = hintCount;
         _actualGameLevel = savedLvl;
-        if (!hasSeen) {
-          _isTutorialMode = true;
-          _currentLevel = 0; // Force level 0 (simplest) for tutorial
-        } else {
-          _isTutorialMode = false;
-          _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
-        }
+        _isTutorialMode = false;
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
         _loadLevel();
       });
     }
-  }
-
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_pattern_lock';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _currentLevel = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
   }
 
   @override
@@ -533,15 +515,15 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                 },
               ),
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully traced the pattern and unlocked the level."
-                  : "Watch the highlighted pattern blink, then drag your finger to trace the exact same line sequence!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully traced the pattern and unlocked the level."
+          //         : "Watch the highlighted pattern blink, then drag your finger to trace the exact same line sequence!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     ),

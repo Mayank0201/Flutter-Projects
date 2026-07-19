@@ -19,15 +19,29 @@ class FogOverlay extends StatefulWidget {
 }
 
 class _FogOverlayState extends State<FogOverlay> {
-  Offset? _pointerPos;
-  bool _isPointerDown = false;
+  late final ValueNotifier<Offset?> _pointerPosNotifier;
+  late final ValueNotifier<bool> _isPointerDownNotifier;
+
+  @override
+  void initState() {
+    super.initState();
+    _pointerPosNotifier = ValueNotifier<Offset?>(widget.focalPoint);
+    _isPointerDownNotifier = ValueNotifier<bool>(false);
+  }
+
+  @override
+  void dispose() {
+    _pointerPosNotifier.dispose();
+    _isPointerDownNotifier.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant FogOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.focalPoint != oldWidget.focalPoint) {
       if (widget.focalPoint != null) {
-        _pointerPos = widget.focalPoint;
+        _pointerPosNotifier.value = widget.focalPoint;
       }
     }
   }
@@ -36,42 +50,24 @@ class _FogOverlayState extends State<FogOverlay> {
   Widget build(BuildContext context) {
     if (!widget.enabled) return widget.child;
 
-    // Use dragging pointer position when pointer is active to allow viewing board during drag
-    final Offset? activeCenter = (_isPointerDown && _pointerPos != null)
-        ? _pointerPos
-        : (widget.focalPoint ?? _pointerPos);
-
-    // Make the spotlight 25% larger during active press/drag
-    final double activeRadius = _isPointerDown ? (widget.radius * 1.25) : widget.radius;
-
     return Listener(
       onPointerDown: (event) {
-        setState(() {
-          _isPointerDown = true;
-          _pointerPos = event.localPosition;
-        });
+        _isPointerDownNotifier.value = true;
+        _pointerPosNotifier.value = event.localPosition;
       },
       onPointerMove: (event) {
-        setState(() {
-          _pointerPos = event.localPosition;
-        });
+        _pointerPosNotifier.value = event.localPosition;
       },
       onPointerUp: (event) {
-        setState(() {
-          _isPointerDown = false;
-        });
+        _isPointerDownNotifier.value = false;
       },
       onPointerCancel: (event) {
-        setState(() {
-          _isPointerDown = false;
-        });
+        _isPointerDownNotifier.value = false;
       },
       child: MouseRegion(
         onHover: (event) {
-          if (!_isPointerDown && widget.focalPoint == null) {
-            setState(() {
-              _pointerPos = event.localPosition;
-            });
+          if (!_isPointerDownNotifier.value && widget.focalPoint == null) {
+            _pointerPosNotifier.value = event.localPosition;
           }
         },
         child: Stack(
@@ -79,11 +75,26 @@ class _FogOverlayState extends State<FogOverlay> {
             widget.child,
             Positioned.fill(
               child: IgnorePointer(
-                child: CustomPaint(
-                  painter: FogPainter(
-                    pointerPos: activeCenter,
-                    radius: activeRadius,
-                  ),
+                child: ValueListenableBuilder<Offset?>(
+                  valueListenable: _pointerPosNotifier,
+                  builder: (context, pointerPos, _) {
+                    return ValueListenableBuilder<bool>(
+                      valueListenable: _isPointerDownNotifier,
+                      builder: (context, isPointerDown, _) {
+                        final Offset? activeCenter = (isPointerDown && pointerPos != null)
+                            ? pointerPos
+                            : (widget.focalPoint ?? pointerPos);
+                        final double activeRadius = isPointerDown ? (widget.radius * 1.25) : widget.radius;
+
+                        return CustomPaint(
+                          painter: FogPainter(
+                            pointerPos: activeCenter,
+                            radius: activeRadius,
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
               ),
             ),

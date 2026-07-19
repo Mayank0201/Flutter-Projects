@@ -5,14 +5,13 @@ import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/rules_helper.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../widgets/game_tutorial_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class MineFinderScreen extends StatefulWidget {
@@ -37,7 +36,6 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   bool _flagMode = false; // Toggle: false = Dig, true = Flag
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
-  int _actualGameLevel = 0;
 
   int _hintCount = 0;
   String _message = '';
@@ -57,13 +55,13 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   Future<void> _initLevel() async {
     _hintCount = await HintManager.getHints('minesweeper');
     final prefs = await SharedPreferences.getInstance();
-    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
-      _dailyModifierName = prefs.getString('daily_modifier_name') ?? '';
-      _dailyModifierDesc = prefs.getString('daily_modifier_desc') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       try {
-        final extraParamsStr = prefs.getString('daily_modifier_extra_params');
+        final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams);
         if (extraParamsStr != null) {
           final params = jsonDecode(extraParamsStr);
           if (params['radius'] != null) {
@@ -84,19 +82,11 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       }
       return;
     }
-    final savedLevel = prefs.getInt('level_minesweeper') ?? 0;
+    final savedLevel = prefs.getInt(PrefsKeys.gameLevel('minesweeper')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_minesweeper';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_playDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
  
     if (mounted) {
       setState(() {
@@ -108,7 +98,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     if (!_playDailyMode && !_isTutorialMode) {
       Future.delayed(Duration.zero, () async {
         if (!mounted) return;
-        final savedStateStr = prefs.getString('normal_minesweeper_state');
+        final savedStateStr = prefs.getString(PrefsKeys.normalGameState('minesweeper'));
         if (savedStateStr != null) {
           try {
             final data = jsonDecode(savedStateStr);
@@ -179,17 +169,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_minesweeper';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
-  }
+
 
   Future<void> _saveNormalState() async {
     if (_playDailyMode || _won || _lost) return;
@@ -201,18 +181,18 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       'isFirstTap': _isFirstTap,
       'levelIndex': _levelIndex,
     };
-    await prefs.setString('normal_minesweeper_state', jsonEncode(state));
+    await prefs.setString(PrefsKeys.normalGameState('minesweeper'), jsonEncode(state));
   }
 
   Future<void> _clearNormalState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('normal_minesweeper_state');
+    await prefs.remove(PrefsKeys.normalGameState('minesweeper'));
   }
 
   void _loadLevel() {
     // Sizing difficulty scaling:
     // Continuous formula from 5x5 to 13x13 grid sizes.
-    _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 13);
+    _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
     final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
     _mineCount = (3 + (_levelIndex * 1.2).floor()).clamp(3, maxMines.floor());
 
@@ -464,7 +444,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   Future<void> _savePersistedLevel(int lvl) async {
     if (widget.dailyLevelIndex != null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_minesweeper', lvl + 1);
+    await prefs.setInt(PrefsKeys.gameLevel('minesweeper'), lvl + 1);
     final earned = await HintManager.onLevelCleared('minesweeper');
     if (earned) {
       final newCount = await HintManager.getHints('minesweeper');
@@ -933,55 +913,74 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                                   ? const Color(0xFF332F2A)
                                   : context.bgSurface;
 
-                              return GestureDetector(
-                                onTap: () => _handleCellTap(r, c),
-                                onLongPress: () => _toggleFlag(r, c),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 150),
-                                  width: cellSize,
-                                  height: cellSize,
-                                  margin: const EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    color: isRev
-                                        ? (isMine
-                                              ? ((_playDailyMode && _dailyModifierType == 'hidden_rule' && _isCorner(r, c))
-                                                  ? revealedSafeColor
-                                                  : Colors.redAccent.withAlpha(80))
-                                              : revealedSafeColor)
-                                        : context.bgCard,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: isRev
-                                          ? context.textMuted.withAlpha(
-                                              context.isDarkMode ? 80 : 30,
-                                            )
-                                          : context.textMuted.withAlpha(80),
-                                      width: 1,
-                                    ),
-                                    boxShadow: isRev
-                                        ? []
-                                        : [
-                                            BoxShadow(
-                                              color: Colors.black.withAlpha(15),
-                                              blurRadius: 1,
-                                              offset: const Offset(0, 1),
-                                            ),
-                                          ],
-                                  ),
-                                  child: Center(
-                                    child: _buildCellContent(
-                                      r,
-                                      c,
-                                      isRev,
-                                      isMine,
-                                      isFlag,
-                                      adjCount,
-                                      accentColor,
-                                      cellSize,
-                                    ),
-                                  ),
-                                ),
-                              );
+                               String cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}';
+                               if (isRev) {
+                                 if (isMine) {
+                                   cellLabel += ', mine';
+                                 } else {
+                                   cellLabel += ', revealed: $adjCount adjacent mines';
+                                 }
+                               } else {
+                                 if (isFlag) {
+                                   cellLabel += ', flagged';
+                                 } else {
+                                   cellLabel += ', unrevealed';
+                                 }
+                               }
+
+                               return Semantics(
+                                 label: cellLabel,
+                                 button: true,
+                                 child: GestureDetector(
+                                   onTap: () => _handleCellTap(r, c),
+                                   onLongPress: () => _toggleFlag(r, c),
+                                   child: AnimatedContainer(
+                                     duration: const Duration(milliseconds: 150),
+                                     width: cellSize,
+                                     height: cellSize,
+                                     margin: const EdgeInsets.all(2),
+                                     decoration: BoxDecoration(
+                                       color: isRev
+                                           ? (isMine
+                                                 ? ((_playDailyMode && _dailyModifierType == 'hidden_rule' && _isCorner(r, c))
+                                                     ? revealedSafeColor
+                                                     : Colors.redAccent.withAlpha(80))
+                                                 : revealedSafeColor)
+                                           : context.bgCard,
+                                       borderRadius: BorderRadius.circular(6),
+                                       border: Border.all(
+                                         color: isRev
+                                             ? context.textMuted.withAlpha(
+                                                 context.isDarkMode ? 80 : 30,
+                                               )
+                                             : context.textMuted.withAlpha(80),
+                                         width: 1,
+                                       ),
+                                       boxShadow: isRev
+                                           ? []
+                                           : [
+                                               BoxShadow(
+                                                 color: Colors.black.withAlpha(15),
+                                                 blurRadius: 1,
+                                                 offset: const Offset(0, 1),
+                                               ),
+                                             ],
+                                     ),
+                                     child: Center(
+                                       child: _buildCellContent(
+                                         r,
+                                         c,
+                                         isRev,
+                                         isMine,
+                                         isFlag,
+                                         adjCount,
+                                         accentColor,
+                                         cellSize,
+                                       ),
+                                     ),
+                                   ),
+                                 ),
+                               );
                             }),
                           );
                         }),
@@ -1117,15 +1116,15 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
             Navigator.pop(context, true);
           },
         ),
-      if (_isTutorialMode)
-        InteractiveTutorialOverlay(
-          instruction: _tutorialCompleted
-              ? "Nice! You successfully cleared all safe cells."
-              : "Tap safe cells to reveal adjacent mine counts. Use Flag mode to mark suspected mines, and Dig mode to clear safe spaces!",
-          isCompleted: _tutorialCompleted,
-          onSkip: _finishTutorial,
-          onStartGame: _finishTutorial,
-        ),
+      // if (_isTutorialMode)
+      //   InteractiveTutorialOverlay(
+      //     instruction: _tutorialCompleted
+      //         ? "Nice! You successfully cleared all safe cells."
+      //         : "Tap safe cells to reveal adjacent mine counts. Use Flag mode to mark suspected mines, and Dig mode to clear safe spaces!",
+      //     isCompleted: _tutorialCompleted,
+      //     onSkip: _finishTutorial,
+      //     onStartGame: _finishTutorial,
+      //   ),
     ],
   ),
 );

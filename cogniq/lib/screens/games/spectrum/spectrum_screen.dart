@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../widgets/buy_hints_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class HueTile {
@@ -109,75 +109,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     });
   }
 
-  void _showTutorial(BuildContext ctx) {
-    showDialog(
-      context: ctx,
-      barrierDismissible: true,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Theme.of(ctx).scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'How to Play Spectrum',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.w800, fontSize: 18),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _tutRow(
-                '🎨',
-                'The grid holds color tiles scrambled out of order.',
-              ),
-              _tutRow(
-                '🔒',
-                'Corner tiles (black dot) are locked in place as anchors.',
-              ),
-              _tutRow(
-                '👆',
-                'Tap one tile to SELECT it, then tap another to SWAP them.',
-              ),
-              _tutRow(
-                '🌈',
-                'Arrange tiles so colors blend smoothly — no sudden jumps.',
-              ),
-              _tutRow(
-                '✅',
-                'Tap PREVIEW (👁) to toggle showing which tiles are correct.',
-              ),
-              _tutRow('💡', 'Use Hint to auto-fix the most misplaced tile.'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(
-              'Got it!',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _tutRow(String emoji, String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(emoji, style: const TextStyle(fontSize: 20)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: GoogleFonts.outfit(fontSize: 13, height: 1.5),
-          ),
-        ),
-      ],
-    ),
-  );
 
   void _setupGridDimensions() {
     if (_isDailyMode && _dailyModifierType == 'prism') {
@@ -224,9 +156,10 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         _cols = 10;
         break; // level 41-45
       default:
-        _rows = 10;
-        _cols = 11;
-        break; // level 46-50
+        final extraTiers = tier - 9;
+        _rows = (10 + extraTiers ~/ 2).clamp(10, 12);
+        _cols = (11 + (extraTiers + 1) ~/ 2).clamp(11, 13);
+        break;
     }
   }
 
@@ -365,11 +298,11 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     if (_isDailyMode) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('spectrum_mid_levelIndex', _levelIndex);
-      await prefs.setInt('spectrum_mid_cTL', _cTL.value);
-      await prefs.setInt('spectrum_mid_cTR', _cTR.value);
-      await prefs.setInt('spectrum_mid_cBL', _cBL.value);
-      await prefs.setInt('spectrum_mid_cBR', _cBR.value);
+      await prefs.setInt(PrefsKeys.spectrumMidLevelIndex, _levelIndex);
+      await prefs.setInt(PrefsKeys.spectrumMidCTL, _cTL.value);
+      await prefs.setInt(PrefsKeys.spectrumMidCTR, _cTR.value);
+      await prefs.setInt(PrefsKeys.spectrumMidCBL, _cBL.value);
+      await prefs.setInt(PrefsKeys.spectrumMidCBR, _cBR.value);
 
       final List<int> tileIds = [];
       for (int r = 0; r < _rows; r++) {
@@ -377,19 +310,19 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
           tileIds.add(_grid[r][c].id);
         }
       }
-      await prefs.setString('spectrum_mid_layout', tileIds.join(','));
+      await prefs.setString(PrefsKeys.spectrumMidLayout, tileIds.join(','));
     } catch (_) {}
   }
 
   Future<void> _clearMidLevelState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('spectrum_mid_levelIndex');
-      await prefs.remove('spectrum_mid_cTL');
-      await prefs.remove('spectrum_mid_cTR');
-      await prefs.remove('spectrum_mid_cBL');
-      await prefs.remove('spectrum_mid_cBR');
-      await prefs.remove('spectrum_mid_layout');
+      await prefs.remove(PrefsKeys.spectrumMidLevelIndex);
+      await prefs.remove(PrefsKeys.spectrumMidCTL);
+      await prefs.remove(PrefsKeys.spectrumMidCTR);
+      await prefs.remove(PrefsKeys.spectrumMidCBL);
+      await prefs.remove(PrefsKeys.spectrumMidCBR);
+      await prefs.remove(PrefsKeys.spectrumMidLayout);
     } catch (_) {}
   }
 
@@ -412,39 +345,31 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
   Future<void> _loadPersistedLevel() async {
     _hintCount = await HintManager.getHints('hue');
     final prefs = await SharedPreferences.getInstance();
-    _isDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_isDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
     }
-    final savedLevel = prefs.getInt('level_hue') ?? 0;
+    final savedLevel = prefs.getInt(PrefsKeys.gameLevel('hue')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_hue';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_isDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
 
     if (mounted) {
       setState(() {
         _shuffleActive = active;
 
-        final midLevelIndex = prefs.getInt('spectrum_mid_levelIndex');
-        final midLayoutStr = prefs.getString('spectrum_mid_layout');
+        final midLevelIndex = prefs.getInt(PrefsKeys.spectrumMidLevelIndex);
+        final midLayoutStr = prefs.getString(PrefsKeys.spectrumMidLayout);
         if (!_isDailyMode &&
             midLevelIndex == _levelIndex &&
             midLayoutStr != null &&
             midLayoutStr.isNotEmpty) {
           _setupGridDimensions();
-          final cTLVal = prefs.getInt('spectrum_mid_cTL')!;
-          final cTRVal = prefs.getInt('spectrum_mid_cTR')!;
-          final cBLVal = prefs.getInt('spectrum_mid_cBL')!;
-          final cBRVal = prefs.getInt('spectrum_mid_cBR')!;
+          final cTLVal = prefs.getInt(PrefsKeys.spectrumMidCTL)!;
+          final cTRVal = prefs.getInt(PrefsKeys.spectrumMidCTR)!;
+          final cBLVal = prefs.getInt(PrefsKeys.spectrumMidCBL)!;
+          final cBRVal = prefs.getInt(PrefsKeys.spectrumMidCBR)!;
           _cTL = Color(cTLVal);
           _cTR = Color(cTRVal);
           _cBL = Color(cBLVal);
@@ -497,22 +422,12 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_hue';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _isDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _generateSpectrum();
-    });
-  }
+
 
   Future<void> _savePersistedLevel(int lvl) async {
     if (_isDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_hue', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('hue'), lvl);
     final earned = await HintManager.onLevelCleared('hue');
     final newCount = await HintManager.getHints('hue');
     if (mounted) {
@@ -996,15 +911,15 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                 },
               ),
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully arranged the colors in order."
-                  : "Tap a tile, then tap an adjacent tile to swap them. Arrange all tiles so they form a smooth color gradient from corner to corner. The circles represent locked guide tiles!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully arranged the colors in order."
+          //         : "Tap a tile, then tap an adjacent tile to swap them. Arrange all tiles so they form a smooth color gradient from corner to corner. The circles represent locked guide tiles!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     );

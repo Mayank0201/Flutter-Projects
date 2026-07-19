@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/game_info.dart';
 import 'point_manager.dart';
+import 'prefs_keys.dart';
 
 class Achievement {
   final String id;
@@ -213,13 +214,13 @@ class AchievementManager {
 
   static Future<List<Achievement>> checkAndUnlock(String currentGameId) async {
     final prefs = await SharedPreferences.getInstance();
-    final unlocked = prefs.getStringList('unlocked_achievements') ?? [];
+    final unlocked = prefs.getStringList(PrefsKeys.unlockedAchievements) ?? [];
     final newlyUnlocked = <Achievement>[];
 
     // Read current stats
-    final globalClears = prefs.getInt('global_level_cleared_count') ?? 0;
-    final dailyStreak = prefs.getInt('daily_streak') ?? 0;
-    final shuffleClears = prefs.getInt('shuffle_clears') ?? 0;
+    final globalClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
+    final dailyStreak = prefs.getInt(PrefsKeys.dailyStreak) ?? 0;
+    final shuffleClears = prefs.getInt(PrefsKeys.shuffleClears) ?? 0;
 
     // Get per-game stats
     final activeGames = kAllGames.where((g) => !g.isStashed).toList();
@@ -227,7 +228,7 @@ class AchievementManager {
     int maxLevelReached = 0;
 
     for (final game in activeGames) {
-      final level = prefs.getInt('level_${game.id}') ?? 0;
+      final level = prefs.getInt(PrefsKeys.gameLevel(game.id)) ?? 0;
       if (level > 0) {
         playedGamesCount++;
       }
@@ -236,7 +237,7 @@ class AchievementManager {
       }
     }
 
-    final levelChimp = prefs.getInt('level_chimp') ?? 0;
+    final levelChimp = prefs.getInt(PrefsKeys.gameLevel('chimp')) ?? 0;
 
     for (final a in allAchievements) {
       if (unlocked.contains(a.id)) continue;
@@ -278,7 +279,7 @@ class AchievementManager {
           conditionMet = playedGamesCount >= 10;
           break;
         case 'completionist':
-          conditionMet = playedGamesCount >= 15;
+          conditionMet = playedGamesCount >= 12;
           break;
 
         // Mastery
@@ -318,61 +319,90 @@ class AchievementManager {
       if (conditionMet) {
         unlocked.add(a.id);
         newlyUnlocked.add(a);
-
-        // Dispatch rewards!
-        if (a.rewardPoints > 0) {
-          await PointManager.addPoints(a.rewardPoints);
-        }
-        if (a.rewardTitle != null) {
-          final titles = prefs.getStringList('unlocked_titles') ?? [];
-          if (!titles.contains(a.rewardTitle!)) {
-            titles.add(a.rewardTitle!);
-            await prefs.setStringList('unlocked_titles', titles);
-          }
-        }
-        if (a.rewardTrailStyle != null) {
-          // Centurion unlocks swipe trail base features
-          if (a.id == 'centurion') {
-            await prefs.setBool('swipe_trail_unlocked', true);
-          }
-          final styles = prefs.getStringList('unlocked_trail_styles') ?? ['accent'];
-          if (!styles.contains(a.rewardTrailStyle!)) {
-            styles.add(a.rewardTrailStyle!);
-            await prefs.setStringList('unlocked_trail_styles', styles);
-          }
-        }
       }
     }
 
     if (newlyUnlocked.isNotEmpty) {
-      await prefs.setStringList('unlocked_achievements', unlocked);
+      await prefs.setStringList(PrefsKeys.unlockedAchievements, unlocked);
     }
 
     return newlyUnlocked;
   }
 
+  static Future<bool> claim(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final unlocked = prefs.getStringList(PrefsKeys.unlockedAchievements) ?? [];
+    final claimed = prefs.getStringList(PrefsKeys.claimedAchievements) ?? [];
+
+    if (!unlocked.contains(id) || claimed.contains(id)) {
+      return false;
+    }
+
+    // Find the achievement
+    Achievement? target;
+    for (final a in allAchievements) {
+      if (a.id == id) {
+        target = a;
+        break;
+      }
+    }
+
+    if (target == null) return false;
+
+    // Dispatch rewards
+    if (target.rewardPoints > 0) {
+      await PointManager.addPoints(target.rewardPoints);
+    }
+    if (target.rewardTitle != null) {
+      final titles = prefs.getStringList(PrefsKeys.unlockedTitles) ?? [];
+      if (!titles.contains(target.rewardTitle!)) {
+        titles.add(target.rewardTitle!);
+        await prefs.setStringList(PrefsKeys.unlockedTitles, titles);
+      }
+    }
+    if (target.rewardTrailStyle != null) {
+      if (target.id == 'centurion') {
+        await prefs.setBool('swipe_trail_unlocked', true);
+      }
+      final styles = prefs.getStringList(PrefsKeys.unlockedTrailStyles) ?? ['accent'];
+      if (!styles.contains(target.rewardTrailStyle!)) {
+        styles.add(target.rewardTrailStyle!);
+        await prefs.setStringList(PrefsKeys.unlockedTrailStyles, styles);
+      }
+    }
+
+    claimed.add(id);
+    await prefs.setStringList(PrefsKeys.claimedAchievements, claimed);
+    return true;
+  }
+
+  static Future<List<String>> getClaimedIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(PrefsKeys.claimedAchievements) ?? [];
+  }
+
   static Future<List<String>> getUnlockedIds() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('unlocked_achievements') ?? [];
+    return prefs.getStringList(PrefsKeys.unlockedAchievements) ?? [];
   }
 
   static Future<double> getProgress(Achievement a) async {
     final prefs = await SharedPreferences.getInstance();
-    final globalClears = prefs.getInt('global_level_cleared_count') ?? 0;
-    final dailyStreak = prefs.getInt('daily_streak') ?? 0;
-    final shuffleClears = prefs.getInt('shuffle_clears') ?? 0;
+    final globalClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
+    final dailyStreak = prefs.getInt(PrefsKeys.dailyStreak) ?? 0;
+    final shuffleClears = prefs.getInt(PrefsKeys.shuffleClears) ?? 0;
 
     final activeGames = kAllGames.where((g) => !g.isStashed).toList();
     int playedGamesCount = 0;
     int maxLevelReached = 0;
 
     for (final game in activeGames) {
-      final level = prefs.getInt('level_${game.id}') ?? 0;
+      final level = prefs.getInt(PrefsKeys.gameLevel(game.id)) ?? 0;
       if (level > 0) playedGamesCount++;
       if (level > maxLevelReached) maxLevelReached = level;
     }
 
-    final levelChimp = prefs.getInt('level_chimp') ?? 0;
+    final levelChimp = prefs.getInt(PrefsKeys.gameLevel('chimp')) ?? 0;
 
     switch (a.id) {
       // Milestones
@@ -399,7 +429,7 @@ class AchievementManager {
       case 'jack_of_all':
         return (playedGamesCount / 10.0).clamp(0.0, 1.0);
       case 'completionist':
-        return (playedGamesCount / 15.0).clamp(0.0, 1.0);
+        return (playedGamesCount / 12.0).clamp(0.0, 1.0);
 
       // Mastery
       case 'apprentice':

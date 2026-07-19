@@ -4,6 +4,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_keys.dart';
 import 'activity_tracker.dart';
 import 'daily_challenge_manager.dart';
 
@@ -165,7 +166,7 @@ class NotificationManager {
     final prefs = await SharedPreferences.getInstance();
     
     // Check if challenge start time exists
-    final startTimeStr = prefs.getString('daily_challenge_start_time') ?? '';
+    final startTimeStr = prefs.getString(PrefsKeys.dailyChallengeStartTime) ?? '';
     if (startTimeStr.isEmpty) {
       await _plugin.cancel(dailyChallengeNotificationId);
       return;
@@ -289,7 +290,7 @@ class NotificationManager {
   static Future<void> scheduleInstallTestNotification() async {
     if (!_isSupportedPlatform) return;
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('test_install_notification_scheduled') ?? false) {
+    if (prefs.getBool(PrefsKeys.testInstallNotificationScheduled) ?? false) {
       return; // already scheduled
     }
 
@@ -318,7 +319,7 @@ class NotificationManager {
         androidScheduleMode: mode,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       );
-      await prefs.setBool('test_install_notification_scheduled', true);
+      await prefs.setBool(PrefsKeys.testInstallNotificationScheduled, true);
     } catch (e) {
       debugPrint('Failed to schedule install test notification: $e');
     }

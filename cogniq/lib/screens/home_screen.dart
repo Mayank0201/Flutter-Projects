@@ -17,6 +17,7 @@ import 'achievements_screen.dart';
 import 'trails_screen.dart';
 import '../widgets/buy_hints_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
+import '../utils/prefs_keys.dart';
 // import 'daily_challenge_test_screen.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/notification_manager.dart';
@@ -45,6 +46,13 @@ const Map<String, IconData> _gameIcons = {
   'colour_link': Icons.link_outlined,
   'color_flood': Icons.water_drop_outlined,
   'circuit_guide': Icons.electrical_services_outlined,
+  'kakuro': Icons.border_all_outlined,
+  'cipherdecoder': Icons.vpn_key_outlined,
+  'hitori': Icons.grid_on_outlined,
+  'slitherlink': Icons.loop_outlined,
+  'masyu': Icons.circle_outlined,
+  'bridges': Icons.gesture_outlined,
+  'sumstrike': Icons.add_box_outlined,
 };
 
 const Map<String, List<String>> _categories = {
@@ -62,6 +70,9 @@ const Map<String, List<String>> _categories = {
     'colour_link',
     'color_flood',
     'circuit_guide',
+    'masyu',
+    'bridges',
+    'sumstrike',
   ],
   'Memory': [
     'chimp',
@@ -291,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _toggleShuffle() async {
     final prefs = await SharedPreferences.getInstance();
-    final hasSeen = prefs.getBool('has_seen_shuffle_tutorial') ?? false;
+    final hasSeen = prefs.getBool(PrefsKeys.hasSeenShuffleTutorial) ?? false;
 
     if (!hasSeen) {
       if (!mounted) return;
@@ -328,7 +339,7 @@ class _HomeScreenState extends State<HomeScreen>
           actions: [
             TextButton(
               onPressed: () async {
-                await prefs.setBool('has_seen_shuffle_tutorial', true);
+                await prefs.setBool(PrefsKeys.hasSeenShuffleTutorial, true);
                 Navigator.pop(ctx);
                 await _performToggleShuffle();
               },
@@ -418,7 +429,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _checkAndShowDailyChallengePopup() async {
     final prefs = await SharedPreferences.getInstance();
-    final bool hasSeen = prefs.getBool('shown_daily_challenge_popup_v1') ?? false;
+    final bool hasSeen = prefs.getBool(PrefsKeys.shownDailyChallengePopupV1) ?? false;
     if (!hasSeen) {
       if (!mounted) return;
       showDialog(
@@ -510,7 +521,7 @@ class _HomeScreenState extends State<HomeScreen>
           );
         },
       );
-      await prefs.setBool('shown_daily_challenge_popup_v1', true);
+      await prefs.setBool(PrefsKeys.shownDailyChallengePopupV1, true);
     }
   }
 
@@ -523,7 +534,6 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didPopNext() async {
     await ShuffleManager.setInactive();
-    await DailyChallengeManager.clearDailyModifier();
     _loadDailyChallengeInfo();
     _loadShuffleState();
   }
@@ -571,7 +581,7 @@ class _HomeScreenState extends State<HomeScreen>
     int maxLvl = 0;
 
     for (final g in kAllGames) {
-      final lvl = prefs.getInt('level_${g.id}') ?? 0;
+      final lvl = prefs.getInt(PrefsKeys.gameLevel(g.id)) ?? 0;
       if (lvl > 0) completed += lvl;
       if (lvl > maxLvl) {
         maxLvl = lvl;
@@ -614,8 +624,8 @@ class _HomeScreenState extends State<HomeScreen>
         .where((g) => !g.isStashed)
         .toList();
 
-    _pointBalance = prefs.getInt('points') ?? 0;
-    _shuffleActive = prefs.getBool('shuffle_mode') ?? false;
+    _pointBalance = prefs.getInt(PrefsKeys.points) ?? 0;
+    _shuffleActive = prefs.getBool(PrefsKeys.shuffleMode) ?? false;
 
     if (mounted) setState(() {});
   }
@@ -749,17 +759,14 @@ class _HomeScreenState extends State<HomeScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const SizedBox(width: 6),
-                            SizedBox(
-                              width: tabWidth - 36,
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.outfit(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: activeColor,
-                                ),
+                            Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: activeColor,
                               ),
                             ),
                           ],
@@ -1001,6 +1008,7 @@ class _HomeScreenState extends State<HomeScreen>
               else
                 GridView.builder(
                   shrinkWrap: true,
+                  padding: EdgeInsets.zero,
                   physics: const NeverScrollableScrollPhysics(),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
@@ -1316,7 +1324,7 @@ class _RecentGameCardState extends State<_RecentGameCard> {
 
   Future<void> _loadProgress() async {
     final prefs = await SharedPreferences.getInstance();
-    final lvl = prefs.getInt('level_${widget.game.id}') ?? 0;
+    final lvl = prefs.getInt(PrefsKeys.gameLevel(widget.game.id)) ?? 0;
     if (mounted) {
       setState(() {
         _level = lvl + 1;
@@ -1451,7 +1459,7 @@ class _GameCardState extends State<_GameCard> {
 
   Future<void> _loadProgress() async {
     final prefs = await SharedPreferences.getInstance();
-    final lvl = prefs.getInt('level_${widget.game.id}') ?? 0;
+    final lvl = prefs.getInt(PrefsKeys.gameLevel(widget.game.id)) ?? 0;
     if (mounted) {
       setState(() {
         _level = lvl + 1;
@@ -1573,10 +1581,10 @@ class _StatsTabState extends State<_StatsTab> {
     final Map<String, int> lvls = {};
     final Map<String, int> strks = {};
     for (final g in kAllGames) {
-      lvls[g.id] = (prefs.getInt('level_${g.id}') ?? 0) + 1;
-      strks[g.id] = prefs.getInt('streak_${g.id}') ?? 0;
+      lvls[g.id] = (prefs.getInt(PrefsKeys.gameLevel(g.id)) ?? 0) + 1;
+      strks[g.id] = prefs.getInt(PrefsKeys.gameStreak(g.id)) ?? 0;
     }
-    final recentlyPlayedIds = prefs.getStringList('recently_played_games') ?? [];
+    final recentlyPlayedIds = prefs.getStringList(PrefsKeys.recentlyPlayedGames) ?? [];
     if (mounted) {
       setState(() {
         _levels = lvls;

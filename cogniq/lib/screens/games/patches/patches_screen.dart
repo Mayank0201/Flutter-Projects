@@ -1,16 +1,15 @@
 import'dart:math';
-import'package:flutter/material.dart';
-import'package:google_fonts/google_fonts.dart';
-import'package:shared_preferences/shared_preferences.dart';
-import'../../../utils/rules_helper.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import'../../../theme/app_theme.dart';
+import'../../../utils/prefs_keys.dart';
 import'../../../utils/hint_manager.dart';
 import'../../../utils/audio_manager.dart';
 import'../../../widgets/challenge_cleared_overlay.dart';
 import'../../../widgets/auto_next_countdown.dart';
-import'../../../widgets/game_tutorial_dialog.dart';
 import'../../../widgets/buy_hints_dialog.dart';
-import'../../../widgets/interactive_tutorial_overlay.dart';
+import'../../../widgets/game_tutorial_dialog.dart';
 // Chimp Test: numbers appear, tap 1 to hide them, then tap in order from memory.
 // Grid and number count grow each level.
 import '../../../utils/shuffle_manager.dart';
@@ -57,7 +56,6 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   int _hintCount = 0;
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
-  int _actualGameLevel = 0;
 
   @override
   void initState() {
@@ -69,26 +67,18 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   Future<void> _loadPersistedLevel() async {
     _hintCount = await HintManager.getHints('chimp');
     final prefs = await SharedPreferences.getInstance();
-    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
     } else {
       _dailyModifierType = '';
     }
-    final savedLevel = prefs.getInt('level_chimp') ?? 0;
+    final savedLevel = prefs.getInt(PrefsKeys.gameLevel('chimp')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_chimp';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_playDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
- 
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
+
     if (mounted) {
       setState(() {
         _shuffleActive = active;
@@ -97,22 +87,10 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_chimp';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
-  }
-
   Future<void> _savePersistedLevel(int lvl) async {
     if (_playDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_chimp', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('chimp'), lvl);
     final earned = await HintManager.onLevelCleared('chimp');
     final newCount = await HintManager.getHints('chimp');
     setState(() {
@@ -146,7 +124,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       return _levels[index];
     }
     final extra = index - _levels.length;
-    final gridSize = (9 + extra ~/ 5).clamp(9, 12);
+    final gridSize = (9 + extra ~/ 5).clamp(9, 14);
     final maxCells = gridSize * gridSize;
     final numCount = (60 + extra * 2).clamp(60, (maxCells * 0.75).toInt());
     return (gridSize, numCount);
@@ -539,15 +517,15 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                 Navigator.pop(context, true);
               },
             ),
-          if (_isTutorialMode)
-            InteractiveTutorialOverlay(
-              instruction: _tutorialCompleted
-                  ? "Nice! You successfully memorized and tapped all numbers."
-                  : "Watch the numbers closely. Tapping 1 will hide them, then you must tap the remaining tiles in order from memory!",
-              isCompleted: _tutorialCompleted,
-              onSkip: _finishTutorial,
-              onStartGame: _finishTutorial,
-            ),
+          // if (_isTutorialMode)
+          //   InteractiveTutorialOverlay(
+          //     instruction: _tutorialCompleted
+          //         ? "Nice! You successfully memorized and tapped all numbers."
+          //         : "Watch the numbers closely. Tapping 1 will hide them, then you must tap the remaining tiles in order from memory!",
+          //     isCompleted: _tutorialCompleted,
+          //     onSkip: _finishTutorial,
+          //     onStartGame: _finishTutorial,
+          //   ),
         ],
       ),
     );

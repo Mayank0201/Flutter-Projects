@@ -1,7 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_keys.dart';
 
 class RecentlyPlayedManager {
-  static const String _key = 'recently_played_games';
+  static const String _key = PrefsKeys.recentlyPlayedGames;
 
   static Future<List<String>> getRecentlyPlayed() async {
     final prefs = await SharedPreferences.getInstance();

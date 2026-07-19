@@ -8,10 +8,9 @@ import'../../../utils/rules_helper.dart';
 import'../../../theme/app_theme.dart';
 import'../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
-import '../../../widgets/game_tutorial_dialog.dart';
-import '../../../widgets/interactive_tutorial_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class SpellingBeeLevel {
@@ -454,7 +453,8 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       return 10;
     }
     if (_levelIndex >= 29) {
-      return 10;
+      final extraCount = (_levelIndex - 29) ~/ 10;
+      return (10 + extraCount).clamp(10, min(15, _level.validWords.length));
     }
     return _level.targetCount;
   }
@@ -476,26 +476,18 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   Future<void> _initLevel() async {
     _hintCount = await HintManager.getHints('spellingbee');
     final prefs = await SharedPreferences.getInstance();
-    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
-      _dailyModifierType = prefs.getString('daily_modifier_type') ?? '';
+      _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
     } else {
       _dailyModifierType = '';
     }
 
-    final savedLevel = prefs.getInt('level_spellingbee') ?? 0;
+    final savedLevel = prefs.getInt(PrefsKeys.gameLevel('spellingbee')) ?? 0;
     final active = await ShuffleManager.isActive();
 
-    final tutorialKey = 'has_seen_tutorial_spellingbee';
-    final hasSeen = prefs.getBool(tutorialKey) ?? false;
-    if (!hasSeen && !_playDailyMode) {
-      _isTutorialMode = true;
-      _actualGameLevel = savedLevel;
-      _levelIndex = 0;
-    } else {
-      _isTutorialMode = false;
-      _levelIndex = savedLevel;
-    }
+    _isTutorialMode = false;
+    _levelIndex = savedLevel;
  
     if (mounted) {
       setState(() {
@@ -506,24 +498,14 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     }
   }
 
-  Future<void> _finishTutorial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tutorialKey = 'has_seen_tutorial_spellingbee';
-    await prefs.setBool(tutorialKey, true);
-    setState(() {
-      _isTutorialMode = false;
-      _tutorialCompleted = false;
-      _levelIndex = _playDailyMode ? (_actualGameLevel % 10) : _actualGameLevel;
-      _loadLevel();
-    });
-  }
+
 
   Future<void> _checkSavedState() async {
     if (_playDailyMode || _isTutorialMode) return;
     final prefs = await SharedPreferences.getInstance();
     Future.delayed(Duration.zero, () async {
         if (!mounted) return;
-        final savedStateStr = prefs.getString('normal_spellingbee_state');
+        final savedStateStr = prefs.getString(PrefsKeys.normalGameState('spellingbee'));
         if (savedStateStr != null) {
           try {
             final data = jsonDecode(savedStateStr);
@@ -595,12 +577,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       'levelIndex': _levelIndex,
       'foundWords': _foundWords.toList(),
     };
-    await prefs.setString('normal_spellingbee_state', jsonEncode(state));
+    await prefs.setString(PrefsKeys.normalGameState('spellingbee'), jsonEncode(state));
   }
 
   Future<void> _clearNormalState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('normal_spellingbee_state');
+    await prefs.remove(PrefsKeys.normalGameState('spellingbee'));
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
@@ -608,7 +590,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       return;
     }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level_spellingbee', lvl);
+    await prefs.setInt(PrefsKeys.gameLevel('spellingbee'), lvl);
     final earned = await HintManager.onLevelCleared('spellingbee');
     final newCount = await HintManager.getHints('spellingbee');
     setState(() {
@@ -621,7 +603,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   Future<void> _useHint() async {
     if (_won || _hintCount <= 0) return;
     String? targetWord;
-    final minLength = _levelIndex >= 29 ? 4 : 3;
+    final minLength = _levelIndex >= 60 ? 5 : (_levelIndex >= 29 ? 4 : 3);
     for (final word in _level.validWords) {
       if (word.length >= minLength && word.contains(_level.centerLetter) && !_foundWords.contains(word)) {
         targetWord = word;
@@ -1197,15 +1179,15 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
             },
           ),
         ),
-      if (_isTutorialMode)
-        InteractiveTutorialOverlay(
-          instruction: _tutorialCompleted
-              ? "Nice! You successfully found all required words."
-              : "Swipe and connect letters to form words. Every word must contain the center letter at least once, and be at least 4 letters long!",
-          isCompleted: _tutorialCompleted,
-          onSkip: _finishTutorial,
-          onStartGame: _finishTutorial,
-        ),
+      // if (_isTutorialMode)
+      //   InteractiveTutorialOverlay(
+      //     instruction: _tutorialCompleted
+      //         ? "Nice! You successfully found all required words."
+      //         : "Swipe and connect letters to form words. Every word must contain the center letter at least once, and be at least 4 letters long!",
+      //     isCompleted: _tutorialCompleted,
+      //     onSkip: _finishTutorial,
+      //     onStartGame: _finishTutorial,
+      //   ),
       ],
     ),
     );

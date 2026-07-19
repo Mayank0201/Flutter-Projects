@@ -82,8 +82,8 @@ class _AchievementToastWidgetState extends State<_AchievementToastWidget>
 
     _controller.forward();
 
-    // Auto dismiss after 3.2 seconds (500ms slide-in + 2200ms stay + 500ms slide-out)
-    Future.delayed(const Duration(milliseconds: 2700), () {
+    // Auto dismiss after 2.7 seconds (500ms slide-in + 1700ms stay + 500ms slide-out)
+    Future.delayed(const Duration(milliseconds: 2200), () {
       if (mounted) {
         _controller.reverse().then((_) {
           widget.onDismiss();
