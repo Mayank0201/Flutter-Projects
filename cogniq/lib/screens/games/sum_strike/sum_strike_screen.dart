@@ -39,6 +39,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   int _hintCount = 1;
   bool _isHintShowing = false;
   int _hintIdx = -1;
+  final Set<int> _wrongTaps = {};
 
   @override
   void initState() {
@@ -76,6 +77,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   }
 
   void _generatePuzzle() {
+    if (!_playDailyMode && _currentLevel >= 50) {
+      return;
+    }
     final rand = Random();
     
     // Easy: 3x3, Medium: 4x4, Hard: 5x5
@@ -88,41 +92,85 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     }
 
     final total = _gridSize * _gridSize;
-    _grid = List.generate(total, (_) => rand.nextInt(9) + 1);
-    
-    List<bool> solution = [];
-    do {
-      solution = List.generate(total, (_) => rand.nextDouble() > 0.4);
-    } while (solution.where((k) => k).length < total * 0.3); // Must keep at least 30% of numbers
-
     _rowTargets = List.filled(_gridSize, 0);
     _colTargets = List.filled(_gridSize, 0);
 
-    for (int r = 0; r < _gridSize; r++) {
-      int rSum = 0;
-      for (int c = 0; c < _gridSize; c++) {
-        if (solution[r * _gridSize + c]) {
-          rSum += _grid[r * _gridSize + c];
+    bool generated = false;
+
+    // Try up to 50 attempts to find a uniquely solvable puzzle
+    for (int attempt = 0; attempt < 50; attempt++) {
+      _grid = List.generate(total, (_) => rand.nextInt(9) + 1);
+      
+      List<bool> solution = [];
+      int retries = 0;
+      do {
+        solution = List.generate(total, (_) => rand.nextDouble() > 0.4);
+        retries++;
+      } while (solution.where((k) => k).length < total * 0.3 && retries < 20);
+
+      // Compute targets for this candidate solution
+      for (int r = 0; r < _gridSize; r++) {
+        int rSum = 0;
+        for (int c = 0; c < _gridSize; c++) {
+          if (solution[r * _gridSize + c]) {
+            rSum += _grid[r * _gridSize + c];
+          }
         }
+        _rowTargets[r] = rSum;
       }
-      _rowTargets[r] = rSum;
+
+      for (int c = 0; c < _gridSize; c++) {
+        int cSum = 0;
+        for (int r = 0; r < _gridSize; r++) {
+          if (solution[r * _gridSize + c]) {
+            cSum += _grid[r * _gridSize + c];
+          }
+        }
+        _colTargets[c] = cSum;
+      }
+
+      // Check uniqueness of solution using backtracking
+      final tempKeep = List.filled(total, false);
+      final solutions = _countSumStrikeSolutions(0, tempKeep, 2);
+      if (solutions == 1) {
+        _solutionMask = solution;
+        generated = true;
+        break;
+      }
     }
 
-    for (int c = 0; c < _gridSize; c++) {
-      int cSum = 0;
+    // Fallback if no unique board found after 50 attempts
+    if (!generated) {
+      _grid = List.generate(total, (_) => rand.nextInt(9) + 1);
+      List<bool> solution = [];
+      int retries = 0;
+      do {
+        solution = List.generate(total, (_) => rand.nextDouble() > 0.4);
+        retries++;
+      } while (solution.where((k) => k).length < total * 0.3 && retries < 20);
+
       for (int r = 0; r < _gridSize; r++) {
-        if (solution[r * _gridSize + c]) {
-          cSum += _grid[r * _gridSize + c];
+        int rSum = 0;
+        for (int c = 0; c < _gridSize; c++) {
+          if (solution[r * _gridSize + c]) rSum += _grid[r * _gridSize + c];
         }
+        _rowTargets[r] = rSum;
       }
-      _colTargets[c] = cSum;
+      for (int c = 0; c < _gridSize; c++) {
+        int cSum = 0;
+        for (int r = 0; r < _gridSize; r++) {
+          if (solution[r * _gridSize + c]) cSum += _grid[r * _gridSize + c];
+        }
+        _colTargets[c] = cSum;
+      }
+      _solutionMask = solution;
     }
 
     _keep = List.filled(total, true);
-    _solutionMask = solution;
     _isSuccess = false;
     _hintIdx = -1;
     _isHintShowing = false;
+    _wrongTaps.clear();
   }
 
   int _rowSum(int r) {
@@ -141,12 +189,109 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     return s;
   }
 
+  bool _isSumStrikePartialValid(int cellIdx, List<bool> tempKeep) {
+    for (int r = 0; r < _gridSize; r++) {
+      int determinedKeptSum = 0;
+      int undeterminedMaxSum = 0;
+      for (int c = 0; c < _gridSize; c++) {
+        int idx = r * _gridSize + c;
+        if (idx <= cellIdx) {
+          if (tempKeep[idx]) determinedKeptSum += _grid[idx];
+        } else {
+          undeterminedMaxSum += _grid[idx];
+        }
+      }
+      if (determinedKeptSum > _rowTargets[r]) return false;
+      if (determinedKeptSum + undeterminedMaxSum < _rowTargets[r]) return false;
+    }
+
+    for (int c = 0; c < _gridSize; c++) {
+      int determinedKeptSum = 0;
+      int undeterminedMaxSum = 0;
+      for (int r = 0; r < _gridSize; r++) {
+        int idx = r * _gridSize + c;
+        if (idx <= cellIdx) {
+          if (tempKeep[idx]) determinedKeptSum += _grid[idx];
+        } else {
+          undeterminedMaxSum += _grid[idx];
+        }
+      }
+      if (determinedKeptSum > _colTargets[c]) return false;
+      if (determinedKeptSum + undeterminedMaxSum < _colTargets[c]) return false;
+    }
+
+    return true;
+  }
+
+  int _countSumStrikeSolutions(int cellIdx, List<bool> tempKeep, int maxSolutions) {
+    if (cellIdx >= _grid.length) return 1;
+
+    int solutionsCount = 0;
+
+    tempKeep[cellIdx] = false;
+    if (_isSumStrikePartialValid(cellIdx, tempKeep)) {
+      solutionsCount += _countSumStrikeSolutions(cellIdx + 1, tempKeep, maxSolutions);
+      if (solutionsCount >= maxSolutions) return solutionsCount;
+    }
+
+    tempKeep[cellIdx] = true;
+    if (_isSumStrikePartialValid(cellIdx, tempKeep)) {
+      solutionsCount += _countSumStrikeSolutions(cellIdx + 1, tempKeep, maxSolutions);
+      if (solutionsCount >= maxSolutions) return solutionsCount;
+    }
+
+    return solutionsCount;
+  }
+
   void _toggleCell(int idx) {
-    if (_isSuccess) return;
-    settingsNotifier.hapticTap();
-    setState(() {
-      _keep[idx] = !_keep[idx];
-    });
+    if (_isSuccess || !_keep[idx] || _wrongTaps.contains(idx)) return;
+
+    if (_solutionMask[idx] == false) {
+      // Correct: the number should be struck out/deleted!
+      settingsNotifier.hapticTap();
+      setState(() {
+        _keep[idx] = false;
+      });
+      _tryAutoCheck();
+    } else {
+      // Incorrect: the number should be kept!
+      AudioManager.playFail();
+      settingsNotifier.hapticError();
+      setState(() {
+        _wrongTaps.add(idx);
+      });
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() {
+            _wrongTaps.remove(idx);
+          });
+        }
+      });
+    }
+  }
+
+  void _tryAutoCheck() {
+    bool allMatched = true;
+    for (int r = 0; r < _gridSize; r++) {
+      if (_rowSum(r) != _rowTargets[r]) {
+        allMatched = false;
+        break;
+      }
+    }
+    if (allMatched) {
+      for (int c = 0; c < _gridSize; c++) {
+        if (_colSum(c) != _colTargets[c]) {
+          allMatched = false;
+          break;
+        }
+      }
+    }
+
+    if (allMatched) {
+      AudioManager.playSuccess();
+      settingsNotifier.hapticSuccess();
+      _onLevelCleared();
+    }
   }
 
   void _checkSolution() {
@@ -240,6 +385,93 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     // Grid size includes targets column/row at the end
     final int viewGridSize = _gridSize + 1;
     final double cellW = boardSize / viewGridSize;
+
+    final bool allLevelsCompleted = !_playDailyMode && _currentLevel >= 50;
+
+    if (allLevelsCompleted) {
+      return Scaffold(
+        backgroundColor: context.bgDark,
+        appBar: AppBar(
+          title: Text('Sum Strike', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+        ),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: context.bgCard,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: context.textMuted.withAlpha(20)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.emoji_events,
+                  color: Colors.amber,
+                  size: 80,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'All Levels Completed!',
+                  style: GoogleFonts.outfit(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: context.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Congratulations! You have solved all 50 levels of Sum Strike. More levels will be added in future updates!',
+                  style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    color: context.textSecondary,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.dustyMauve,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.home),
+                  label: const Text('Back to Home'),
+                ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: context.textMuted,
+                  ),
+                  onPressed: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setInt(PrefsKeys.gameLevel('sumstrike'), 0);
+                    setState(() {
+                      _currentLevel = 0;
+                      _generatePuzzle();
+                    });
+                  },
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Reset Progress & Replay'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: context.bgDark,
@@ -358,25 +590,30 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                     int target = _colTargets[c];
                                     int sum = _colSum(c);
                                     bool isMatch = sum == target;
-                                    bool isOver = sum > target;
 
                                     return Container(
                                       decoration: BoxDecoration(
-                                        color: isMatch
-                                            ? const Color(0xFF2E7D32)
-                                            : isOver
-                                                ? Colors.red.shade900
-                                                : Colors.blueGrey.shade900,
-                                        borderRadius: BorderRadius.circular(8),
+                                        color: const Color(0xFF1E2127),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: isMatch
+                                              ? AppTheme.dustyMauve.withAlpha(120)
+                                              : Colors.transparent,
+                                          width: 1,
+                                        ),
                                       ),
                                       child: Center(
                                         child: Text(
                                           '$target',
                                           style: GoogleFonts.spaceGrotesk(
-                                            fontSize: 16,
+                                            fontSize: 14,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.white,
+                                            color: isMatch ? Colors.white38 : Colors.white,
+                                            decoration: isMatch ? TextDecoration.lineThrough : null,
+                                            decorationColor: AppTheme.dustyMauve,
+                                            decorationThickness: 2,
                                           ),
+                                          textAlign: TextAlign.center,
                                         ),
                                       ),
                                     );
@@ -387,25 +624,30 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                     int target = _rowTargets[r];
                                     int sum = _rowSum(r);
                                     bool isMatch = sum == target;
-                                    bool isOver = sum > target;
 
                                     return Container(
                                       decoration: BoxDecoration(
-                                        color: isMatch
-                                            ? const Color(0xFF2E7D32)
-                                            : isOver
-                                                ? Colors.red.shade900
-                                                : Colors.blueGrey.shade900,
-                                        borderRadius: BorderRadius.circular(8),
+                                        color: const Color(0xFF1E2127),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: isMatch
+                                              ? AppTheme.dustyMauve.withAlpha(120)
+                                              : Colors.transparent,
+                                          width: 1,
+                                        ),
                                       ),
                                       child: Center(
                                         child: Text(
                                           '$target',
                                           style: GoogleFonts.spaceGrotesk(
-                                            fontSize: 16,
+                                            fontSize: 14,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.white,
+                                            color: isMatch ? Colors.white38 : Colors.white,
+                                            decoration: isMatch ? TextDecoration.lineThrough : null,
+                                            decorationColor: AppTheme.dustyMauve,
+                                            decorationThickness: 2,
                                           ),
+                                          textAlign: TextAlign.center,
                                         ),
                                       ),
                                     );
@@ -416,21 +658,28 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                   int val = _grid[gridIdx];
                                   bool keep = _keep[gridIdx];
                                   bool isHintGlow = _hintIdx == gridIdx;
+                                  bool isWrong = _wrongTaps.contains(gridIdx);
 
                                   return GestureDetector(
                                     onTap: () => _toggleCell(gridIdx),
                                     child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
+                                      duration: const Duration(milliseconds: 180),
                                       decoration: BoxDecoration(
-                                        color: keep ? const Color(0xFF1E2126) : Colors.black38,
-                                        borderRadius: BorderRadius.circular(8),
+                                        color: isWrong
+                                            ? const Color(0xFFC62828)
+                                            : keep
+                                                ? const Color(0xFF23272F)
+                                                : const Color(0xFF14161B),
+                                        borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
-                                          color: isHintGlow
-                                              ? Colors.amber
-                                              : keep
-                                                  ? AppTheme.dustyMauve.withAlpha(80)
-                                                  : Colors.transparent,
-                                          width: isHintGlow ? 2.5 : 1,
+                                          color: isWrong
+                                              ? Colors.redAccent
+                                              : isHintGlow
+                                                  ? Colors.amber
+                                                  : keep
+                                                      ? AppTheme.dustyMauve.withAlpha(90)
+                                                      : Colors.transparent,
+                                          width: (isHintGlow || isWrong) ? 2.5 : 1,
                                         ),
                                         boxShadow: isHintGlow
                                             ? [
@@ -440,18 +689,23 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                                   spreadRadius: 1,
                                                 )
                                               ]
-                                            : null,
+                                            : (keep && !isWrong)
+                                                ? [
+                                                    BoxShadow(
+                                                      color: Colors.black.withAlpha(60),
+                                                      blurRadius: 3,
+                                                      offset: const Offset(0, 2),
+                                                    )
+                                                  ]
+                                                : null,
                                       ),
                                       child: Center(
                                         child: Text(
-                                          '$val',
+                                          keep ? '$val' : '',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 20,
                                             fontWeight: FontWeight.bold,
-                                            color: keep ? Colors.white : Colors.white24,
-                                            decoration: keep ? null : TextDecoration.lineThrough,
-                                            decorationColor: Colors.red.shade600,
-                                            decorationThickness: 2,
+                                            color: Colors.white,
                                           ),
                                         ),
                                       ),
@@ -466,74 +720,44 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: context.bgCard,
-                        foregroundColor: context.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _keep = List.filled(_keep.length, true);
-                        });
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reset'),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.dustyMauve,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: _checkSolution,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Check'),
-                    ),
-                  ],
+                Center(
+                  child: _isSuccess
+                      ? AutoNextCountdown(
+                          onNext: _nextLevel,
+                          accentColor: AppTheme.dustyMauve,
+                        )
+                      : ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: context.bgCard,
+                            foregroundColor: context.textPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () {
+                            settingsNotifier.hapticTap();
+                            setState(() {
+                              _keep = List.filled(_keep.length, true);
+                              _wrongTaps.clear();
+                            });
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Reset'),
+                        ),
                 ),
               ],
             ),
           ),
-          if (_isSuccess)
+          if (_isSuccess && _playDailyMode)
             Positioned.fill(
               child: Container(
                 color: Colors.black.withOpacity(0.6),
                 child: Center(
-                  child: _playDailyMode
-                      ? ChallengeClearedOverlay(
-                          accentColor: AppTheme.dustyMauve,
-                          onComplete: () {
-                            Navigator.pop(context, true);
-                          },
-                        )
-                      : Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 32),
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: context.bgCard,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Level ${_currentLevel + 1} Cleared!',
-                                style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 16),
-                              AutoNextCountdown(
-                                onNext: _nextLevel,
-                                accentColor: AppTheme.dustyMauve,
-                              ),
-                            ],
-                          ),
-                        ),
+                  child: ChallengeClearedOverlay(
+                    accentColor: AppTheme.dustyMauve,
+                    onComplete: () {
+                      Navigator.pop(context, true);
+                    },
+                  ),
                 ),
               ),
             ),

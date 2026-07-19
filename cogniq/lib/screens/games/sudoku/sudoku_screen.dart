@@ -1705,6 +1705,18 @@ class _SudokuScreenState extends State<SudokuScreen> {
       }
     }
     _saveNormalState();
+    _tryAutoCheck();
+  }
+
+  void _tryAutoCheck() {
+    if (_won || _gameOver) return;
+    final size = _level.size;
+    for (int r = 0; r < size; r++) {
+      for (int c = 0; c < size; c++) {
+        if (_board[r][c] == 0) return;
+      }
+    }
+    _checkBoard();
   }
 
   void _clearCell() {
@@ -2203,43 +2215,18 @@ class _SudokuScreenState extends State<SudokuScreen> {
                       const SizedBox(height: 20),
                     ],
                     if (!(_playDailyMode && _dailyModifierType == 'eclipse'))
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          TextButton(
-                            onPressed: (_selectedRow != -1) ? _clearCell : null,
-                            child: Text(
-                              'CLEAR',
-                              style: GoogleFonts.outfit(
-                                color: context.textSecondary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: context.scale(14),
-                              ),
+                      Center(
+                        child: TextButton(
+                          onPressed: (_selectedRow != -1) ? _clearCell : null,
+                          child: Text(
+                            'CLEAR',
+                            style: GoogleFonts.outfit(
+                              color: context.textSecondary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: context.scale(14),
                             ),
                           ),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: accentColor,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 40,
-                                vertical: 14,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              elevation: 0,
-                            ),
-                            onPressed: _checkBoard,
-                            child: Text(
-                              'CHECK',
-                              style: GoogleFonts.outfit(
-                                fontWeight: FontWeight.bold,
-                                fontSize: context.scale(14),
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                   ] else ...[
                     const SizedBox(height: 16),

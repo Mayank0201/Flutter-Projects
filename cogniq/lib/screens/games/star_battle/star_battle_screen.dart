@@ -757,6 +757,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _saveToHistory();
     setState(() { _cells[r][c] = (_cells[r][c] + 1) % 3; _error = ''; });
     _saveNormalState();
+    _tryAutoCheck();
   }
 
   void _onDragStart(int r, int c) {
@@ -790,6 +791,21 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       _lastDragCell = null;
     });
     _saveNormalState();
+    _tryAutoCheck();
+  }
+
+  void _tryAutoCheck() {
+    final n = _level.n;
+    int count = 0;
+    for (int r = 0; r < n; r++) {
+      for (int c = 0; c < n; c++) {
+        if (_cells[r][c] == 2) count++;
+      }
+    }
+    final targetQueensCount = (_playDailyMode && _dailyModifierType == 'spy') ? (n - 1) : n;
+    if (count == targetQueensCount) {
+      _check();
+    }
   }
 
   void _check() {
@@ -1253,14 +1269,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                           onNext: _nextLevel,
                           accentColor: AppTheme.queensOrange,
                         ),
-                      ] else if (!_tutorialCompleted && !_won)
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.queensOrange, foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), elevation: 0),
-                          onPressed: _check,
-                          child: Text('Check', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: context.scale(14))),
-                        ),
+                      ],
                       const SizedBox(height: 12),
                     ],
                   ),

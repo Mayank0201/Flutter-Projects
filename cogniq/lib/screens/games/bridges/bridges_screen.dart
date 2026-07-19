@@ -13,6 +13,7 @@ import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
+import 'bridges_levels.dart';
 
 class BridgesLevel {
   final int gridSize;
@@ -48,147 +49,6 @@ class _BridgesScreenState extends State<BridgesScreen> {
   // Drag variables
   int _dragStartIsland = -1;
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
-
-  static const List<BridgesLevel> _kLevels = [
-    // Easy (3x3)
-    BridgesLevel(
-      gridSize: 3,
-      islands: [
-        0, 0, 0,
-        0, 2, 1,
-        1, 2, 0,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 3,
-      islands: [
-        0, 0, 0,
-        0, 1, 0,
-        1, 3, 1,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 3,
-      islands: [
-        2, 2, 0,
-        2, 4, 2,
-        0, 2, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 3,
-      islands: [
-        0, 0, 0,
-        0, 1, 2,
-        1, 0, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 3,
-      islands: [
-        0, 0, 0,
-        0, 1, 1,
-        0, 2, 2,
-      ],
-    ),
-    // Medium (4x4)
-    BridgesLevel(
-      gridSize: 4,
-      islands: [
-        2, 0, 3, 2,
-        0, 0, 0, 0,
-        2, 0, 4, 2,
-        2, 0, 3, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 4,
-      islands: [
-        1, 2, 0, 2,
-        0, 2, 0, 0,
-        2, 0, 3, 1,
-        1, 2, 0, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 4,
-      islands: [
-        2, 2, 2, 2,
-        2, 0, 0, 2,
-        0, 0, 0, 0,
-        2, 2, 2, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 4,
-      islands: [
-        3, 3, 0, 2,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        3, 3, 0, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 4,
-      islands: [
-        2, 0, 2, 2,
-        0, 0, 0, 0,
-        2, 0, 2, 2,
-        2, 0, 2, 2,
-      ],
-    ),
-    // Hard (5x5)
-    BridgesLevel(
-      gridSize: 5,
-      islands: [
-        2, 3, 0, 3, 2,
-        0, 0, 0, 0, 0,
-        3, 0, 4, 0, 3,
-        0, 0, 0, 0, 0,
-        2, 3, 0, 3, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 5,
-      islands: [
-        3, 0, 4, 0, 3,
-        0, 0, 0, 0, 0,
-        4, 0, 6, 0, 4,
-        0, 0, 0, 0, 0,
-        3, 0, 4, 0, 3,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 5,
-      islands: [
-        2, 0, 2, 0, 2,
-        0, 0, 0, 0, 0,
-        2, 0, 4, 0, 2,
-        0, 0, 0, 0, 0,
-        2, 0, 2, 0, 2,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 5,
-      islands: [
-        1, 2, 0, 2, 1,
-        2, 0, 0, 0, 2,
-        0, 0, 4, 0, 0,
-        2, 0, 0, 0, 2,
-        1, 2, 0, 2, 1,
-      ],
-    ),
-    BridgesLevel(
-      gridSize: 5,
-      islands: [
-        2, 2, 2, 2, 2,
-        2, 0, 0, 0, 2,
-        2, 0, 4, 0, 2,
-        2, 0, 0, 0, 2,
-        2, 2, 2, 2, 2,
-      ],
-    ),
-  ];
 
   @override
   void initState() {
@@ -226,7 +86,10 @@ class _BridgesScreenState extends State<BridgesScreen> {
   }
 
   void _setupLevel() {
-    final level = _kLevels[_currentLevel % _kLevels.length];
+    if (!_playDailyMode && _currentLevel >= kBridgesLevels.length) {
+      return;
+    }
+    final level = kBridgesLevels[_playDailyMode ? (_currentLevel % kBridgesLevels.length) : _currentLevel];
     _gridSize = level.gridSize;
     _islands = List.from(level.islands);
     _bridgeCounts.clear();
@@ -301,7 +164,24 @@ class _BridgesScreenState extends State<BridgesScreen> {
     setState(() {
       _bridgeCounts[key] = (current + 1) % 3;
     });
+    _tryAutoCheck();
     return true;
+  }
+
+  void _tryAutoCheck() {
+    final totalCells = _gridSize * _gridSize;
+    bool allMatched = true;
+    for (int i = 0; i < totalCells; i++) {
+      if (_islands[i] > 0) {
+        if (_getCurrentBridges(i) != _islands[i]) {
+          allMatched = false;
+          break;
+        }
+      }
+    }
+    if (allMatched) {
+      _checkSolution();
+    }
   }
 
   bool _isAdjacent(int a, int b) {
@@ -405,9 +285,9 @@ class _BridgesScreenState extends State<BridgesScreen> {
     if (idx != -1 && idx != _dragStartIsland) {
       if (_toggleBridge(_dragStartIsland, idx)) {
         setState(() {
-          _dragStartIsland = -1;
-          _selectedIsland = -1;
-          _dragPositionNotifier.value = null;
+          _dragStartIsland = idx;
+          _selectedIsland = idx;
+          _dragPositionNotifier.value = _islandCenter(idx, cellSpacing, origin);
         });
       }
     }
@@ -544,23 +424,240 @@ class _BridgesScreenState extends State<BridgesScreen> {
     });
   }
 
-  void _showHint() {
+
+
+  Map<String, int>? _solveBridges() {
+    final solverIslands = <_SolverIsland>[];
+    final islandIdxMap = <int, int>{};
     for (int i = 0; i < _islands.length; i++) {
-      if (_islands[i] > 0 && _getCurrentBridges(i) != _islands[i]) {
-        setState(() {
-          _hintIdx = i;
-          _isHintShowing = true;
-        });
-        Future.delayed(const Duration(seconds: 4), () {
-          if (mounted) {
-            setState(() {
-              _isHintShowing = false;
-              _hintIdx = -1;
-            });
-          }
-        });
-        break;
+      if (_islands[i] > 0) {
+        islandIdxMap[i] = solverIslands.length;
+        solverIslands.add(_SolverIsland(i % _gridSize, i ~/ _gridSize, _islands[i], i));
       }
+    }
+
+    final adjList = <List<int>>[];
+    final connKeys = <String>[];
+
+    bool canConnect(int i, int j) {
+      final a = solverIslands[i];
+      final b = solverIslands[j];
+      if (a.x != b.x && a.y != b.y) return false;
+      if (a.y == b.y) {
+        int minX = min(a.x, b.x);
+        int maxX = max(a.x, b.x);
+        for (int k = 0; k < solverIslands.length; k++) {
+          if (k == i || k == j) continue;
+          if (solverIslands[k].y == a.y && solverIslands[k].x > minX && solverIslands[k].x < maxX) {
+            return false;
+          }
+        }
+      } else {
+        int minY = min(a.y, b.y);
+        int maxY = max(a.y, b.y);
+        for (int k = 0; k < solverIslands.length; k++) {
+          if (k == i || k == j) continue;
+          if (solverIslands[k].x == a.x && solverIslands[k].y > minY && solverIslands[k].y < maxY) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    for (int i = 0; i < solverIslands.length; i++) {
+      for (int j = i + 1; j < solverIslands.length; j++) {
+        if (canConnect(i, j)) {
+          adjList.add([i, j]);
+          int u = solverIslands[i].gridIdx;
+          int v = solverIslands[j].gridIdx;
+          connKeys.add(u < v ? '$u-$v' : '$v-$u');
+        }
+      }
+    }
+
+    bool segmentsIntersect(int x1, int y1, int x2, int y2, int x3, int y3, int x4, int y4) {
+      bool isH1 = y1 == y2;
+      bool isV1 = x1 == x2;
+      bool isH2 = y3 == y4;
+      bool isV2 = x3 == x4;
+      if (isH1 && isV2) {
+        return (min(x1, x2) < x3 && x3 < max(x1, x2)) && (min(y3, y4) < y1 && y1 < max(y3, y4));
+      }
+      if (isV1 && isH2) {
+        return (min(x3, x4) < x1 && x1 < max(x3, x4)) && (min(y1, y2) < y3 && y3 < max(y1, y2));
+      }
+      return false;
+    }
+
+    bool crossesAny(int connIdx, List<int> currentBridges) {
+      final a = solverIslands[adjList[connIdx][0]];
+      final b = solverIslands[adjList[connIdx][1]];
+      for (int i = 0; i < connIdx; i++) {
+        if (currentBridges[i] == 0) continue;
+        final c = solverIslands[adjList[i][0]];
+        final d = solverIslands[adjList[i][1]];
+        if (segmentsIntersect(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y)) return true;
+      }
+      return false;
+    }
+
+    bool validate(List<int> currentBridges) {
+      final degrees = List.filled(solverIslands.length, 0);
+      for (int i = 0; i < adjList.length; i++) {
+        degrees[adjList[i][0]] += currentBridges[i];
+        degrees[adjList[i][1]] += currentBridges[i];
+      }
+      for (int i = 0; i < solverIslands.length; i++) {
+        if (degrees[i] != solverIslands[i].val) return false;
+      }
+      final visited = List.filled(solverIslands.length, false);
+      final queue = [0];
+      visited[0] = true;
+      int visitedCount = 1;
+      while (queue.isNotEmpty) {
+        final curr = queue.removeAt(0);
+        for (int i = 0; i < adjList.length; i++) {
+          if (currentBridges[i] == 0) continue;
+          final u = adjList[i][0];
+          final v = adjList[i][1];
+          if (u == curr && !visited[v]) {
+            visited[v] = true;
+            queue.add(v);
+            visitedCount++;
+          } else if (v == curr && !visited[u]) {
+            visited[u] = true;
+            queue.add(u);
+            visitedCount++;
+          }
+        }
+      }
+      return visitedCount == solverIslands.length;
+    }
+
+    Map<String, int>? solution;
+    final currentBridges = List.filled(adjList.length, 0);
+
+    bool solve(int connIdx) {
+      if (connIdx == adjList.length) {
+        if (validate(currentBridges)) {
+          solution = {};
+          for (int i = 0; i < adjList.length; i++) {
+            if (currentBridges[i] > 0) {
+              solution![connKeys[i]] = currentBridges[i];
+            }
+          }
+          return true;
+        }
+        return false;
+      }
+
+      final degrees = List.filled(solverIslands.length, 0);
+      final maxRemaining = List.filled(solverIslands.length, 0);
+      for (int i = 0; i < adjList.length; i++) {
+        final u = adjList[i][0];
+        final v = adjList[i][1];
+        degrees[u] += currentBridges[i];
+        degrees[v] += currentBridges[i];
+        if (i >= connIdx) {
+          maxRemaining[u] += 2;
+          maxRemaining[v] += 2;
+        }
+      }
+      for (int i = 0; i < solverIslands.length; i++) {
+        if (degrees[i] > solverIslands[i].val) return false;
+        if (degrees[i] + maxRemaining[i] < solverIslands[i].val) return false;
+      }
+
+      for (int bridges = 0; bridges <= 2; bridges++) {
+        if (bridges > 0 && crossesAny(connIdx, currentBridges)) continue;
+        currentBridges[connIdx] = bridges;
+        if (solve(connIdx + 1)) return true;
+        currentBridges[connIdx] = 0;
+      }
+      return false;
+    }
+
+    solve(0);
+    return solution;
+  }
+
+  void _showHint() {
+    final solution = _solveBridges();
+    if (solution == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cannot find solution from here. Try clearing some bridges!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    // 1. Look for incorrect bridges that user placed (not in solution or too many)
+    String? incorrectKey;
+    _bridgeCounts.forEach((key, count) {
+      if (count > 0) {
+        int solCount = solution[key] ?? 0;
+        if (count > solCount) {
+          incorrectKey = key;
+        }
+      }
+    });
+
+    if (incorrectKey != null) {
+      final parts = incorrectKey!.split('-');
+      int u = int.parse(parts[0]);
+      setState(() {
+        _bridgeCounts[incorrectKey!] = _bridgeCounts[incorrectKey!]! - 1;
+        if (_bridgeCounts[incorrectKey!] == 0) {
+          _bridgeCounts.remove(incorrectKey);
+        }
+        _hintIdx = u;
+        _isHintShowing = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed an incorrect bridge!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.amber.shade800,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _isHintShowing = false);
+      });
+      return;
+    }
+
+    // 2. Otherwise, find a missing bridge and add it
+    String? missingKey;
+    solution.forEach((key, solCount) {
+      int userCount = _bridgeCounts[key] ?? 0;
+      if (userCount < solCount) {
+        missingKey = key;
+      }
+    });
+
+    if (missingKey != null) {
+      final parts = missingKey!.split('-');
+      int u = int.parse(parts[0]);
+      setState(() {
+        _bridgeCounts[missingKey!] = (_bridgeCounts[missingKey!] ?? 0) + 1;
+        _hintIdx = u;
+        _isHintShowing = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Placed a correct bridge!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.dustyMauve,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _isHintShowing = false);
+      });
+      _tryAutoCheck();
     }
   }
 
@@ -577,6 +674,93 @@ class _BridgesScreenState extends State<BridgesScreen> {
     final double boardSize = min(screenW - 32, 400.0);
     final double cellSpacing = boardSize / _gridSize;
     final double origin = cellSpacing / 2;
+
+    final bool allLevelsCompleted = !_playDailyMode && _currentLevel >= kBridgesLevels.length;
+
+    if (allLevelsCompleted) {
+      return Scaffold(
+        backgroundColor: context.bgDark,
+        appBar: AppBar(
+          title: Text('Bridges', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+        ),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: context.bgCard,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: context.textMuted.withAlpha(20)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.emoji_events,
+                  color: Colors.amber,
+                  size: 80,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'All Levels Completed!',
+                  style: GoogleFonts.outfit(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: context.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Congratulations! You have solved all ${kBridgesLevels.length} levels of Bridges. More levels will be added in future updates!',
+                  style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    color: context.textSecondary,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.dustyMauve,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.home),
+                  label: const Text('Back to Home'),
+                ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: context.textMuted,
+                  ),
+                  onPressed: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setInt(PrefsKeys.gameLevel('bridges'), 0);
+                    setState(() {
+                      _currentLevel = 0;
+                      _setupLevel();
+                    });
+                  },
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Reset Progress & Replay'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: context.bgDark,
@@ -703,75 +887,43 @@ class _BridgesScreenState extends State<BridgesScreen> {
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: context.bgCard,
-                        foregroundColor: context.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _bridgeCounts.clear();
-                          _selectedIsland = -1;
-                        });
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reset'),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.dustyMauve,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: _checkSolution,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Check'),
-                    ),
-                  ],
+                Center(
+                  child: _isSuccess
+                      ? AutoNextCountdown(
+                          onNext: _nextLevel,
+                          accentColor: AppTheme.dustyMauve,
+                        )
+                      : ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: context.bgCard,
+                            foregroundColor: context.textPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _bridgeCounts.clear();
+                              _selectedIsland = -1;
+                            });
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Reset'),
+                        ),
                 ),
               ],
             ),
           ),
-          if (_isSuccess)
+          if (_isSuccess && _playDailyMode)
             Positioned.fill(
               child: Container(
                 color: Colors.black.withOpacity(0.6),
                 child: Center(
-                  child: _playDailyMode
-                      ? ChallengeClearedOverlay(
-                          accentColor: AppTheme.dustyMauve,
-                          onComplete: () {
-                            Navigator.pop(context, true);
-                          },
-                        )
-                      : Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 32),
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: context.bgCard,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Level ${_currentLevel + 1} Cleared!',
-                                style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 16),
-                              AutoNextCountdown(
-                                onNext: _nextLevel,
-                                accentColor: AppTheme.dustyMauve,
-                              ),
-                            ],
-                          ),
-                        ),
+                  child: ChallengeClearedOverlay(
+                    accentColor: AppTheme.dustyMauve,
+                    onComplete: () {
+                      Navigator.pop(context, true);
+                    },
+                  ),
                 ),
               ),
             ),
@@ -947,4 +1099,9 @@ class _BridgesPainter extends CustomPainter {
       old.selectedIsland != selectedIsland ||
       old.dragStartIsland != dragStartIsland ||
       old.hintIdx != hintIdx;
+}
+
+class _SolverIsland {
+  final int x, y, val, gridIdx;
+  _SolverIsland(this.x, this.y, this.val, this.gridIdx);
 }

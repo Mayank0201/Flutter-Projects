@@ -35,6 +35,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
   List<int> _vClues = []; // vertical clues
 
   int _selectedIdx = -1;
+  int _hintIdx = -1;
   bool _isLoading = true;
 
   @override
@@ -130,12 +131,18 @@ class _KakuroScreenState extends State<KakuroScreen> {
 
     // Retry loop to build a valid grid and ensure uniqueness
     for (int retry = 0; retry < 50; retry++) {
+      _solution = List.filled(totalCells, 0);
+      _hClues = List.filled(totalCells, 0);
+      _vClues = List.filled(totalCells, 0);
       if (_fillGridWithUniqueDigits(0, rand)) {
         _computeClues();
-        // Clear board for the player
-        _grid = List.filled(totalCells, 0);
-        generated = true;
-        break;
+        final tempBoard = List.filled(totalCells, 0);
+        final numSolutions = _countSolutions(0, tempBoard, 2);
+        if (numSolutions == 1) {
+          _grid = List.filled(totalCells, 0);
+          generated = true;
+          break;
+        }
       }
     }
 
@@ -154,6 +161,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
     setState(() {
       _isSuccess = false;
       _selectedIdx = -1;
+      _hintIdx = -1;
       _isLoading = false;
     });
   }
@@ -236,6 +244,92 @@ class _KakuroScreenState extends State<KakuroScreen> {
     }
 
     return true;
+  }
+
+  bool _isValidSolverPlacement(int idx, int d, List<int> tempBoard) {
+    final rowIndices = _getRowSegmentIndices(idx);
+    for (final ri in rowIndices) {
+      if (ri != idx && tempBoard[ri] == d) return false;
+    }
+    final colIndices = _getColSegmentIndices(idx);
+    for (final ci in colIndices) {
+      if (ci != idx && tempBoard[ci] == d) return false;
+    }
+    return true;
+  }
+
+  bool _isSegmentSumsValid(int idx, List<int> tempBoard) {
+    final rowIndices = _getRowSegmentIndices(idx);
+    int rowSum = 0;
+    bool rowComplete = true;
+    for (final ri in rowIndices) {
+      if (tempBoard[ri] == 0) {
+        rowComplete = false;
+      } else {
+        rowSum += tempBoard[ri];
+      }
+    }
+    int r = idx ~/ _gridSize;
+    int c = idx % _gridSize;
+    int startCol = c;
+    while (startCol >= 0 && _types[r * _gridSize + startCol] == 1) {
+      startCol--;
+    }
+    int hClueCell = r * _gridSize + startCol;
+    int hClue = _hClues[hClueCell];
+    if (rowComplete) {
+      if (rowSum != hClue) return false;
+    } else {
+      if (rowSum >= hClue) return false;
+    }
+
+    final colIndices = _getColSegmentIndices(idx);
+    int colSum = 0;
+    bool colComplete = true;
+    for (final ci in colIndices) {
+      if (tempBoard[ci] == 0) {
+        colComplete = false;
+      } else {
+        colSum += tempBoard[ci];
+      }
+    }
+    int startRow = r;
+    while (startRow >= 0 && _types[startRow * _gridSize + c] == 1) {
+      startRow--;
+    }
+    int vClueCell = startRow * _gridSize + c;
+    int vClue = _vClues[vClueCell];
+    if (colComplete) {
+      if (colSum != vClue) return false;
+    } else {
+      if (colSum >= vClue) return false;
+    }
+
+    return true;
+  }
+
+  int _countSolutions(int cellIdx, List<int> tempBoard, int maxSolutions) {
+    if (cellIdx >= _types.length) return 1;
+
+    if (_types[cellIdx] != 1) {
+      return _countSolutions(cellIdx + 1, tempBoard, maxSolutions);
+    }
+
+    int solutionsCount = 0;
+    for (int d = 1; d <= 9; d++) {
+      if (_isValidSolverPlacement(cellIdx, d, tempBoard)) {
+        tempBoard[cellIdx] = d;
+        if (_isSegmentSumsValid(cellIdx, tempBoard)) {
+          solutionsCount += _countSolutions(cellIdx + 1, tempBoard, maxSolutions);
+          if (solutionsCount >= maxSolutions) {
+            tempBoard[cellIdx] = 0;
+            return solutionsCount;
+          }
+        }
+        tempBoard[cellIdx] = 0;
+      }
+    }
+    return solutionsCount;
   }
 
   void _computeClues() {
@@ -432,23 +526,27 @@ class _KakuroScreenState extends State<KakuroScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Fill entry cells with digits 1-9 to match clues.',
-                          style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        RepaintBoundary(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double maxBoardSide = min(
+                  constraints.maxWidth * 0.88,
+                  max(200.0, constraints.maxHeight - 200.0),
+                );
+
+                return Column(
+                  children: [
+                    Text(
+                      'Fill entry cells with digits 1-9 to match clues.',
+                      style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: Center(
+                        child: RepaintBoundary(
                           child: Container(
-                            width: boardSize,
-                            height: boardSize,
+                            width: maxBoardSide,
+                            height: maxBoardSide,
                             decoration: BoxDecoration(
                               color: context.bgCard,
                               borderRadius: BorderRadius.circular(16),
@@ -456,179 +554,146 @@ class _KakuroScreenState extends State<KakuroScreen> {
                             ),
                             child: FogOverlay(
                               enabled: _playDailyMode && _dailyModifierType == 'fog',
-                              radius: (boardSize / _gridSize) * _dailyRadius,
+                              radius: (maxBoardSide / _gridSize) * _dailyRadius,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
-                                  child: GridView.builder(
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: _gridSize,
-                                      crossAxisSpacing: 2,
-                                      mainAxisSpacing: 2,
-                                    ),
-                                    itemCount: _gridSize * _gridSize,
-                                    itemBuilder: (context, idx) {
-                                      int type = _types[idx];
-                                      if (type == 0) {
-                                        // Solid slate wall
-                                        return Container(
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF181A1F),
-                                            border: Border.all(color: Colors.black26, width: 0.5),
+                                child: GridView.builder(
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: _gridSize,
+                                    crossAxisSpacing: 2,
+                                    mainAxisSpacing: 2,
+                                  ),
+                                  itemCount: _gridSize * _gridSize,
+                                  itemBuilder: (context, idx) {
+                                    int type = _types[idx];
+                                    if (type == 0) {
+                                      // Solid slate wall
+                                      return Container(
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF181A1F),
+                                          border: Border.all(color: Colors.black26, width: 0.5),
+                                        ),
+                                      );
+                                    }
+
+                                    if (type == 2) {
+                                      // Clue cell
+                                      return CustomPaint(
+                                        painter: _KakuroCluePainter(
+                                          rightSum: _hClues[idx],
+                                          downSum: _vClues[idx],
+                                          lineColor: AppTheme.dustyMauve,
+                                          textColor: Colors.white,
+                                        ),
+                                      );
+                                    }
+
+                                    // Entry cell (type == 1)
+                                    bool isSelected = idx == _selectedIdx;
+                                    bool isHinted = idx == _hintIdx;
+                                    int val = _grid[idx];
+
+                                    return GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedIdx = idx;
+                                        });
+                                      },
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        decoration: BoxDecoration(
+                                          color: isSelected
+                                              ? AppTheme.dustyMauve.withAlpha(40)
+                                              : (isHinted ? Colors.amber.withAlpha(40) : context.bgCard),
+                                          border: Border.all(
+                                            color: isSelected
+                                                ? AppTheme.dustyMauve
+                                                : (isHinted
+                                                    ? Colors.amber
+                                                    : context.textMuted.withAlpha(40)),
+                                            width: isSelected || isHinted ? 2 : 0.5,
                                           ),
-                                        );
-                                      }
-
-                                      if (type == 2) {
-                                        final int hc = _hClues[idx];
-                                        final int vc = _vClues[idx];
-                                        if (hc == 0 && vc == 0) {
-                                          return Container(
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF181A1F),
-                                              border: Border.all(color: Colors.black26, width: 0.5),
-                                            ),
-                                          );
-                                        }
-
-                                        return Semantics(
-                                          label: 'Clue block. '
-                                              '${hc > 0 ? "Horizontal clue $hc. " : ""}'
-                                              '${vc > 0 ? "Vertical clue $vc. " : ""}',
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF1C1E24),
-                                              border: Border.all(color: Colors.black26, width: 0.5),
-                                            ),
-                                            child: CustomPaint(
-                                              painter: _KakuroCluePainter(
-                                                rightSum: hc,
-                                                downSum: vc,
-                                                lineColor: AppTheme.dustyMauve.withAlpha(200),
-                                                textColor: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }
-
-                                      final isSelected = _selectedIdx == idx;
-                                      final cellVal = _grid[idx];
-
-                                      return Semantics(
-                                        label: 'Cell row ${idx ~/ _gridSize + 1}, column ${idx % _gridSize + 1}. '
-                                            '${cellVal == 0 ? "Empty" : "Value $cellVal"}. '
-                                            '${isSelected ? "Selected" : ""}',
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            settingsNotifier.hapticTap();
-                                            setState(() => _selectedIdx = idx);
-                                          },
-                                          child: AnimatedContainer(
-                                            duration: const Duration(milliseconds: 200),
-                                            decoration: BoxDecoration(
-                                              color: isSelected ? context.bgCard : context.bgCard.withOpacity(0.9),
-                                              border: Border.all(
-                                                color: isSelected
-                                                    ? AppTheme.dustyMauve
-                                                    : context.textMuted.withAlpha(40),
-                                                width: isSelected ? 2.5 : 1,
-                                              ),
-                                              boxShadow: isSelected
-                                                  ? [
-                                                      BoxShadow(
-                                                        color: AppTheme.dustyMauve.withOpacity(0.3),
-                                                        blurRadius: 8,
-                                                        spreadRadius: 1,
-                                                      )
-                                                    ]
-                                                  : null,
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                cellVal == 0 ? "" : "$cellVal",
-                                                style: GoogleFonts.spaceGrotesk(
-                                                  fontSize: _gridSize == 4 ? 22 : 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: isSelected ? AppTheme.dustyMauve : context.textPrimary,
-                                                ),
-                                              ),
+                                          boxShadow: isSelected
+                                              ? [
+                                                  BoxShadow(
+                                                    color: AppTheme.dustyMauve.withAlpha(60),
+                                                    blurRadius: 6,
+                                                  )
+                                                ]
+                                              : null,
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            val == 0 ? '' : '$val',
+                                            style: GoogleFonts.spaceGrotesk(
+                                              fontSize: _gridSize == 4 ? 22 : 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: isSelected ? AppTheme.dustyMauve : context.textPrimary,
                                             ),
                                           ),
                                         ),
-                                      );
-                                    },
-                                  ),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 24),
-                          // Number keypad: 2 rows of 5 for optimal layout
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: context.bgCard,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: context.textMuted.withAlpha(30)),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    for (int i = 1; i <= 5; i++)
-                                      _buildKeypadButton(i),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    for (int i = 6; i <= 9; i++)
-                                      _buildKeypadButton(i),
-                                    _buildEraseButton(),
-                                  ],
-                                ),
-                              ],
-                            ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Number keypad
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: context.bgCard,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: context.textMuted.withAlpha(30)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              for (int i = 1; i <= 5; i++) _buildKeypadButton(i),
+                            ],
                           ),
-                      ],
-                    ),
-                  ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: context.bgCard,
-                        foregroundColor: context.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              for (int i = 6; i <= 9; i++) _buildKeypadButton(i),
+                              _buildEraseButton(),
+                            ],
+                          ),
+                        ],
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _grid = List.filled(_gridSize * _gridSize, 0);
-                          _selectedIdx = -1;
-                        });
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reset'),
                     ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.dustyMauve,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.bgCard,
+                          foregroundColor: context.textPrimary,
+                          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _grid = List.filled(_gridSize * _gridSize, 0);
+                            _selectedIdx = -1;
+                          });
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Reset'),
                       ),
-                      onPressed: _checkSolution,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Check'),
                     ),
                   ],
-                ),
-              ],
+                );
+              },
             ),
           ),
           if (_isSuccess)
@@ -675,6 +740,19 @@ class _KakuroScreenState extends State<KakuroScreen> {
     );
   }
 
+  void _tryAutoCheck() {
+    bool allFilled = true;
+    for (int i = 0; i < _types.length; i++) {
+      if (_types[i] == 1 && _grid[i] == 0) {
+        allFilled = false;
+        break;
+      }
+    }
+    if (allFilled) {
+      _checkSolution();
+    }
+  }
+
   Widget _buildKeypadButton(int val) {
     return GestureDetector(
       onTap: () {
@@ -683,6 +761,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
           setState(() {
             _grid[_selectedIdx] = val;
           });
+          _tryAutoCheck();
         }
       },
       child: Container(
@@ -759,60 +838,78 @@ class _KakuroCluePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Shading for bottom-left triangle to give depth
-    final Path path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(0, size.height)
-      ..lineTo(size.width, size.height)
-      ..close();
-    final Paint fillPaint = Paint()
-      ..color = const Color(0xFF131518)
+    // Fill the entire cell with a solid dark grey/slate wall color
+    final Paint bgPaint = Paint()
+      ..color = const Color(0xFF181A1F)
       ..style = PaintingStyle.fill;
-    canvas.drawPath(path, fillPaint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
-    final Paint lp = Paint()
-      ..color = lineColor
-      ..strokeWidth = 2.0
-      ..isAntiAlias = true;
-    canvas.drawLine(Offset.zero, Offset(size.width, size.height), lp);
+    final bool hasClues = rightSum > 0 || downSum > 0;
 
-    final double fontSize = size.shortestSide * 0.26;
+    if (hasClues) {
+      // Draw slightly darker shading for the bottom-left triangle to give depth split
+      final Path path = Path()
+        ..moveTo(0, 0)
+        ..lineTo(0, size.height)
+        ..lineTo(size.width, size.height)
+        ..close();
+      final Paint fillPaint = Paint()
+        ..color = const Color(0xFF111317)
+        ..style = PaintingStyle.fill;
+      canvas.drawPath(path, fillPaint);
 
-    // downSum: top-right triangle
-    if (downSum > 0) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: '$downSum',
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            color: textColor,
+      // Draw the diagonal divider line
+      final Paint lp = Paint()
+        ..color = lineColor.withOpacity(0.6)
+        ..strokeWidth = 1.5
+        ..isAntiAlias = true;
+      canvas.drawLine(Offset.zero, Offset(size.width, size.height), lp);
+
+      final double fontSize = size.shortestSide * 0.22;
+
+      // rightSum: horizontal clue (top-right triangle in Kakuro)
+      if (rightSum > 0) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '$rightSum',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final double cx = size.width * 0.72 - tp.width / 2;
-      final double cy = size.height * 0.24 - tp.height / 2;
-      tp.paint(canvas, Offset(cx, cy));
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final double cx = size.width * 0.75 - tp.width / 2;
+        final double cy = size.height * 0.25 - tp.height / 2;
+        tp.paint(canvas, Offset(cx, cy));
+      }
+
+      // downSum: vertical clue (bottom-left triangle in Kakuro)
+      if (downSum > 0) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '$downSum',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final double cx = size.width * 0.25 - tp.width / 2;
+        final double cy = size.height * 0.75 - tp.height / 2;
+        tp.paint(canvas, Offset(cx, cy));
+      }
     }
 
-    // rightSum: bottom-left triangle
-    if (rightSum > 0) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: '$rightSum',
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            color: textColor,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final double cx = size.width * 0.28 - tp.width / 2;
-      final double cy = size.height * 0.76 - tp.height / 2;
-      tp.paint(canvas, Offset(cx, cy));
-    }
+    // Draw a subtle border around the clue cell for neat grid alignment
+    final Paint borderPaint = Paint()
+      ..color = Colors.black.withOpacity(0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.5;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
   }
 
   @override

@@ -13,6 +13,7 @@ import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
+import 'masyu_levels.dart';
 
 class MasyuLevel {
   final int gridSize;
@@ -38,6 +39,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
   late int _gridSize;
   late List<int> _grid; // 0: empty, 1: white, 2: black
   Map<String, bool> _activeEdges = {}; // Key: "u-v" (u < v), Value: true/false
+  Map<String, bool> _solutionEdges = {}; // Cached correct solution edges for hints
   int _hintCount = 1;
   bool _isHintShowing = false;
   int _hintIdx = -1;
@@ -47,161 +49,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
   List<int> _dragPath = [];
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
 
-  static const List<MasyuLevel> _kLevels = [
-    // Easy (4x4)
-    MasyuLevel(
-      gridSize: 4,
-      pearls: [
-        0, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 2, 0,
-        0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 4,
-      pearls: [
-        0, 0, 0, 0,
-        0, 0, 1, 0,
-        0, 2, 0, 0,
-        0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 4,
-      pearls: [
-        0, 2, 0, 0,
-        0, 0, 0, 1,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 4,
-      pearls: [
-        0, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 0, 2,
-        0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 4,
-      pearls: [
-        0, 1, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 2, 0,
-        0, 0, 0, 0,
-      ],
-    ),
-    // Medium (5x5)
-    MasyuLevel(
-      gridSize: 5,
-      pearls: [
-        0, 0, 0, 0, 0,
-        0, 1, 0, 0, 0,
-        0, 0, 2, 0, 2,
-        0, 0, 0, 1, 0,
-        0, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 5,
-      pearls: [
-        0, 0, 1, 0, 0,
-        0, 0, 0, 0, 0,
-        0, 2, 0, 2, 0,
-        0, 0, 0, 0, 0,
-        0, 0, 1, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 5,
-      pearls: [
-        0, 0, 0, 0, 2,
-        0, 0, 0, 0, 0,
-        0, 1, 0, 1, 0,
-        0, 0, 0, 0, 0,
-        2, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 5,
-      pearls: [
-        1, 0, 0, 0, 1,
-        0, 0, 0, 0, 0,
-        0, 2, 0, 2, 0,
-        0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 5,
-      pearls: [
-        0, 0, 0, 0, 0,
-        0, 1, 0, 1, 0,
-        0, 0, 2, 0, 0,
-        0, 1, 0, 1, 0,
-        0, 0, 0, 0, 0,
-      ],
-    ),
-    // Hard (6x6)
-    MasyuLevel(
-      gridSize: 6,
-      pearls: [
-        0, 0, 0, 0, 0, 0,
-        0, 1, 0, 0, 0, 0,
-        0, 0, 2, 0, 2, 0,
-        0, 0, 0, 1, 0, 0,
-        0, 2, 0, 0, 1, 0,
-        0, 0, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 6,
-      pearls: [
-        0, 1, 0, 0, 1, 0,
-        0, 0, 0, 0, 0, 0,
-        0, 0, 2, 2, 0, 0,
-        0, 0, 0, 0, 0, 0,
-        0, 1, 0, 0, 2, 0,
-        0, 0, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 6,
-      pearls: [
-        0, 2, 0, 0, 2, 0,
-        0, 0, 1, 1, 0, 0,
-        0, 0, 0, 0, 0, 0,
-        0, 0, 2, 2, 0, 0,
-        0, 1, 0, 0, 1, 0,
-        0, 0, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 6,
-      pearls: [
-        1, 0, 0, 0, 0, 1,
-        0, 0, 2, 2, 0, 0,
-        0, 1, 0, 0, 1, 0,
-        0, 0, 2, 2, 0, 0,
-        1, 0, 0, 0, 0, 1,
-        0, 0, 0, 0, 0, 0,
-      ],
-    ),
-    MasyuLevel(
-      gridSize: 6,
-      pearls: [
-        0, 0, 1, 1, 0, 0,
-        0, 2, 0, 0, 2, 0,
-        1, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 1,
-        0, 2, 0, 0, 2, 0,
-        0, 0, 1, 1, 0, 0,
-      ],
-    ),
-  ];
+  static const List<MasyuLevel> _kLevels = kMasyuLevels;
 
   @override
   void initState() {
@@ -239,7 +87,10 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   void _setupLevel() {
-    final level = _kLevels[_currentLevel % _kLevels.length];
+    if (!_playDailyMode && _currentLevel >= _kLevels.length) {
+      return;
+    }
+    final level = _kLevels[_playDailyMode ? (_currentLevel % _kLevels.length) : _currentLevel];
     _gridSize = level.gridSize;
     _grid = List.from(level.pearls);
     _activeEdges.clear();
@@ -249,6 +100,138 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _dragPositionNotifier.value = null;
     _isHintShowing = false;
     _hintIdx = -1;
+    _solutionEdges = _solveMasyu() ?? {};
+  }
+
+  Map<String, bool>? _solveMasyu() {
+    int startCell = -1;
+    for (int i = 0; i < _grid.length; i++) {
+      if (_grid[i] > 0) {
+        startCell = i;
+        break;
+      }
+    }
+    if (startCell == -1) return null;
+
+    final totalCells = _gridSize * _gridSize;
+
+    List<int> getNeighbors(int idx) {
+      final r = idx ~/ _gridSize;
+      final c = idx % _gridSize;
+      final res = <int>[];
+      if (r > 0) res.add(idx - _gridSize);
+      if (r < _gridSize - 1) res.add(idx + _gridSize);
+      if (c > 0) res.add(idx - 1);
+      if (c < _gridSize - 1) res.add(idx + 1);
+      return res;
+    }
+
+    bool isStraight(int a, int b, int c) {
+      int rA = a ~/ _gridSize, cA = a % _gridSize;
+      int rB = b ~/ _gridSize, cB = b % _gridSize;
+      int rC = c ~/ _gridSize, cC = c % _gridSize;
+      return (rA == rB && rB == rC) || (cA == cB && cB == cC);
+    }
+
+    bool isTurn(int a, int b, int c) {
+      return !isStraight(a, b, c);
+    }
+
+    bool validateLoop(List<int> loop) {
+      final K = loop.length;
+      final loopSet = Set<int>.from(loop);
+      for (int i = 0; i < _grid.length; i++) {
+        if (_grid[i] > 0 && !loopSet.contains(i)) return false;
+      }
+
+      final cellToIdx = {for (int j = 0; j < K; j++) loop[j]: j};
+
+      for (int j = 0; j < K; j++) {
+        int idx = loop[j];
+        int pearl = _grid[idx];
+        if (pearl == 0) continue;
+
+        int prev = loop[(j - 1 + K) % K];
+        int next = loop[(j + 1) % K];
+        int prevPrev = loop[(j - 2 + K) % K];
+        int nextNext = loop[(j + 2) % K];
+
+        if (pearl == 1) {
+          if (!isStraight(prev, idx, next)) return false;
+          bool prevTurns = isTurn(prevPrev, prev, idx);
+          bool nextTurns = isTurn(idx, next, nextNext);
+          if (!prevTurns && !nextTurns) return false;
+        } else if (pearl == 2) {
+          if (!isTurn(prev, idx, next)) return false;
+          bool prevStraight = isStraight(prevPrev, prev, idx);
+          bool nextStraight = isStraight(idx, next, nextNext);
+          if (!prevStraight || !nextStraight) return false;
+        }
+      }
+      return true;
+    }
+
+    List<int>? solutionLoop;
+    final visited = List.filled(totalCells, false);
+
+    bool dfs(int curr, List<int> path) {
+      if (path.length >= 4) {
+        final startNeighbors = getNeighbors(startCell);
+        if (startNeighbors.contains(curr)) {
+          if (validateLoop(path)) {
+            solutionLoop = List.from(path);
+            return true;
+          }
+        }
+      }
+
+      final neighbors = getNeighbors(curr);
+      for (final next in neighbors) {
+        if (next == startCell) continue;
+        if (!visited[next]) {
+          if (path.length >= 2) {
+            int prevIdx = path[path.length - 2];
+            int pearlIdx = path[path.length - 1];
+            int pearlType = _grid[pearlIdx];
+            if (pearlType == 1) {
+              if (!isStraight(prevIdx, pearlIdx, next)) continue;
+            } else if (pearlType == 2) {
+              if (!isTurn(prevIdx, pearlIdx, next)) continue;
+            }
+          }
+
+          if (path.length >= 3) {
+            int prevIdx = path[path.length - 2];
+            int pearlIdx = path[path.length - 1];
+            if (_grid[prevIdx] == 2) {
+              if (!isStraight(prevIdx, pearlIdx, next)) continue;
+            }
+          }
+
+          visited[next] = true;
+          path.add(next);
+          if (dfs(next, path)) return true;
+          path.removeLast();
+          visited[next] = false;
+        }
+      }
+      return false;
+    }
+
+    visited[startCell] = true;
+    dfs(startCell, [startCell]);
+
+    if (solutionLoop == null) return null;
+
+    final Map<String, bool> solEdges = {};
+    final K = solutionLoop!.length;
+    for (int i = 0; i < K; i++) {
+      int u = solutionLoop![i];
+      int v = solutionLoop![(i + 1) % K];
+      String key = u < v ? '$u-$v' : '$v-$u';
+      solEdges[key] = true;
+    }
+    return solEdges;
   }
 
   List<List<int>> _getEdges() {
@@ -344,172 +327,155 @@ class _MasyuScreenState extends State<MasyuScreen> {
     setState(() {
       _dragPath.clear();
     });
+    _tryAutoCheck();
+  }
+
+  Map<int, List<int>> _buildAdjacency() {
+    final adj = <int, List<int>>{};
+    _activeEdges.forEach((key, active) {
+      if (active) {
+        final parts = key.split('-');
+        int u = int.parse(parts[0]);
+        int v = int.parse(parts[1]);
+        adj.putIfAbsent(u, () => []).add(v);
+        adj.putIfAbsent(v, () => []).add(u);
+      }
+    });
+    return adj;
+  }
+
+  bool _isStraight(int a, int b, int c) {
+    int rA = a ~/ _gridSize, cA = a % _gridSize;
+    int rB = b ~/ _gridSize, cB = b % _gridSize;
+    int rC = c ~/ _gridSize, cC = c % _gridSize;
+    return (rA == rB && rB == rC) || (cA == cB && cB == cC);
+  }
+
+  bool _isTurn(int a, int b, int c) {
+    return !_isStraight(a, b, c);
+  }
+
+  (bool isValid, String? errorMsg, int? errIdx) _validateMasyuGraph() {
+    final adj = _buildAdjacency();
+    final totalCells = _gridSize * _gridSize;
+
+    if (adj.isEmpty) {
+      return (false, 'Draw a loop connecting the pearls!', null);
+    }
+
+    // 1. Degree check: Every cell in loop graph must have degree 2
+    int loopCellsCount = 0;
+    int startCell = -1;
+    for (final entry in adj.entries) {
+      int u = entry.key;
+      int deg = entry.value.length;
+      if (deg == 2) {
+        loopCellsCount++;
+        if (startCell == -1) startCell = u;
+      } else if (deg != 0) {
+        int r = u ~/ _gridSize + 1, c = u % _gridSize + 1;
+        return (false, 'Cell ($r,$c) has $deg connections — must have 0 or 2', u);
+      }
+    }
+
+    if (loopCellsCount < 4 || startCell == -1) {
+      return (false, 'Loop must connect at least 4 cells', null);
+    }
+
+    // 2. Single-loop connectivity check via BFS
+    List<bool> visited = List.filled(totalCells, false);
+    List<int> queue = [startCell];
+    visited[startCell] = true;
+    int visitedCount = 1;
+
+    while (queue.isNotEmpty) {
+      int curr = queue.removeAt(0);
+      for (int neighbor in adj[curr] ?? []) {
+        if (!visited[neighbor]) {
+          visited[neighbor] = true;
+          queue.add(neighbor);
+          visitedCount++;
+        }
+      }
+    }
+
+    if (visitedCount != loopCellsCount) {
+      return (false, 'Multiple loops found — only a single loop is allowed', null);
+    }
+
+    // Reconstruct the ordered loop sequence
+    final List<int> loop = [startCell];
+    int prevNode = -1;
+    int currNode = startCell;
+    while (true) {
+      final neighbors = adj[currNode]!;
+      int nextNode = (prevNode == -1)
+          ? neighbors[0]
+          : ((neighbors[0] == prevNode) ? neighbors[1] : neighbors[0]);
+      if (nextNode == startCell) {
+        break;
+      }
+      loop.add(nextNode);
+      prevNode = currNode;
+      currNode = nextNode;
+    }
+
+    final int K = loop.length;
+    final Map<int, int> cellToLoopIndex = {};
+    for (int j = 0; j < K; j++) {
+      cellToLoopIndex[loop[j]] = j;
+    }
+
+    // 3. Pearl rule validation along the reconstructed loop
+    for (int i = 0; i < totalCells; i++) {
+      int pearl = _grid[i];
+      if (pearl == 0) continue;
+
+      int r = i ~/ _gridSize + 1, c = i % _gridSize + 1;
+      if (!cellToLoopIndex.containsKey(i)) {
+        return (false, 'Pearl at ($r,$c) must be part of the loop', i);
+      }
+
+      int j = cellToLoopIndex[i]!;
+      int prev = loop[(j - 1 + K) % K];
+      int next = loop[(j + 1) % K];
+      int prevPrev = loop[(j - 2 + K) % K];
+      int nextNext = loop[(j + 2) % K];
+
+      if (pearl == 1) {
+        // White Pearl: Must go STRAIGHT through it
+        if (!_isStraight(prev, i, next)) {
+          return (false, 'White pearl at ($r,$c) must go straight through', i);
+        }
+
+        // At least one adjacent cell must make a 90-degree turn
+        bool prevTurns = _isTurn(prevPrev, prev, i);
+        bool nextTurns = _isTurn(i, next, nextNext);
+
+        if (!prevTurns && !nextTurns) {
+          return (false, 'White pearl at ($r,$c): at least 1 neighbor must turn', i);
+        }
+      } else if (pearl == 2) {
+        // Black Pearl: Must TURN 90 degrees at the pearl
+        if (!_isTurn(prev, i, next)) {
+          return (false, 'Black pearl at ($r,$c) must turn 90°', i);
+        }
+
+        // Both outgoing paths must continue straight for 1 unit
+        bool prevStraight = _isStraight(prevPrev, prev, i);
+        bool nextStraight = _isStraight(i, next, nextNext);
+
+        if (!prevStraight || !nextStraight) {
+          return (false, 'Black pearl at ($r,$c): path must continue straight after turn', i);
+        }
+      }
+    }
+
+    return (true, null, null);
   }
 
   void _checkSolution() {
-    bool isValid = true;
-    final totalCells = _gridSize * _gridSize;
-    List<int> degree = List.filled(totalCells, 0);
-    final edges = _getEdges();
-
-    for (int i = 0; i < edges.length; i++) {
-      int u = edges[i][0];
-      int v = edges[i][1];
-      if (_hasEdge(u, v)) {
-        degree[u]++;
-        degree[v]++;
-      }
-    }
-
-    int loopCellsCount = 0;
-    int startCell = -1;
-    for (int i = 0; i < totalCells; i++) {
-      if (degree[i] == 2) {
-        loopCellsCount++;
-        if (startCell == -1) startCell = i;
-      } else if (degree[i] != 0) {
-        isValid = false;
-      }
-    }
-
-    if (loopCellsCount < 4) isValid = false;
-
-    // Single loop check (BFS/DFS connectivity)
-    if (isValid && startCell != -1) {
-      List<bool> visited = List.filled(totalCells, false);
-      List<int> queue = [startCell];
-      visited[startCell] = true;
-      int visitedCount = 1;
-      while (queue.isNotEmpty) {
-        int curr = queue.removeAt(0);
-        for (int i = 0; i < edges.length; i++) {
-          int u = edges[i][0];
-          int v = edges[i][1];
-          if (_hasEdge(u, v)) {
-            if (u == curr && !visited[v]) {
-              visited[v] = true;
-              queue.add(v);
-              visitedCount++;
-            } else if (v == curr && !visited[u]) {
-              visited[u] = true;
-              queue.add(u);
-              visitedCount++;
-            }
-          }
-        }
-      }
-      if (visitedCount != loopCellsCount) isValid = false;
-    }
-
-    // Pearls verification
-    if (isValid) {
-      for (int i = 0; i < totalCells; i++) {
-        int pearl = _grid[i];
-        if (pearl > 0) {
-          if (degree[i] != 2) {
-            isValid = false;
-            break;
-          }
-
-          List<int> neighbors = [];
-          int ri = i ~/ _gridSize; int ci = i % _gridSize;
-          if (ri > 0 && _hasEdge(i, (ri - 1) * _gridSize + ci)) neighbors.add((ri - 1) * _gridSize + ci);
-          if (ri < _gridSize - 1 && _hasEdge(i, (ri + 1) * _gridSize + ci)) neighbors.add((ri + 1) * _gridSize + ci);
-          if (ci > 0 && _hasEdge(i, i - 1)) neighbors.add(i - 1);
-          if (ci < _gridSize - 1 && _hasEdge(i, i + 1)) neighbors.add(i + 1);
-
-          if (neighbors.length != 2) {
-            isValid = false;
-            break;
-          }
-
-          int n1 = neighbors[0];
-          int n2 = neighbors[1];
-          int r1 = n1 ~/ _gridSize, c1 = n1 % _gridSize;
-          int r2 = n2 ~/ _gridSize, c2 = n2 % _gridSize;
-          bool isStraight = (r1 == r2) || (c1 == c2);
-
-          if (pearl == 1) {
-            // White pearl: must go straight
-            if (!isStraight) {
-              isValid = false;
-              break;
-            }
-            
-            // At least one neighbor must make a 90-degree turn
-            bool n1Turns = false;
-            int rn1 = n1 ~/ _gridSize, cn1 = n1 % _gridSize;
-            List<int> n1Neighbors = [];
-            if (rn1 > 0 && _hasEdge(n1, (rn1 - 1) * _gridSize + cn1)) n1Neighbors.add((rn1 - 1) * _gridSize + cn1);
-            if (rn1 < _gridSize - 1 && _hasEdge(n1, (rn1 + 1) * _gridSize + cn1)) n1Neighbors.add((rn1 + 1) * _gridSize + cn1);
-            if (cn1 > 0 && _hasEdge(n1, n1 - 1)) n1Neighbors.add(n1 - 1);
-            if (cn1 < _gridSize - 1 && _hasEdge(n1, n1 + 1)) n1Neighbors.add(n1 + 1);
-            if (n1Neighbors.length == 2) {
-              int rn1_1 = n1Neighbors[0] ~/ _gridSize, cn1_1 = n1Neighbors[0] % _gridSize;
-              int rn1_2 = n1Neighbors[1] ~/ _gridSize, cn1_2 = n1Neighbors[1] % _gridSize;
-              n1Turns = (rn1_1 != rn1_2) && (cn1_1 != cn1_2);
-            }
-
-            bool n2Turns = false;
-            int rn2 = n2 ~/ _gridSize, cn2 = n2 % _gridSize;
-            List<int> n2Neighbors = [];
-            if (rn2 > 0 && _hasEdge(rn2 * _gridSize + cn2, (rn2 - 1) * _gridSize + cn2)) n2Neighbors.add((rn2 - 1) * _gridSize + cn2);
-            if (rn2 < _gridSize - 1 && _hasEdge(rn2 * _gridSize + cn2, (rn2 + 1) * _gridSize + cn2)) n2Neighbors.add((rn2 + 1) * _gridSize + cn2);
-            if (cn2 > 0 && _hasEdge(rn2 * _gridSize + cn2, rn2 * _gridSize + cn2 - 1)) n2Neighbors.add(rn2 * _gridSize + cn2 - 1);
-            if (cn2 < _gridSize - 1 && _hasEdge(rn2 * _gridSize + cn2, rn2 * _gridSize + cn2 + 1)) n2Neighbors.add(rn2 * _gridSize + cn2 + 1);
-            if (n2Neighbors.length == 2) {
-              int rn2_1 = n2Neighbors[0] ~/ _gridSize, cn2_1 = n2Neighbors[0] % _gridSize;
-              int rn2_2 = n2Neighbors[1] ~/ _gridSize, cn2_2 = n2Neighbors[1] % _gridSize;
-              n2Turns = (rn2_1 != rn2_2) && (cn2_1 != cn2_2);
-            }
-
-            if (!n1Turns && !n2Turns) {
-              isValid = false;
-              break;
-            }
-          } else if (pearl == 2) {
-            // Black pearl: must make 90-degree turn
-            if (isStraight) {
-              isValid = false;
-              break;
-            }
-
-            // Both outgoing paths must continue straight for at least 1 cell
-            bool n1Straight = false;
-            int rn1 = n1 ~/ _gridSize, cn1 = n1 % _gridSize;
-            List<int> n1Neighbors = [];
-            if (rn1 > 0 && _hasEdge(n1, (rn1 - 1) * _gridSize + cn1)) n1Neighbors.add((rn1 - 1) * _gridSize + cn1);
-            if (rn1 < _gridSize - 1 && _hasEdge(n1, (rn1 + 1) * _gridSize + cn1)) n1Neighbors.add((rn1 + 1) * _gridSize + cn1);
-            if (cn1 > 0 && _hasEdge(n1, n1 - 1)) n1Neighbors.add(n1 - 1);
-            if (cn1 < _gridSize - 1 && _hasEdge(n1, n1 + 1)) n1Neighbors.add(n1 + 1);
-            if (n1Neighbors.length == 2) {
-              int rn1_1 = n1Neighbors[0] ~/ _gridSize, cn1_1 = n1Neighbors[0] % _gridSize;
-              int rn1_2 = n1Neighbors[1] ~/ _gridSize, cn1_2 = n1Neighbors[1] % _gridSize;
-              n1Straight = (rn1_1 == rn1_2) || (cn1_1 == cn1_2);
-            }
-
-            bool n2Straight = false;
-            int rn2 = n2 ~/ _gridSize, cn2 = n2 % _gridSize;
-            List<int> n2Neighbors = [];
-            if (rn2 > 0 && _hasEdge(rn2 * _gridSize + cn2, (rn2 - 1) * _gridSize + cn2)) n2Neighbors.add((rn2 - 1) * _gridSize + cn2);
-            if (rn2 < _gridSize - 1 && _hasEdge(rn2 * _gridSize + cn2, (rn2 + 1) * _gridSize + cn2)) n2Neighbors.add((rn2 + 1) * _gridSize + cn2);
-            if (cn2 > 0 && _hasEdge(rn2 * _gridSize + cn2, rn2 * _gridSize + cn2 - 1)) n2Neighbors.add(rn2 * _gridSize + cn2 - 1);
-            if (cn2 < _gridSize - 1 && _hasEdge(rn2 * _gridSize + cn2, rn2 * _gridSize + cn2 + 1)) n2Neighbors.add(rn2 * _gridSize + cn2 + 1);
-            if (n2Neighbors.length == 2) {
-              int rn2_1 = n2Neighbors[0] ~/ _gridSize, cn2_1 = n2Neighbors[0] % _gridSize;
-              int rn2_2 = n2Neighbors[1] ~/ _gridSize, cn2_2 = n2Neighbors[1] % _gridSize;
-              n2Straight = (rn2_1 == rn2_2) || (cn2_1 == cn2_2);
-            }
-
-            if (!n1Straight || !n2Straight) {
-              isValid = false;
-              break;
-            }
-          }
-        }
-      }
-    }
-
+    final (isValid, errorMsg, errIdx) = _validateMasyuGraph();
     if (isValid) {
       AudioManager.playSuccess();
       settingsNotifier.hapticSuccess();
@@ -517,16 +483,31 @@ class _MasyuScreenState extends State<MasyuScreen> {
     } else {
       AudioManager.playFail();
       settingsNotifier.hapticError();
+      if (errIdx != null) {
+        setState(() => _hintIdx = errIdx);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Invalid loop. Check all pearl rules!',
+            errorMsg ?? 'Invalid loop. Check pearl rules!',
             style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.red.shade800,
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+
+  void _tryAutoCheck() {
+    if (_isSuccess) return;
+    int activeEdgeCount = _activeEdges.values.where((v) => v).length;
+    int pearlCount = _grid.where((p) => p > 0).length;
+    if (activeEdgeCount >= max(4, pearlCount)) {
+      final (isValid, _, _) = _validateMasyuGraph();
+      if (isValid) {
+        _checkSolution();
+      }
     }
   }
 
@@ -552,22 +533,79 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   void _showHint() {
-    for (int i = 0; i < _grid.length; i++) {
-      if (_grid[i] > 0 && _hintIdx == -1) {
-        setState(() {
-          _hintIdx = i;
-          _isHintShowing = true;
-        });
-        Future.delayed(const Duration(seconds: 4), () {
-          if (mounted) {
-            setState(() {
-              _isHintShowing = false;
-              _hintIdx = -1;
-            });
-          }
-        });
-        break;
+    if (_solutionEdges.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cannot find solution. Try clearing some lines!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    // 1. Spot incorrect edges and erase them
+    String? incorrectKey;
+    _activeEdges.forEach((key, isActive) {
+      if (isActive) {
+        if (!_solutionEdges.containsKey(key) || !_solutionEdges[key]!) {
+          incorrectKey = key;
+        }
       }
+    });
+
+    if (incorrectKey != null) {
+      final parts = incorrectKey!.split('-');
+      int u = int.parse(parts[0]);
+      setState(() {
+        _activeEdges[incorrectKey!] = false;
+        _hintIdx = u;
+        _isHintShowing = true;
+      });
+      settingsNotifier.hapticTap();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erased an incorrect line!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.amber.shade800,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _isHintShowing = false);
+      });
+      return;
+    }
+
+    // 2. Give the next step by placing a correct edge
+    String? missingKey;
+    _solutionEdges.forEach((key, isSolActive) {
+      if (isSolActive) {
+        if (!_activeEdges.containsKey(key) || !_activeEdges[key]!) {
+          missingKey = key;
+        }
+      }
+    });
+
+    if (missingKey != null) {
+      final parts = missingKey!.split('-');
+      int u = int.parse(parts[0]);
+      setState(() {
+        _activeEdges[missingKey!] = true;
+        _hintIdx = u;
+        _isHintShowing = true;
+      });
+      settingsNotifier.hapticTap();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Revealed the next step!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: AppTheme.dustyMauve,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _isHintShowing = false);
+      });
+      _tryAutoCheck();
     }
   }
 
@@ -585,10 +623,97 @@ class _MasyuScreenState extends State<MasyuScreen> {
     final double cellSpacing = boardSize / _gridSize;
     final double origin = cellSpacing / 2;
 
+    final bool allLevelsCompleted = !_playDailyMode && _currentLevel >= _kLevels.length;
+
+    if (allLevelsCompleted) {
+      return Scaffold(
+        backgroundColor: context.bgDark,
+        appBar: AppBar(
+          title: Text('Pearl Loop', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+        ),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: context.bgCard,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: context.textMuted.withAlpha(20)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.emoji_events,
+                  color: Colors.amber,
+                  size: 80,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'All Levels Completed!',
+                  style: GoogleFonts.outfit(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: context.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Congratulations! You have solved all ${_kLevels.length} levels of Pearl Loop. More levels will be added in future updates!',
+                  style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    color: context.textSecondary,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.dustyMauve,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.home),
+                  label: const Text('Back to Home'),
+                ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: context.textMuted,
+                  ),
+                  onPressed: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setInt(PrefsKeys.gameLevel('masyu'), 0);
+                    setState(() {
+                      _currentLevel = 0;
+                      _setupLevel();
+                    });
+                  },
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Reset Progress & Replay'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
-        title: Text('Masyu', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Text('Pearl Loop', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           IconButton(
             icon: Stack(
@@ -630,7 +755,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.help_outline),
-            onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Masyu'),
+            onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16, left: 8),
@@ -707,75 +832,45 @@ class _MasyuScreenState extends State<MasyuScreen> {
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: context.bgCard,
-                        foregroundColor: context.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _activeEdges.clear();
-                          _dragPath.clear();
-                        });
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reset'),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.dustyMauve,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: _checkSolution,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Check'),
-                    ),
-                  ],
+                Center(
+                  child: _isSuccess
+                      ? AutoNextCountdown(
+                          onNext: _nextLevel,
+                          accentColor: AppTheme.dustyMauve,
+                        )
+                      : ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: context.bgCard,
+                            foregroundColor: context.textPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _activeEdges.clear();
+                              _dragPath.clear();
+                              _isSuccess = false;
+                              _hintIdx = -1;
+                            });
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Reset'),
+                        ),
                 ),
               ],
             ),
           ),
-          if (_isSuccess)
+          if (_isSuccess && _playDailyMode)
             Positioned.fill(
               child: Container(
                 color: Colors.black.withOpacity(0.6),
                 child: Center(
-                  child: _playDailyMode
-                      ? ChallengeClearedOverlay(
-                          accentColor: AppTheme.dustyMauve,
-                          onComplete: () {
-                            Navigator.pop(context, true);
-                          },
-                        )
-                      : Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 32),
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: context.bgCard,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Level ${_currentLevel + 1} Cleared!',
-                                style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 16),
-                              AutoNextCountdown(
-                                onNext: _nextLevel,
-                                accentColor: AppTheme.dustyMauve,
-                              ),
-                            ],
-                          ),
-                        ),
+                  child: ChallengeClearedOverlay(
+                    accentColor: AppTheme.dustyMauve,
+                    onComplete: () {
+                      Navigator.pop(context, true);
+                    },
+                  ),
                 ),
               ),
             ),
@@ -819,12 +914,12 @@ class _MasyuPainter extends CustomPainter {
     }
 
     final Paint dotPaint = Paint()
-      ..color = Colors.grey.withOpacity(0.3)
+      ..color = AppTheme.dustyMauve.withAlpha(200)
       ..style = PaintingStyle.fill;
     
     for (int r = 0; r < gridSize; r++) {
       for (int c = 0; c < gridSize; c++) {
-        canvas.drawCircle(Offset(origin + c * cellSpacing, origin + r * cellSpacing), 3, dotPaint);
+        canvas.drawCircle(Offset(origin + c * cellSpacing, origin + r * cellSpacing), 4.5, dotPaint);
       }
     }
 
@@ -922,12 +1017,5 @@ class _MasyuPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MasyuPainter old) =>
-      old.gridSize != gridSize ||
-      old.grid != grid ||
-      old.activeEdges != activeEdges ||
-      old.cellSpacing != cellSpacing ||
-      old.origin != origin ||
-      old.dragPath != dragPath ||
-      old.hintIdx != hintIdx;
+  bool shouldRepaint(covariant _MasyuPainter old) => true;
 }

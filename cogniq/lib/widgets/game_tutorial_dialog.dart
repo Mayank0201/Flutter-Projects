@@ -454,6 +454,93 @@ class _GameTutorialDialogState extends State<GameTutorialDialog> {
             illustrationEmoji: '🏆',
           ),
         ];
+      case 'kakuro':
+        return [
+          const TutorialStep(
+            title: '🧩 Kakuro Grid',
+            description: 'The board consists of black cells (clue cells/walls) and white cells (playable cells). Fill white cells with digits 1-9.',
+            illustrationEmoji: '🧩',
+          ),
+          const TutorialStep(
+            title: '➕ Clue Sums',
+            description: 'Numbers in clue cells show the sum of their corresponding horizontal rows (top-right corner) and vertical columns (bottom-left corner).',
+            illustrationEmoji: '➕',
+          ),
+          const TutorialStep(
+            title: '🚫 Unique Digits',
+            description: 'Every horizontal or vertical run of cells must contain unique digits. You cannot repeat the same digit within a single run.',
+            illustrationEmoji: '🚫',
+          ),
+          const TutorialStep(
+            title: '⚡ Auto-Check',
+            description: 'When you fill all entry cells, the puzzle will auto-validate. Match all sum clues to win!',
+            illustrationEmoji: '⚡',
+          ),
+        ];
+      case 'masyu':
+        return [
+          const TutorialStep(
+            title: '⭕ Draw a Loop',
+            description: 'Draw a single, continuous closed loop connecting grid dots. The loop cannot cross itself or branch.',
+            illustrationEmoji: '⭕',
+          ),
+          const TutorialStep(
+            title: '⚪ White Pearls',
+            description: 'The loop must pass straight through white circles. Additionally, the loop must turn 90° in the cell immediately before and/or after the pearl.',
+            illustrationEmoji: '⚪',
+          ),
+          const TutorialStep(
+            title: '⚫ Black Pearls',
+            description: 'The loop must turn 90° inside black circles. Additionally, both straight segments extending from the turn must be at least one cell long before turning again.',
+            illustrationEmoji: '⚫',
+          ),
+          const TutorialStep(
+            title: '☝️ Drag to Draw',
+            description: 'Drag your finger along the grid lines to draw. Tap Reset to clear your path and restart.',
+            illustrationEmoji: '☝️',
+          ),
+        ];
+      case 'bridges':
+        return [
+          const TutorialStep(
+            title: '🏝️ Connect Islands',
+            description: 'Draw bridges between islands. The number on each island shows how many bridges must connect to it (1 or 2 per pair).',
+            illustrationEmoji: '🏝️',
+          ),
+          const TutorialStep(
+            title: '🚫 Crossing & Paths',
+            description: 'Bridges cannot cross each other and cannot pass through other islands. They can only run horizontally or vertically.',
+            illustrationEmoji: '🚫',
+          ),
+          const TutorialStep(
+            title: '🕸️ Single Network',
+            description: 'All islands must be connected into a single interconnected network. No isolated loops are allowed.',
+            illustrationEmoji: '🕸️',
+          ),
+          const TutorialStep(
+            title: '☝️ Drag or Tap',
+            description: 'Drag from one island to another to draw bridges, or tap two islands in sequence. Tap again to upgrade to a double bridge or remove it.',
+            illustrationEmoji: '☝️',
+          ),
+        ];
+      case 'sumstrike':
+        return [
+          const TutorialStep(
+            title: '🎯 Match Sum Targets',
+            description: 'Strike out numbers from the grid so that the sum of the remaining numbers in each row and column matches the target numbers at the edge.',
+            illustrationEmoji: '🎯',
+          ),
+          const TutorialStep(
+            title: '⚡ Instant Verification',
+            description: 'Tap a cell to delete its number. If correct, the number disappears. If incorrect, the cell flashes red and stays on the board.',
+            illustrationEmoji: '⚡',
+          ),
+          const TutorialStep(
+            title: '🚫 Slate Badges',
+            description: 'Target sums are shown in slate-colored badges. Once a row or column matches its target, its badge is crossed out.',
+            illustrationEmoji: '🚫',
+          ),
+        ];
       default:
         return [
           TutorialStep(

@@ -452,11 +452,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     if (_playDailyMode && _dailyModifierType == 'whisper') {
       return 10;
     }
-    if (_levelIndex >= 29) {
-      final extraCount = (_levelIndex - 29) ~/ 10;
-      return (10 + extraCount).clamp(10, min(15, _level.validWords.length));
-    }
-    return _level.targetCount;
+    // Dynamic difficulty scaling based on level index
+    final computedTarget = 4 + (_levelIndex ~/ 3);
+    return computedTarget.clamp(4, min(18, _level.validWords.length));
   }
 
   @override
