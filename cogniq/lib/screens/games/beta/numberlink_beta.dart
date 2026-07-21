@@ -1,4 +1,7 @@
 import 'dart:math';
+import 'dart:async';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -50,6 +53,17 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
+  bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+  final Set<int> _wallCells = {};
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -78,6 +92,9 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     setState(() {
       _isSuccess = false;
       _dragColor = 0;
+      _gameTimer?.cancel();
+      _timeLeft = -1;
+      _timeBonusEarned = false;
       
       if (_isTutorialMode) {
         _gridSize = 3;
@@ -90,8 +107,22 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         return;
       }
       
-      // Determine difficulty parameters based on level
-      if (_currentLevel < 5) {
+      if (!_playDailyMode && _currentLevel >= 30) {
+        if (_currentLevel >= 30 && _currentLevel < 45) {
+          _gridSize = 8;
+          _numColors = 6 + min(2, (_currentLevel - 30) ~/ 7); // 7-8 colors
+        } else if (_currentLevel >= 45 && _currentLevel < 60) {
+          _gridSize = 8;
+          _numColors = 8;
+        } else if (_currentLevel >= 60 && _currentLevel < 80) {
+          _gridSize = 8;
+          _numColors = 6;
+        } else {
+          // Rotation (L80+)
+          _gridSize = 4 + ((_currentLevel - 80) % 5); // Rotates 4x4 to 8x8
+          _numColors = 3 + ((_currentLevel - 80) % 4); // Rotates 3-6 color pairs
+        }
+      } else if (_currentLevel < 5) {
         _gridSize = 4;
         _numColors = 2;
       } else if (_currentLevel < 10) {
@@ -110,16 +141,43 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
 
       _grid = List.filled(_gridSize * _gridSize, 0);
       _paths = List.generate(_numColors, (_) => []);
+      _wallCells.clear();
 
-      // Procedural level generation using seeded random path growth
-      bool generated = false;
-      final rng = Random(_currentLevel + 2026); // Seeded random for consistent levels
+      final rng = _playDailyMode
+          ? Random(_currentLevel + 2026)
+          : RotationEngine.getDeterminism('colourlink', _currentLevel);
+
+      int wallCount = 0;
+      if (!_playDailyMode && _currentLevel >= 60) {
+        if (_currentLevel < 80) {
+          wallCount = 1 + (_currentLevel - 60) ~/ 5;
+        } else {
+          int combo = (_currentLevel - 80) % 3;
+          if (combo == 1 || combo == 2) {
+            wallCount = 1 + _gridSize ~/ 2;
+          }
+        }
+      }
       
+      bool generated = false;
       int attempts = 0;
       while (attempts < 2000) {
         attempts++;
         List<List<int>> testPaths = List.generate(_numColors, (_) => []);
         List<int> board = List.filled(_gridSize * _gridSize, 0);
+        _wallCells.clear();
+
+        if (wallCount > 0) {
+          final List<int> indices = List.generate(_gridSize * _gridSize, (idx) => idx)..shuffle(rng);
+          int placed = 0;
+          for (int idx in indices) {
+            if (placed >= wallCount) break;
+            board[idx] = -1;
+            _wallCells.add(idx);
+            placed++;
+          }
+        }
+
         bool success = true;
 
         for (int c = 1; c <= _numColors; c++) {
@@ -127,40 +185,42 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           for (int i = 0; i < board.length; i++) {
             if (board[i] == 0) empties.add(i);
           }
-          if (empties.isEmpty) {
-            success = false;
-            break;
-          }
-          int start = empties[rng.nextInt(empties.length)];
-          board[start] = c;
-          testPaths[c - 1].add(start);
+          if (empties.isEmpty) { success = false; break; }
+          int current = empties[rng.nextInt(empties.length)];
+          testPaths[c - 1].add(current);
+          board[current] = c;
 
-          int curr = start;
-          while (true) {
-            int r = curr ~/ _gridSize;
-            int col = curr % _gridSize;
+          int len = 3 + rng.nextInt(max(3, _gridSize));
+          if (!_playDailyMode && _currentLevel >= 45) {
+            int extra = ((_currentLevel - 45) ~/ 4);
+            if (_currentLevel >= 80) {
+              int combo = (_currentLevel - 80) % 3;
+              if (combo == 0 || combo == 2) {
+                extra = _gridSize;
+              }
+            }
+            len = 3 + _gridSize + extra;
+          }
+
+          for (int step = 0; step < len; step++) {
+            int r = current ~/ _gridSize;
+            int cCell = current % _gridSize;
             List<int> neighbors = [];
-            if (r > 0 && board[(r - 1) * _gridSize + col] == 0) neighbors.add((r - 1) * _gridSize + col);
-            if (r < _gridSize - 1 && board[(r + 1) * _gridSize + col] == 0) neighbors.add((r + 1) * _gridSize + col);
-            if (col > 0 && board[r * _gridSize + col - 1] == 0) neighbors.add(r * _gridSize + col - 1);
-            if (col < _gridSize - 1 && board[r * _gridSize + col + 1] == 0) neighbors.add(r * _gridSize + col + 1);
+            if (r > 0 && board[current - _gridSize] == 0) neighbors.add(current - _gridSize);
+            if (r < _gridSize - 1 && board[current + _gridSize] == 0) neighbors.add(current + _gridSize);
+            if (cCell > 0 && board[current - 1] == 0) neighbors.add(current - 1);
+            if (cCell < _gridSize - 1 && board[current + 1] == 0) neighbors.add(current + 1);
 
             if (neighbors.isEmpty) break;
-
-            int next = neighbors[rng.nextInt(neighbors.length)];
-            board[next] = c;
-            testPaths[c - 1].add(next);
-            curr = next;
+            int nextNode = neighbors[rng.nextInt(neighbors.length)];
+            testPaths[c - 1].add(nextNode);
+            board[nextNode] = c;
+            current = nextNode;
           }
-
-          if (testPaths[c - 1].length < 2) {
-            success = false;
-            break;
-          }
+          if (testPaths[c - 1].length < 2) { success = false; break; }
         }
 
-        if (success && board.every((cell) => cell != 0)) {
-          // Found a full grid partition!
+        if (success) {
           for (int c = 1; c <= _numColors; c++) {
             int ep1 = testPaths[c - 1].first;
             int ep2 = testPaths[c - 1].last;
@@ -174,17 +234,35 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
       }
 
       if (!generated) {
-        // Fallback static level if generation fails
         _gridSize = 4;
         _numColors = 2;
         _grid = List.filled(16, 0);
         _paths = List.generate(2, (_) => []);
-        _grid[0] = 1; _grid[15] = 1; // Red
-        _grid[3] = 2; _grid[12] = 2; // Blue
+        _wallCells.clear();
+        _grid[0] = 1; _grid[15] = 1;
+        _grid[3] = 2; _grid[12] = 2;
         _solutionPaths = [
           [0, 1, 5, 9, 13, 14, 15],
           [3, 2, 6, 10, 11, 7, 8, 12]
         ];
+      }
+
+      if (_isEndgame) {
+        _timeLeft = 30 + (_gridSize * 12);
+        _timeBonusEarned = true;
+        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (mounted) {
+            setState(() {
+              if (_timeLeft > 0) {
+                _timeLeft--;
+              } else {
+                _timeLeft = 0;
+                _timeBonusEarned = false;
+                _gameTimer?.cancel();
+              }
+            });
+          }
+        });
       }
     });
   }
@@ -230,7 +308,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   void _onPanStart(DragStartDetails details, double cs) {
     if (_isSuccess) return;
     int idx = _cellAtLocal(details.localPosition, cs);
-    if (idx == -1) return;
+    if (idx == -1 || _wallCells.contains(idx)) return;
 
     // Check if user tapped an endpoint or an existing path cell
     int cellVal = _grid[idx];
@@ -258,7 +336,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   void _onPanUpdate(DragUpdateDetails details, double cs) {
     if (_isSuccess || _dragColor == 0) return;
     int idx = _cellAtLocal(details.localPosition, cs);
-    if (idx == -1) return;
+    if (idx == -1 || _wallCells.contains(idx)) return;
 
     List<int> activePath = _paths[_dragColor - 1];
     if (activePath.isEmpty) return;
@@ -280,6 +358,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     // Connect with interpolation
     final listCells = _interpolateCells(lastIdx, idx);
     for (int cell in listCells) {
+      if (_wallCells.contains(cell)) break;
       if (_isCellOccupiedByOther(cell, _dragColor)) break;
       if (activePath.contains(cell)) continue;
 
@@ -337,7 +416,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     }
 
     if (allConnected) {
-      if (totalPathCells == _gridSize * _gridSize) {
+      if (totalPathCells == _gridSize * _gridSize - _wallCells.length) {
         if (_isTutorialMode) {
           if (!_tutorialCompleted) {
             AudioManager.playSuccess();
@@ -366,6 +445,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     AudioManager.playSuccess();
     settingsNotifier.hapticSuccess();
 
@@ -374,6 +454,19 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     int highest = prefs.getInt(key) ?? 0;
     if (_currentLevel + 1 > highest) {
       await prefs.setInt(key, _currentLevel + 1);
+    }
+
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
 
     final earned = await HintManager.onLevelCleared('colour_link');
@@ -411,6 +504,56 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
       _currentLevel++;
       _loadLevel();
     });
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _useHint() async {
@@ -540,20 +683,56 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve, 
-                  fontSize: 14, 
-                  fontWeight: FontWeight.bold,
+          GestureDetector(
+            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      style: AppTheme.numberStyle(
+                        color: AppTheme.dustyMauve, 
+                        fontSize: 14, 
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!_isTutorialMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -606,6 +785,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                                         gridSize: _gridSize,
                                         cellSize: cs,
                                         colors: _colors,
+                                        wallCells: _wallCells,
                                       ),
                                     ),
                                   );
@@ -680,6 +860,7 @@ class NumberlinkPainter extends CustomPainter {
   final int gridSize;
   final double cellSize;
   final List<Color> colors;
+  final Set<int> wallCells;
 
   NumberlinkPainter({
     required this.grid,
@@ -687,10 +868,21 @@ class NumberlinkPainter extends CustomPainter {
     required this.gridSize,
     required this.cellSize,
     required this.colors,
+    required this.wallCells,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 0. Draw Wall Cells
+    final wallPaint = Paint()
+      ..color = Colors.grey.shade900
+      ..style = PaintingStyle.fill;
+    for (int idx in wallCells) {
+      double left = (idx % gridSize) * cellSize;
+      double top = (idx ~/ gridSize) * cellSize;
+      canvas.drawRect(Rect.fromLTWH(left, top, cellSize, cellSize), wallPaint);
+    }
+
     // 1. Draw Grid Lines
     final linePaint = Paint()
       ..color = Colors.grey.shade800
@@ -746,6 +938,7 @@ class NumberlinkPainter extends CustomPainter {
     return oldDelegate.cellSize != cellSize ||
         oldDelegate.gridSize != gridSize ||
         !listEquals(oldDelegate.grid, grid) ||
+        !setEquals(oldDelegate.wallCells, wallCells) ||
         _anyPathChanged(oldDelegate.paths, paths);
   }
 

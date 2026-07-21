@@ -13,6 +13,8 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class ZipLevel {
@@ -51,10 +53,14 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   bool get _isReversePath => _isDailyMode && _dailyModifierType == 'mirror';
   bool _hideGridPathElements = false;
   Timer? _blindStepsTimer;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   @override
   void dispose() {
     _blindStepsTimer?.cancel();
+    _gameTimer?.cancel();
     super.dispose();
   }
 
@@ -225,12 +231,24 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
             });
           }
         } else {
+          _gameTimer?.cancel();
           _won = true;
           _msg = 'Path complete!';
           AudioManager.playSuccess();
           settingsNotifier.hapticError(); // equivalent to heavyImpact
           _savePersistedLevel(_levelIndex + 1);
           _clearState();
+
+          if (_timeLeft > 0 && _timeBonusEarned) {
+            PointManager.addPoints(5);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+                backgroundColor: Colors.amber,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
         }
       } else {
         _msg = 'Hint added to path!';
@@ -245,26 +263,50 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     int gridSize;
     int waypointCount;
 
-    if (levelIndex < 5) {
+    if (!_isDailyMode && levelIndex >= 30) {
+      if (levelIndex >= 80) {
+        gridSize = 4 + ((levelIndex - 80) % 3); // Rotates 4x4, 5x5, 6x6
+      } else {
+        gridSize = 6;
+      }
+    } else if (levelIndex < 5) {
       gridSize = 3;
-      waypointCount = 2 + ((levelIndex + 1) ~/ 2); // 2, 3, 3, 4, 4 waypoints
     } else if (levelIndex < 15) {
       gridSize = 4;
-      waypointCount = 3 + ((levelIndex - 5 + 1) ~/ 3);
     } else if (levelIndex < 30) {
       gridSize = 5;
-      waypointCount = 5 + ((levelIndex - 15 + 1) ~/ 4);
-    } else if (levelIndex < 50) {
-      gridSize = 6;
-      waypointCount = 8 + ((levelIndex - 30 + 1) ~/ 5);
     } else {
       gridSize = 6;
-      waypointCount = 12 + ((levelIndex - 50) ~/ 6);
     }
-    waypointCount = waypointCount.clamp(2, (gridSize * gridSize) - 2);
+
     final int rows = gridSize;
     final int cols = gridSize;
-    final rand = Random(levelIndex);
+    final rand = RotationEngine.getDeterminism('zip', levelIndex);
+
+    if (!_isDailyMode && levelIndex >= 30) {
+      if (levelIndex >= 30 && levelIndex < 45) {
+        waypointCount = 10 - ((levelIndex - 30) ~/ 4);
+      } else if (levelIndex >= 45 && levelIndex < 60) {
+        waypointCount = max(2, 6 - ((levelIndex - 45) ~/ 5)); // down to 2-3
+      } else if (levelIndex >= 60 && levelIndex < 80) {
+        waypointCount = 4;
+      } else {
+        waypointCount = 3 + rand.nextInt(3);
+      }
+    } else {
+      if (levelIndex < 5) {
+        waypointCount = 2 + ((levelIndex + 1) ~/ 2);
+      } else if (levelIndex < 15) {
+        waypointCount = 3 + ((levelIndex - 5 + 1) ~/ 3);
+      } else if (levelIndex < 30) {
+        waypointCount = 5 + ((levelIndex - 15 + 1) ~/ 4);
+      } else if (levelIndex < 50) {
+        waypointCount = 8 + ((levelIndex - 30 + 1) ~/ 5);
+      } else {
+        waypointCount = 12 + ((levelIndex - 50) ~/ 6);
+      }
+    }
+    waypointCount = waypointCount.clamp(2, (gridSize * gridSize) - 2);
 
     List<(int, int)> path = [];
     final successfulWalls = <String>{};
@@ -316,17 +358,55 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
       // Generate walls for levels 30+, validating connectivity
       final walls = <String>{};
-      if (levelIndex >= 30) {
-        final numWalls = 2 + (levelIndex % 4); // 2 to 5 walls
+      if (levelIndex >= 140 && (levelIndex % 2 == 0) && gridSize >= 4) {
+        final corners = [
+          (0, 0),
+          (0, cols - 1),
+          (rows - 1, 0),
+          (rows - 1, cols - 1)
+        ];
+        for (final cell in corners) {
+          if (cell != (startR, startC)) {
+            walls.add('${cell.$1},${cell.$2}');
+          }
+        }
+      }
+
+      int numWalls = 0;
+      if (!_isDailyMode && levelIndex >= 30) {
+        if (levelIndex >= 30 && levelIndex < 45) {
+          numWalls = 2 + (levelIndex - 30) ~/ 3;
+        } else if (levelIndex >= 45 && levelIndex < 60) {
+          numWalls = 6;
+        } else if (levelIndex >= 60 && levelIndex < 80) {
+          numWalls = 6 + (levelIndex - 60) ~/ 4;
+        } else {
+          int combo = (levelIndex - 80) % 3;
+          if (combo == 0) {
+            numWalls = 3 + rand.nextInt(3);
+          } else if (combo == 1) {
+            numWalls = 5 + rand.nextInt(4);
+          } else {
+            numWalls = 1 + rand.nextInt(3);
+          }
+        }
+      } else if (levelIndex >= 30) {
+        numWalls = 2 + (levelIndex % 4);
+      }
+
+      if (numWalls > 0) {
         final candidates = <(int, int)>[];
         for (int r = 0; r < rows; r++) {
           for (int c = 0; c < cols; c++) {
-            if (r != startR || c != startC) candidates.add((r, c));
+            if (r != startR || c != startC) {
+              final key = '$r,$c';
+              if (!walls.contains(key)) candidates.add((r, c));
+            }
           }
         }
         candidates.shuffle(rand);
         for (final cell in candidates) {
-          if (walls.length >= numWalls) break;
+          if (walls.length >= numWalls + (levelIndex >= 140 && (levelIndex % 2 == 0) && gridSize >= 4 ? 4 : 0)) break;
           final key = '${cell.$1},${cell.$2}';
           walls.add(key);
           // Check connectivity — if adding this wall breaks it, remove it
@@ -461,6 +541,10 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   }
 
   void _loadLevel([SharedPreferences? prefs]) {
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
     _level = _getDynamicLevel(_levelIndex);
     _solution = _solveZip(_level);
     _path.clear();
@@ -513,6 +597,74 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         }
       });
     }
+
+    if (!_isDailyMode && _levelIndex >= 30) {
+      _timeLeft = 20 + (_level.rows * 12);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 100',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.zipPink),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _reset() {
@@ -729,36 +881,58 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),
             color: context.textMuted,
             onPressed: () => RulesHelper.showRulesBottomSheet(context, 'zip', 'Grid Path'),
           ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: _isTutorialMode
-                ? Text(
-                    'Tutorial',
-                    style: GoogleFonts.outfit(
-                      color: AppTheme.zipPink,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )
-                : _isDailyMode
-                    ? Text(
-                        'Daily Challenge',
-                        style: GoogleFonts.outfit(
-                          color: AppTheme.zipPink,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      )
-                    : AnimatedLevelIndicator(
-                        level: _levelIndex + 1,
-                        accentColor: AppTheme.zipPink,
-                      ),
+          GestureDetector(
+            onTap: (_isTutorialMode || _isDailyMode) ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _isTutorialMode
+                      ? Text('Tutorial', style: GoogleFonts.outfit(color: AppTheme.zipPink, fontSize: 14, fontWeight: FontWeight.bold))
+                      : _isDailyMode
+                          ? Text('Daily Challenge', style: GoogleFonts.outfit(color: AppTheme.zipPink, fontSize: 14, fontWeight: FontWeight.bold))
+                          : AnimatedLevelIndicator(
+                              level: _levelIndex + 1,
+                              accentColor: AppTheme.zipPink,
+                            ),
+                  if (!_isTutorialMode && !_isDailyMode) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.edit, size: 12, color: AppTheme.zipPink),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),

@@ -1,5 +1,8 @@
 import 'dart:math';
 import 'dart:convert';
+import 'dart:async';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -353,6 +356,11 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   String _dailyModifierType = '';
   String _dailyModifierName = '';
   String _dailyModifierDesc = '';
+  
+  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   // Drag-to-place-X state
   int _dragTargetState = -1; // -1=not dragging, 0=erasing, 1=placing X
@@ -364,6 +372,12 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   bool _shuffleActive = false;
 
   @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     // Default synchronous initialization to avoid LateInitializationError
@@ -372,37 +386,160 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _initLevel();
   }
 
-  QueensLevel generateProceduralLevel(int n, Random rand) {
-    // 1. Place stars first to guarantee a solution exists
-    List<(int, int)>? starCoords = placeStars(n, rand);
-    int retries = 0;
-    while (starCoords == null && retries < 100) {
-      starCoords = placeStars(n, Random(rand.nextInt(100000) + retries));
-      retries++;
+  bool get _useTwoStars {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 60 && _levelIndex < 90) return true;
+    if (_levelIndex >= 90) {
+      int combo = (_levelIndex - 90) % 4;
+      return (combo == 1 || combo == 3);
     }
-    
-    // Fail-safe diagonal placement if retries fail
-    if (starCoords == null) {
-      starCoords = [];
-      for (int i = 0; i < n; i++) {
-        starCoords.add((i, i));
+    return false;
+  }
+
+  double _computeContortionScore(List<List<int>> grid, int n) {
+    double totalScore = 0.0;
+    for (int region = 0; region < n; region++) {
+      int area = 0;
+      int perimeter = 0;
+      for (int r = 0; r < n; r++) {
+        for (int c = 0; c < n; c++) {
+          if (grid[r][c] == region) {
+            area++;
+            final dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+            for (final (dr, dc) in dirs) {
+              int nr = r + dr;
+              int nc = c + dc;
+              if (nr < 0 || nr >= n || nc < 0 || nc >= n || grid[nr][nc] != region) {
+                perimeter++;
+              }
+            }
+          }
+        }
+      }
+      if (area > 0) {
+        totalScore += perimeter / area;
+      }
+    }
+    return totalScore / n;
+  }
+
+  QueensLevel generateProceduralLevel(int n, Random rand) {
+    double minScore = 0.0;
+    if (!_playDailyMode && _levelIndex >= 30) {
+      if (_levelIndex < 90) {
+        minScore = 1.8 + (_levelIndex - 30) * 0.01;
+      } else {
+        int combo = (_levelIndex - 90) % 4;
+        if (combo == 0 || combo == 2) minScore = 2.2;
+      }
+      if (minScore > 2.4) minScore = 2.4;
+    }
+
+    int outerAttempts = 0;
+    while (outerAttempts < 50) {
+      outerAttempts++;
+      if (_useTwoStars) {
+        List<(int, int)>? starCoords = placeTwoStars(n, rand);
+        int retries = 0;
+        while (starCoords == null && retries < 100) {
+          starCoords = placeTwoStars(n, Random(rand.nextInt(100000) + retries));
+          retries++;
+        }
+
+        if (starCoords == null) {
+          starCoords = [];
+          for (int i = 0; i < n; i++) {
+            starCoords.add((i, i));
+            starCoords.add((i, (i + 2) % n));
+          }
+        }
+
+        final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
+        for (int i = 0; i < n; i++) {
+          final (r1, c1) = starCoords[2 * i];
+          final (r2, c2) = starCoords[2 * i + 1];
+          grid[r1][c1] = i;
+          grid[r2][c2] = i;
+        }
+
+        final borderCells = <int, List<(int, int)>>{};
+        for (int i = 0; i < n; i++) {
+          borderCells[i] = [starCoords[2 * i], starCoords[2 * i + 1]];
+        }
+        final ql = _growCellularRegions(n, rand, grid, borderCells);
+        if (minScore > 0.0) {
+          double score = _computeContortionScore(ql.regions, n);
+          if (score >= minScore) return ql;
+        } else {
+          return ql;
+        }
+      } else {
+        List<(int, int)>? starCoords = placeStars(n, rand);
+        int retries = 0;
+        while (starCoords == null && retries < 100) {
+          starCoords = placeStars(n, Random(rand.nextInt(100000) + retries));
+          retries++;
+        }
+        
+        if (starCoords == null) {
+          starCoords = [];
+          for (int i = 0; i < n; i++) {
+            starCoords.add((i, i));
+          }
+        }
+
+        final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
+        final seeds = <(int, int)>[];
+        for (int i = 0; i < n; i++) {
+          final (r, c) = starCoords[i];
+          grid[r][c] = i;
+          seeds.add((r, c));
+        }
+
+        final borderCells = <int, List<(int, int)>>{};
+        for (int i = 0; i < n; i++) {
+          borderCells[i] = [seeds[i]];
+        }
+
+        final ql = _growCellularRegions(n, rand, grid, borderCells);
+        if (minScore > 0.0) {
+          double score = _computeContortionScore(ql.regions, n);
+          if (score >= minScore) return ql;
+        } else {
+          return ql;
+        }
       }
     }
 
-    final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
-    final seeds = <(int, int)>[];
-    for (int i = 0; i < n; i++) {
-      final (r, c) = starCoords[i];
-      grid[r][c] = i;
-      seeds.add((r, c));
+    // Fallback if score criteria is not met after 50 attempts
+    if (_useTwoStars) {
+      List<(int, int)> starCoords = [];
+      for (int i = 0; i < n; i++) {
+        starCoords.add((i, i));
+        starCoords.add((i, (i + 2) % n));
+      }
+      final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
+      for (int i = 0; i < n; i++) {
+        grid[starCoords[2 * i].$1][starCoords[2 * i].$2] = i;
+        grid[starCoords[2 * i + 1].$1][starCoords[2 * i + 1].$2] = i;
+      }
+      final borderCells = <int, List<(int, int)>>{};
+      for (int i = 0; i < n; i++) {
+        borderCells[i] = [starCoords[2 * i], starCoords[2 * i + 1]];
+      }
+      return _growCellularRegions(n, rand, grid, borderCells);
+    } else {
+      final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
+      final borderCells = <int, List<(int, int)>>{};
+      for (int i = 0; i < n; i++) {
+        grid[i][i] = i;
+        borderCells[i] = [(i, i)];
+      }
+      return _growCellularRegions(n, rand, grid, borderCells);
     }
+  }
 
-    // 2. Grow regions around seeds using cellular growth
-    final borderCells = <int, List<(int, int)>>{};
-    for (int i = 0; i < n; i++) {
-      borderCells[i] = [seeds[i]];
-    }
-
+  QueensLevel _growCellularRegions(int n, Random rand, List<List<int>> grid, Map<int, List<(int, int)>> borderCells) {
     bool hasUnassigned = true;
     while (hasUnassigned) {
       hasUnassigned = false;
@@ -485,6 +622,63 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         }
         return false;
       }
+      if (backtrack(0)) return stars;
+    }
+    return null;
+  }
+
+  List<(int, int)>? placeTwoStars(int n, Random rand) {
+    for (int attempt = 0; attempt < 500; attempt++) {
+      final stars = <(int, int)>[];
+      final colCounts = List.filled(n, 0);
+
+      bool checkAdjacencyAndKnight(int r, int c) {
+        for (final (sr, sc) in stars) {
+          if ((sr - r).abs() <= 1 && (sc - c).abs() <= 1) return false;
+          int dr = (sr - r).abs();
+          int dc = (sc - c).abs();
+          if ((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) return false;
+        }
+        return true;
+      }
+
+      bool backtrack(int r) {
+        if (r == n) {
+          return colCounts.every((count) => count == 2);
+        }
+
+        final candidates = <(int, int)>[];
+        for (int c1 = 0; c1 < n - 2; c1++) {
+          if (colCounts[c1] >= 2) continue;
+          if (!checkAdjacencyAndKnight(r, c1)) continue;
+
+          for (int c2 = c1 + 2; c2 < n; c2++) {
+            if (colCounts[c2] >= 2) continue;
+            if (!checkAdjacencyAndKnight(r, c2)) continue;
+
+            candidates.add((c1, c2));
+          }
+        }
+
+        candidates.shuffle(rand);
+
+        for (final (c1, c2) in candidates) {
+          stars.add((r, c1));
+          stars.add((r, c2));
+          colCounts[c1]++;
+          colCounts[c2]++;
+
+          if (backtrack(r + 1)) return true;
+
+          colCounts[c1]--;
+          colCounts[c2]--;
+          stars.removeLast();
+          stars.removeLast();
+        }
+
+        return false;
+      }
+
       if (backtrack(0)) return stars;
     }
     return null;
@@ -642,6 +836,59 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     final n = level.n;
     final List<(int, int)> queens = [];
 
+    if (_isEndgame) {
+      final colCounts = List.filled(n, 0);
+      final regCounts = List.filled(n, 0);
+
+      bool isSafe2(int r, int c) {
+        if (colCounts[c] >= 2) return false;
+        final reg = level.regions[r][c];
+        if (regCounts[reg] >= 2) return false;
+
+        for (final q in queens) {
+          if ((q.$1 - r).abs() <= 1 && (q.$2 - c).abs() <= 1) return false;
+          int dr = (q.$1 - r).abs();
+          int dc = (q.$2 - c).abs();
+          if ((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) return false;
+        }
+        return true;
+      }
+
+      bool backtrack2(int r, int starsPlacedInRow) {
+        if (r == n) {
+          return colCounts.every((count) => count == 2) &&
+                 regCounts.every((count) => count == 2);
+        }
+
+        if (starsPlacedInRow == 2) {
+          return backtrack2(r + 1, 0);
+        }
+
+        int startCol = 0;
+        if (starsPlacedInRow == 1) {
+          startCol = queens.last.$2 + 2;
+        }
+
+        for (int c = startCol; c < n; c++) {
+          if (isSafe2(r, c)) {
+            queens.add((r, c));
+            colCounts[c]++;
+            regCounts[level.regions[r][c]]++;
+
+            if (backtrack2(r, starsPlacedInRow + 1)) return true;
+
+            regCounts[level.regions[r][c]]--;
+            colCounts[c]--;
+            queens.removeLast();
+          }
+        }
+        return false;
+      }
+
+      if (backtrack2(0, 0)) return queens;
+      return null;
+    }
+
     bool isSafe(int row, int col) {
       for (final q in queens) {
         if (q.$1 == row || q.$2 == col) return false;
@@ -729,8 +976,21 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   }
 
   void _loadLevel() {
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
     int n = 5;
-    if (_levelIndex < 5) {
+    if (!_playDailyMode && _levelIndex >= 30) {
+      if (_levelIndex >= 30 && _levelIndex < 60) {
+        n = 8;
+      } else if (_levelIndex >= 60 && _levelIndex < 90) {
+        n = 9;
+      } else {
+        // Rotation (L90+)
+        n = 6 + ((_levelIndex - 90) % 5); // Rotates 6, 7, 8, 9, 10
+      }
+    } else if (_levelIndex < 5) {
       n = 5;
     } else if (_levelIndex < 15) {
       n = 6;
@@ -743,10 +1003,83 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     } else {
       n = 10;
     }
-    _level = generateProceduralLevel(n, Random(_levelIndex + 8734));
+
+    final rand = _playDailyMode
+        ? Random(_levelIndex + 8734)
+        : RotationEngine.getDeterminism('queens', _levelIndex);
+
+    _level = generateProceduralLevel(n, rand);
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
     _history.clear();
     _error = ''; _won = false;
+
+    if (_isEndgame) {
+      _timeLeft = 30 + (n * 15);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 100',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.queensOrange),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _reset() => setState(() => _loadLevel());
@@ -802,7 +1135,9 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         if (_cells[r][c] == 2) count++;
       }
     }
-    final targetQueensCount = (_playDailyMode && _dailyModifierType == 'spy') ? (n - 1) : n;
+    final targetQueensCount = _useTwoStars
+        ? (2 * n)
+        : ((_playDailyMode && _dailyModifierType == 'spy') ? (n - 1) : n);
     if (count == targetQueensCount) {
       _check();
     }
@@ -810,50 +1145,55 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
   void _check() {
     final n = _level.n;
-    final queens = <(int,int)>[];
+    final queens = <(int, int)>[];
     for (int r = 0; r < n; r++) {
       for (int c = 0; c < n; c++) {
-        if (_cells[r][c] == 2) { queens.add((r,c)); }
+        if (_cells[r][c] == 2) {
+          queens.add((r, c));
+        }
       }
     }
-    final targetQueensCount = (_playDailyMode && _dailyModifierType == 'spy') ? (n - 1) : n;
+
+    final targetQueensCount = _useTwoStars
+        ? (2 * n)
+        : ((_playDailyMode && _dailyModifierType == 'spy') ? (n - 1) : n);
+
     if (queens.length != targetQueensCount) {
       AudioManager.playFail();
       setState(() => _error = 'Place exactly $targetQueensCount stars.');
       return;
     }
-    final rows = <int>{}, cols = <int>{};
+
+    final rowCounts = <int, int>{};
+    final colCounts = <int, int>{};
     final regCounts = <int, int>{};
-    for (final (r,c) in queens) {
-      if (rows.contains(r)) {
-        AudioManager.playFail();
-        setState(() => _error = 'Two stars in same row!');
-        return;
-      }
-      if (cols.contains(c)) {
-        AudioManager.playFail();
-        setState(() => _error = 'Two stars in same column!');
-        return;
-      }
+
+    for (final (r, c) in queens) {
+      rowCounts[r] = (rowCounts[r] ?? 0) + 1;
+      colCounts[c] = (colCounts[c] ?? 0) + 1;
       final reg = _level.regions[r][c];
       regCounts[reg] = (regCounts[reg] ?? 0) + 1;
-      rows.add(r); cols.add(c);
-      for (final (qr,qc) in queens) {
-        if ((qr-r).abs() == 1 && (qc-c).abs() == 1) {
+
+      for (final (qr, qc) in queens) {
+        if (qr == r && qc == c) continue;
+        if ((qr - r).abs() <= 1 && (qc - c).abs() <= 1) {
           AudioManager.playFail();
-          setState(() => _error = 'Stars cannot touch diagonally!');
+          setState(() => _error = 'Stars cannot touch, even diagonally!');
           return;
         }
-        if (_playDailyMode && _dailyModifierType == 'hidden_rule') {
-          if ((qr-r).abs() == (qc-c).abs() && qr != r) {
+        if (_useTwoStars) {
+          int dr = (qr - r).abs();
+          int dc = (qc - c).abs();
+          if ((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) {
             AudioManager.playFail();
-            setState(() => _error = 'Diagonal Shield: Stars cannot share a diagonal!');
+            setState(() => _error = 'Anti-Knight Rule: Stars cannot be a knight\'s move apart!');
             return;
           }
         }
       }
     }
-    if (_playDailyMode && _dailyModifierType == 'spy') {
+
+    if (!_useTwoStars && _playDailyMode && _dailyModifierType == 'spy') {
       for (final count in regCounts.values) {
         if (count > 1) {
           AudioManager.playFail();
@@ -862,27 +1202,48 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         }
       }
     } else {
-      for (final count in regCounts.values) {
-        if (count > 1) {
+      final targetGroupCount = _useTwoStars ? 2 : 1;
+      for (int i = 0; i < n; i++) {
+        if ((rowCounts[i] ?? 0) != targetGroupCount) {
           AudioManager.playFail();
-          setState(() => _error = 'Two stars in same region!');
+          setState(() => _error = 'Each row must have exactly $targetGroupCount stars.');
+          return;
+        }
+        if ((colCounts[i] ?? 0) != targetGroupCount) {
+          AudioManager.playFail();
+          setState(() => _error = 'Each column must have exactly $targetGroupCount stars.');
+          return;
+        }
+        if ((regCounts[i] ?? 0) != targetGroupCount) {
+          AudioManager.playFail();
+          setState(() => _error = 'Each region must have exactly $targetGroupCount stars.');
           return;
         }
       }
     }
+
+    _gameTimer?.cancel();
     AudioManager.playSuccess();
     if (_isTutorialMode) {
       setState(() {
         _tutorialCompleted = true;
-        _error = '';
       });
-      return;
+    } else {
+      setState(() {
+        _won = true;
+        _savePersistedLevel(_levelIndex + 1);
+      });
+      if (_timeLeft > 0 && _timeBonusEarned) {
+        PointManager.addPoints(5);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
-    setState(() {
-      _won = true;
-      _error = '';
-      _savePersistedLevel(_levelIndex + 1);
-    });
   }
 
   void _nextLevel() async {
@@ -985,6 +1346,30 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               ],
             )
           else ...[
+            if (_timeLeft >= 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Center(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.timer,
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$_timeLeft s',
+                        style: GoogleFonts.spaceGrotesk(
+                          color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             IconButton(
               icon: const Icon(Icons.help_outline, size: 20),
               color: context.textMuted,
@@ -996,22 +1381,34 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               color: context.textMuted,
             ),
           ],
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: _isTutorialMode
-                ? Text(
-                    'Tutorial',
-                    style: GoogleFonts.outfit(
-                      color: AppTheme.queensOrange,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )
-                : AnimatedLevelIndicator(
-                    level: _levelIndex + 1,
-                    accentColor: AppTheme.queensOrange,
-                    label: MediaQuery.of(context).size.width < 360 ? 'L.' : 'Level',
-                  ),
+          GestureDetector(
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _isTutorialMode
+                      ? Text(
+                          'Tutorial',
+                          style: GoogleFonts.outfit(
+                            color: AppTheme.queensOrange,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        )
+                      : AnimatedLevelIndicator(
+                          level: _levelIndex + 1,
+                          accentColor: AppTheme.queensOrange,
+                          label: MediaQuery.of(context).size.width < 360 ? 'L.' : 'Level',
+                        ),
+                  if (!_isTutorialMode && !_playDailyMode) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.edit, size: 12, color: AppTheme.queensOrange),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -1069,8 +1466,13 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                           ),
                         ),
                       const SizedBox(height: 8),
-                      Text('Tap: empty → X → Star → empty. Drag to place/erase X marks.\nOne Star per row, column & color.',
-                        style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12)), textAlign: TextAlign.center),
+                      Text(
+                        _isEndgame
+                            ? 'Tap: empty → X → Star → empty. Drag to place/erase X marks.\n★★ Two Stars per row, column & color. Stars cannot touch.\nAnti-Knight: Stars cannot be a knight\'s move apart.'
+                            : 'Tap: empty → X → Star → empty. Drag to place/erase X marks.\nOne Star per row, column & color.',
+                        style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(11)),
+                        textAlign: TextAlign.center,
+                      ),
                       const SizedBox(height: 12),
                       Center(
                         child: ClipRRect(

@@ -16,6 +16,8 @@ import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../utils/achievement_manager.dart';
 import '../../../widgets/achievement_toast.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 
 class PatternLockBetaScreen extends StatefulWidget {
   const PatternLockBetaScreen({super.key});
@@ -37,16 +39,28 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
+  bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
+  List<int> _distractorDots = [];
+  bool _isReverse = false;
+  int _transformType = 0;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
   double get _boardSize => min(MediaQuery.of(context).size.width - 48, 400.0);
 
   int get _gridN {
+    if (!_playDailyMode && _currentLevel >= 30) {
+      if (_currentLevel >= 90) {
+        return 3 + ((_currentLevel - 90) % 5); // Rotates 3, 4, 5, 6, 7
+      }
+      return 7;
+    }
     if (_currentLevel < 5) return 3;
     if (_currentLevel < 10) return 4;
     if (_currentLevel < 20) return 5;
-    if (_currentLevel < 35) return 6;
-    return 7;
+    return 6;
   }
   double get _spacing => _boardSize / _gridN;
 
@@ -83,63 +97,195 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   @override
   void dispose() {
     _memorizeTimer?.cancel();
+    _gameTimer?.cancel();
     super.dispose();
+  }
+
+  int _transformIndex(int idx, int n, int transformType) {
+    int r = idx ~/ n;
+    int c = idx % n;
+    switch (transformType) {
+      case 1: // Rotate 90 CW
+        return c * n + (n - 1 - r);
+      case 2: // Rotate 180
+        return (n - 1 - r) * n + (n - 1 - c);
+      case 3: // Mirror H
+        return r * n + (n - 1 - c);
+      default:
+        return idx;
+    }
   }
 
   void _loadLevel() {
     _memorizeTimer?.cancel();
+    _gameTimer?.cancel();
     _dragPositionNotifier.value = null;
     setState(() {
       _isSuccess = false;
       _userPattern = [];
       _isMemorizing = true;
+      _timeLeft = -1;
+      _timeBonusEarned = false;
       
       final n = _gridN;
-      final rng = Random(_currentLevel * 137 + 42);
+      final rng = _playDailyMode
+          ? Random(_currentLevel * 137 + 42)
+          : RotationEngine.getDeterminism('patternlock', _currentLevel);
       
       int targetLength = 3 + (_currentLevel ~/ 2);
-      targetLength = targetLength.clamp(3, n * n);
+      _isReverse = false;
+      _transformType = 0;
+      _distractorDots = [];
 
-      List<int> pattern = [];
-      int curr = rng.nextInt(n * n);
-      pattern.add(curr);
-
-      int attempts = 0;
-      while (pattern.length < targetLength && attempts < 1000) {
-        attempts++;
-        int r = curr ~/ n;
-        int c = curr % n;
-
-        List<int> neighbors = [];
-        if (r > 0) neighbors.add((r - 1) * n + c);
-        if (r < n - 1) neighbors.add((r + 1) * n + c);
-        if (c > 0) neighbors.add(r * n + c - 1);
-        if (c < n - 1) neighbors.add(r * n + c + 1);
-
-        // Filter already visited
-        neighbors.removeWhere((idx) => pattern.contains(idx));
-
-        if (neighbors.isEmpty) {
-          // Backtrack or restart random walk
-          pattern = [rng.nextInt(n * n)];
-          curr = pattern.first;
-          continue;
+      if (!_playDailyMode && _currentLevel >= 30) {
+        if (_currentLevel >= 30 && _currentLevel < 45) {
+          targetLength = 6;
+          _transformType = 0;
+        } else if (_currentLevel >= 45 && _currentLevel < 60) {
+          targetLength = 6;
+          _transformType = 0;
+        } else if (_currentLevel >= 60 && _currentLevel < 75) {
+          targetLength = 7;
+          _transformType = 0;
+          _isReverse = true;
+        } else if (_currentLevel >= 75 && _currentLevel < 90) {
+          targetLength = 7;
+          _transformType = 1; // 90 CW Rotation
+        } else {
+          targetLength = (5 + (_currentLevel % 3)).clamp(5, 8);
+          int combo = (_currentLevel - 90) % 6;
+          _isReverse = (combo == 1 || combo == 3 || combo == 5);
+          _transformType = (combo == 2 || combo == 3 || combo == 4) ? (1 + rng.nextInt(2)) : 0;
         }
-
-        int next = neighbors[rng.nextInt(neighbors.length)];
-        pattern.add(next);
-        curr = next;
+      } else {
+        targetLength = targetLength.clamp(3, n * n);
+        _transformType = 0;
       }
 
-      _targetPattern = pattern;
+      bool checkComplexity = false;
+      if (!_playDailyMode && _currentLevel >= 30) {
+        if (_currentLevel < 90) {
+          checkComplexity = true;
+        } else {
+          int combo = (_currentLevel - 90) % 6;
+          checkComplexity = (combo == 0 || combo == 4 || combo == 5);
+        }
+      }
+
+      int attempts = 0;
+      bool pathOk = false;
+      while (!pathOk && attempts < 500) {
+        attempts++;
+        List<int> pattern = [];
+        int curr = rng.nextInt(n * n);
+        pattern.add(curr);
+
+        int walkAttempts = 0;
+        while (pattern.length < targetLength && walkAttempts < 1000) {
+          walkAttempts++;
+          int r = curr ~/ n;
+          int c = curr % n;
+
+          List<int> neighbors = [];
+          if (r > 0) neighbors.add((r - 1) * n + c);
+          if (r < n - 1) neighbors.add((r + 1) * n + c);
+          if (c > 0) neighbors.add(r * n + c - 1);
+          if (c < n - 1) neighbors.add(r * n + c + 1);
+
+          if (!_playDailyMode && _currentLevel >= 30) {
+            if (r > 0 && c > 0) neighbors.add((r - 1) * n + c - 1);
+            if (r > 0 && c < n - 1) neighbors.add((r - 1) * n + c + 1);
+            if (r < n - 1 && c > 0) neighbors.add((r + 1) * n + c - 1);
+            if (r < n - 1 && c < n - 1) neighbors.add((r + 1) * n + c + 1);
+          }
+
+          neighbors.removeWhere((idx) => pattern.contains(idx));
+
+          if (neighbors.isEmpty) {
+            break;
+          }
+
+          int next = neighbors[rng.nextInt(neighbors.length)];
+          pattern.add(next);
+          curr = next;
+        }
+
+        if (pattern.length == targetLength) {
+          if (checkComplexity) {
+            int turns = 0;
+            for (int i = 1; i < pattern.length - 1; i++) {
+              int prev = pattern[i - 1];
+              int curVal = pattern[i];
+              int next = pattern[i + 1];
+              int dr1 = (curVal ~/ n) - (prev ~/ n);
+              int dc1 = (curVal % n) - (prev % n);
+              int dr2 = (next ~/ n) - (curVal ~/ n);
+              int dc2 = (next % n) - (curVal % n);
+              if (dr1 != dr2 || dc1 != dc2) {
+                turns++;
+              }
+            }
+            if (turns >= (targetLength * 0.4).round()) {
+              _targetPattern = pattern;
+              pathOk = true;
+            }
+          } else {
+            _targetPattern = pattern;
+            pathOk = true;
+          }
+        }
+      }
       
-      // Proportional memorization duration based on pattern length (0.6s per dot)
+      if (!pathOk) {
+        _targetPattern = List.generate(targetLength, (index) => index);
+      }
+
+      bool hasDistractors = false;
+      if (!_playDailyMode) {
+        if (_currentLevel >= 45 && _currentLevel < 60) {
+          hasDistractors = true;
+        } else if (_currentLevel >= 90) {
+          int combo = (_currentLevel - 90) % 6;
+          hasDistractors = (combo == 0 || combo == 4);
+        }
+      }
+      if (hasDistractors) {
+        int count = 2 + (_currentLevel - 45) ~/ 4;
+        if (count > 5) count = 5;
+        final List<int> candidates = [];
+        for (int i = 0; i < n * n; i++) {
+          if (!_targetPattern.contains(i)) {
+            candidates.add(i);
+          }
+        }
+        candidates.shuffle(rng);
+        _distractorDots = candidates.take(count).toList();
+      }
+
       double durationSeconds = max(1.5, targetLength * 0.6);
       
       _memorizeTimer = Timer(Duration(milliseconds: (durationSeconds * 1000).toInt()), () {
         if (mounted) {
           setState(() {
             _isMemorizing = false;
+
+            if (_isEndgame) {
+              _timeLeft = 10 + (n * 5);
+              _timeBonusEarned = true;
+              _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+                if (mounted) {
+                  setState(() {
+                    if (_timeLeft > 0) {
+                      _timeLeft--;
+                    } else {
+                      _timeLeft = 0;
+                      _timeBonusEarned = false;
+                      _gameTimer?.cancel();
+                    }
+                  });
+                }
+              });
+            }
           });
         }
       });
@@ -195,11 +341,17 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
 
     if (_userPattern.isEmpty) return;
 
-    // Order independent pattern matching (forward or backward draw sequence)
-    bool win = listEquals(_userPattern, _targetPattern) || 
-               listEquals(_userPattern, _targetPattern.reversed.toList());
+    final targetPattern = _isEndgame
+        ? _targetPattern.map((idx) => _transformIndex(idx, _gridN, _transformType)).toList()
+        : _targetPattern;
+
+    bool win = _isReverse
+        ? listEquals(_userPattern, targetPattern.reversed.toList())
+        : (listEquals(_userPattern, targetPattern) || 
+           listEquals(_userPattern, targetPattern.reversed.toList()));
 
     if (win) {
+      _gameTimer?.cancel();
       if (_isTutorialMode) {
         if (!_tutorialCompleted) {
           AudioManager.playSuccess();
@@ -225,6 +377,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     AudioManager.playSuccess();
     settingsNotifier.hapticSuccess();
 
@@ -233,6 +386,19 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     int highest = prefs.getInt(key) ?? 0;
     if (_currentLevel + 1 > highest) {
       await prefs.setInt(key, _currentLevel + 1);
+    }
+
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
 
     final earned = await HintManager.onLevelCleared('pattern_lock');
@@ -270,6 +436,56 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       _currentLevel++;
       _loadLevel();
     });
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _useHint() async {
@@ -389,20 +605,56 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve, 
-                  fontSize: 14, 
-                  fontWeight: FontWeight.bold,
+          GestureDetector(
+            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      style: AppTheme.numberStyle(
+                        color: AppTheme.dustyMauve, 
+                        fontSize: 14, 
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!_isTutorialMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -430,6 +682,64 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             color: _isMemorizing ? Colors.amber : context.textPrimary,
                           ),
                         ),
+                        if (!_isMemorizing && _isEndgame && _transformType > 0) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.redAccent.withOpacity(0.4), width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _transformType == 1
+                                      ? 'MENTAL SHIFT: BOARD ROTATED 90° CW'
+                                      : (_transformType == 2
+                                          ? 'MENTAL SHIFT: BOARD ROTATED 180°'
+                                          : 'MENTAL SHIFT: BOARD MIRRORED HORIZONTALLY'),
+                                  style: GoogleFonts.spaceGrotesk(
+                                    color: Colors.redAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        if (!_isMemorizing && _isReverse) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.amber.withOpacity(0.4), width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.swap_horiz, color: Colors.amber, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'REVERSE MODE: DRAW BACKWARD FROM FINISH TO START',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    color: Colors.amber,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         RepaintBoundary(
                           child: GestureDetector(
@@ -466,17 +776,21 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                                           child: Center(
                                             child: Builder(
                                               builder: (context) {
+                                                bool isDistractor = _isMemorizing && _distractorDots.contains(idx);
                                                 bool isHighlighted = _isMemorizing
                                                     ? _targetPattern.contains(idx)
                                                     : (_userPattern.contains(idx) || _hintDot == idx);
-                                                Color dotColor = isHighlighted
-                                                    ? (_isMemorizing
-                                                        ? Colors.amber
-                                                        : (_hintDot == idx ? Colors.amber : AppTheme.dustyMauve))
-                                                    : context.textMuted.withOpacity(0.3);
+                                                Color dotColor = isDistractor
+                                                    ? Colors.red.shade700
+                                                    : (isHighlighted
+                                                        ? (_isMemorizing
+                                                            ? Colors.amber
+                                                            : (_hintDot == idx ? Colors.amber : AppTheme.dustyMauve))
+                                                        : context.textMuted.withOpacity(0.3));
+                                                double dotSize = isDistractor ? 16.0 : (isHighlighted ? 20.0 : 12.0);
                                                 return Container(
-                                                  width: isHighlighted ? 20 : 12,
-                                                  height: isHighlighted ? 20 : 12,
+                                                  width: dotSize,
+                                                  height: dotSize,
                                                   decoration: BoxDecoration(
                                                     color: dotColor,
                                                     shape: BoxShape.circle,

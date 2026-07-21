@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'dart:async';
 import 'dart:convert';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -1157,7 +1159,19 @@ class _SudokuScreenState extends State<SudokuScreen> {
   final Set<(int, int)> _recallCorrectSelections = {};
   final Set<(int, int)> _lockedRecallCells = {};
 
-
+  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  bool get _isEclipseActive {
+    if (_playDailyMode && _dailyModifierType == 'eclipse') return true;
+    if (!_playDailyMode && _levelIndex >= 75) {
+      if (_levelIndex < 90) return true;
+      int combo = (_levelIndex - 90) % 3;
+      return combo == 2;
+    }
+    return false;
+  }
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   @override
   void initState() {
@@ -1172,12 +1186,13 @@ class _SudokuScreenState extends State<SudokuScreen> {
   void dispose() {
     _blackoutTimer?.cancel();
     _warpTimer?.cancel();
+    _gameTimer?.cancel();
     super.dispose();
   }
 
   void _startBlackoutTimer() {
     _blackoutTimer?.cancel();
-    if (_playDailyMode && _dailyModifierType == 'eclipse') {
+    if (_isEclipseActive) {
       _isScanPhase = true;
       _inRecallTest = false;
       _blackoutCountdown = 30;
@@ -1378,6 +1393,19 @@ class _SudokuScreenState extends State<SudokuScreen> {
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
+    _gameTimer?.cancel();
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
     if (widget.dailyLevelIndex != null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(PrefsKeys.gameLevel('sudoku'), lvl);
@@ -1387,7 +1415,6 @@ class _SudokuScreenState extends State<SudokuScreen> {
       setState(() {
         _hintCount = newCount;
       });
-      
     }
   }
 
@@ -1459,7 +1486,21 @@ class _SudokuScreenState extends State<SudokuScreen> {
         baseLevel = levels9[index % levels9.length];
       }
     } else {
-      if (index < 10) {
+      if (index >= 30) {
+        if (index >= 90) {
+          final combo = (index - 90) % 3;
+          final targetSize = combo == 0 ? 4 : (combo == 1 ? 6 : 9);
+          baseLevel = targetSize == 4
+              ? levels4[index % levels4.length]
+              : (targetSize == 6 ? levels6[index % levels6.length] : levels9[index % levels9.length]);
+        } else if (index >= 75 && index < 90) {
+          baseLevel = levels9[index % levels9.length];
+        } else if (index >= 45 && index < 75) {
+          baseLevel = levels9[index % levels9.length];
+        } else {
+          baseLevel = levels6[index % levels6.length];
+        }
+      } else if (index < 10) {
         baseLevel = levels4[index % levels4.length];
       } else if (index < 25) {
         baseLevel = levels6[(index - 10) % levels6.length];
@@ -1469,7 +1510,9 @@ class _SudokuScreenState extends State<SudokuScreen> {
     }
 
     final size = baseLevel.size;
-    final rng = Random(index * 997);
+    final rng = _playDailyMode
+        ? Random(index * 997)
+        : RotationEngine.getDeterminism('sudoku', index);
     final digits = List.generate(size, (i) => i + 1)..shuffle(rng);
     final mapping = <int, int>{};
     for (int i = 0; i < size; i++) {
@@ -1508,6 +1551,18 @@ class _SudokuScreenState extends State<SudokuScreen> {
     int targetFilled;
     if (_playDailyMode && _dailyModifierType == 'minimal') {
       targetFilled = 12;
+    } else if (!_playDailyMode && index >= 30) {
+      if (size == 4) {
+        targetFilled = 5;
+      } else if (size == 6) {
+        targetFilled = max(11, 14 - ((index - 30) ~/ 4));
+      } else {
+        if (index >= 90) {
+          targetFilled = 17;
+        } else {
+          targetFilled = max(17, 25 - ((index - 45) ~/ 3));
+        }
+      }
     } else if (size == 9) {
       if (index < 40) {
         targetFilled = 25; // levels 26-40
@@ -1588,10 +1643,85 @@ class _SudokuScreenState extends State<SudokuScreen> {
             }
           });
         });
-      } else if (_dailyModifierType == 'eclipse') {
-        _startBlackoutTimer();
       }
     }
+    if (_isEclipseActive) {
+      _startBlackoutTimer();
+    }
+    if (!_playDailyMode) {
+      _gameTimer?.cancel();
+      _timeLeft = -1;
+      _timeBonusEarned = false;
+      if (_isEndgame) {
+        _timeLeft = _level.size == 4 ? 60 : (_level.size == 6 ? 120 : 240);
+        _timeBonusEarned = true;
+        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (!mounted || _won || _gameOver) {
+            timer.cancel();
+            return;
+          }
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        });
+      }
+    }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 111',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('sudoku')),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _reset() => setState(() => _loadLevel());
@@ -1602,7 +1732,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
 
   void _selectCell(int r, int c) {
     if (_won || _gameOver) return;
-    if (_playDailyMode && _dailyModifierType == 'eclipse' && _isScanPhase) return;
+    if (_isEclipseActive && _isScanPhase) return;
     if (_isOriginal(r, c)) return;
     if (_inRecallTest && _recallCorrectSelections.contains((r, c))) return;
     setState(() {
@@ -1615,11 +1745,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
 
   void _inputNumber(int num) {
     if (_won || _gameOver || _selectedRow == -1 || _selectedCol == -1) return;
-    if (_playDailyMode && _dailyModifierType == 'eclipse' && _isScanPhase) return;
+    if (_isEclipseActive && _isScanPhase) return;
     final prevVal = _board[_selectedRow][_selectedCol];
     final targetVal = _level.solution[_selectedRow][_selectedCol];
 
-    if (_playDailyMode && _dailyModifierType == 'eclipse' && _inRecallTest) {
+    if (_isEclipseActive && _inRecallTest) {
       if (num == targetVal) {
         setState(() {
           _board[_selectedRow][_selectedCol] = num;
@@ -1946,18 +2076,54 @@ class _SudokuScreenState extends State<SudokuScreen> {
               color: context.textMuted,
             ),
           ],
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                _isTutorialMode
-                    ? 'Tutorial'
-                    : _playDailyMode 
-                        ? 'Daily' 
-                        : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
-                style: AppTheme.numberStyle(
-                  color: accentColor,
-                  fontSize: context.scale(13),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          GestureDetector(
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode
+                          ? 'Tutorial'
+                          : _playDailyMode 
+                              ? 'Daily' 
+                              : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
+                      style: AppTheme.numberStyle(
+                        color: accentColor,
+                        fontSize: context.scale(13),
+                      ),
+                    ),
+                    if (!_isTutorialMode && !_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.edit, size: 12, color: accentColor),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -2003,7 +2169,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  if (_playDailyMode && _dailyModifierType == 'eclipse') ...[
+                  if (_isEclipseActive) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -2173,7 +2339,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                   const SizedBox(height: 16),
                   // Number Pad (1 to size)
                   if (!_won && !_tutorialCompleted) ...[
-                    if (!(_playDailyMode && _dailyModifierType == 'eclipse' && _isScanPhase)) ...[
+                    if (!(_isEclipseActive && _isScanPhase)) ...[
                       Wrap(
                         spacing: 10,
                         runSpacing: 10,
@@ -2214,7 +2380,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                       ),
                       const SizedBox(height: 20),
                     ],
-                    if (!(_playDailyMode && _dailyModifierType == 'eclipse'))
+                    if (!_isEclipseActive)
                       Center(
                         child: TextButton(
                           onPressed: (_selectedRow != -1) ? _clearCell : null,

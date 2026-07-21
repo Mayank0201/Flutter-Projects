@@ -1,4 +1,7 @@
-import'dart:math';
+import 'dart:math';
+import 'dart:async';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,12 +49,30 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   String _dailyModifierType = '';
   int _correctTapCount = 0;
   bool _chaosShuffleDone = false;
+  bool _exposureTimerFired = false;
+  final Set<(int, int)> _decoyCells = {};
+
+  int get _chimpCycle => (_levelIndex < _levels.length) ? 0 : ((_levelIndex - _levels.length) ~/ 11);
+  bool get _hasTimedExposure => !_playDailyMode && _chimpCycle >= 1;
+  bool get _hasPositionShuffle => !_playDailyMode && _chimpCycle >= 3;
+  bool get _hasDecoyTiles => !_playDailyMode && _chimpCycle >= 4;
+
+  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   bool _isHintShowing = false;
   bool _shuffleActive = false;
   int _hintCount = 0;
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -116,17 +137,34 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   }
 
   (int, int) _getChimpConfig(int index) {
+    if (!_playDailyMode && index >= 120) {
+      int numCount = 4 + ((index - 120) % 12);
+      int gridSize = (numCount <= 6) ? 3 : (numCount <= 9 ? 4 : (numCount <= 12 ? 5 : 6));
+      return (gridSize, numCount);
+    }
     if (index < _levels.length) {
       return _levels[index];
     }
-    final extra = index - _levels.length;
-    final gridSize = (9 + extra ~/ 5).clamp(9, 14);
-    final maxCells = gridSize * gridSize;
-    final numCount = (60 + extra * 2).clamp(60, (maxCells * 0.75).toInt());
+    final cycleLevel = index - _levels.length;       // 0-based past hardcoded
+    final cycle = cycleLevel ~/ 11;                   // cycle index
+    final posInCycle = cycleLevel % 11;               // position within cycle
+    final numCount = (5 + posInCycle).clamp(5, 15);   // count goes 5 to 15
+    int gridSize;
+    if (cycle >= 2) {
+      gridSize = (numCount <= 6) ? 4 : (numCount <= 9 ? 5 : (numCount <= 12 ? 6 : 7));
+    } else {
+      gridSize = (numCount <= 6) ? 3 : (numCount <= 9 ? 4 : (numCount <= 12 ? 5 : 6));
+    }
     return (gridSize, numCount);
   }
 
   void _loadLevel() {
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+    _exposureTimerFired = false;
+    _decoyCells.clear();
+
     final cfg = _getChimpConfig(_levelIndex);
     _gridSize = cfg.$1; _n = cfg.$2;
     _positions = _randomPositions();
@@ -135,14 +173,121 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     _correctTapCount = 0;
     _chaosShuffleDone = false;
     _glowingCells.clear();
+
+    if (_hasDecoyTiles) {
+      final rng = _playDailyMode
+          ? Random()
+          : RotationEngine.getDeterminism('chimp', _levelIndex + 9999);
+      final occupied = _positions.values.toSet();
+      final int numDecoys = min(5, (_gridSize * _gridSize - _n) ~/ 4);
+      int decoysAdded = 0;
+      int attempts = 0;
+      while (decoysAdded < numDecoys && attempts < 100) {
+        attempts++;
+        final r = rng.nextInt(_gridSize);
+        final c = rng.nextInt(_gridSize);
+        if (!occupied.contains((r, c)) && !_decoyCells.contains((r, c))) {
+          _decoyCells.add((r, c));
+          decoysAdded++;
+        }
+      }
+    }
+
+    if (_hasTimedExposure) {
+      final double exposureSecs = max(2.0, 6.0 - _chimpCycle * 0.5);
+      Timer(Duration(milliseconds: (exposureSecs * 1000).toInt()), () {
+        if (mounted && !_started && !_failed && !_won) {
+          setState(() {
+            _exposureTimerFired = true;
+          });
+        }
+      });
+    }
+
+    if (_isEndgame) {
+      _timeLeft = 8 + (_n * 3);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.patchesTeal),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Map<int,(int,int)> _randomPositions() {
-    final rng = Random(); final used = <(int,int)>{}; final map = <int,(int,int)>{};
+    final rng = _playDailyMode
+        ? Random()
+        : RotationEngine.getDeterminism('chimp', _levelIndex);
+    final used = <(int,int)>{};
+    final map = <int,(int,int)>{};
     int num = 1;
     while (num <= _n) {
-      final r = rng.nextInt(_gridSize); final c = rng.nextInt(_gridSize);
-      if (!used.contains((r,c))) { used.add((r,c)); map[num] = (r,c); num++; }
+      final r = rng.nextInt(_gridSize);
+      final c = rng.nextInt(_gridSize);
+      if (!used.contains((r,c))) {
+        used.add((r,c));
+        map[num] = (r,c);
+        num++;
+      }
     }
     return map;
   }
@@ -170,15 +315,17 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     });
 
     if (num == null) {
-      if (_started) {
+      if (_started || _decoyCells.contains((r, c))) {
         AudioManager.playFail();
-        setState(() => _failed = true);
+        setState(() {
+          _failed = true;
+          _gameTimer?.cancel();
+        });
       }
       return;
     }
 
     if (!_started && num == 1) {
-      // First tap of 1: hide all numbers except already-tapped
       AudioManager.playClick();
       setState(() {
         _started = true;
@@ -190,15 +337,19 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     }
     if (!_started) {
       AudioManager.playFail();
-      setState(() => _failed = true);
+      setState(() {
+        _failed = true;
+        _gameTimer?.cancel();
+      });
       return;
-    } // must tap 1 first
+    }
 
     if (num == _nextToTap) {
       setState(() {
         _nextToTap++;
         _correctTapCount++;
         if (_nextToTap > _n) {
+          _gameTimer?.cancel();
           if (_isTutorialMode) {
             _tutorialCompleted = true;
             AudioManager.playSuccess();
@@ -206,6 +357,17 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
             _won = true;
             AudioManager.playSuccess();
             _savePersistedLevel(_levelIndex + 1);
+
+            if (_timeLeft > 0 && _timeBonusEarned) {
+              PointManager.addPoints(5);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+                  backgroundColor: Colors.amber,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
           }
         } else {
           _applyDailyPositionModifier();
@@ -214,26 +376,39 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       });
     } else {
       AudioManager.playFail();
-      setState(() => _failed = true);
+      setState(() {
+        _failed = true;
+        _gameTimer?.cancel();
+      });
     }
   }
 
   void _applyDailyPositionModifier() {
-    if (!_playDailyMode) return;
-    if (_dailyModifierType == 'chaos' &&
-        _correctTapCount >= 3 &&
-        !_chaosShuffleDone) {
-      _shuffleUntappedNumbers();
-      _chaosShuffleDone = true;
-    } else if (_dailyModifierType == 'gravity') {
-      _sinkUntappedNumbers();
+    if (_playDailyMode) {
+      if (_dailyModifierType == 'chaos' &&
+          _correctTapCount >= 3 &&
+          !_chaosShuffleDone) {
+        _shuffleUntappedNumbers();
+        _chaosShuffleDone = true;
+      } else if (_dailyModifierType == 'gravity') {
+        _sinkUntappedNumbers();
+      }
+    } else {
+      if (_hasPositionShuffle && _correctTapCount >= 3 && !_chaosShuffleDone) {
+        _shuffleUntappedNumbers();
+        _chaosShuffleDone = true;
+      }
+      if (_hasDecoyTiles) {
+        // Apply gravity to move things around as an extra challenge
+        _sinkUntappedNumbers();
+      }
     }
   }
 
   void _shuffleUntappedNumbers() {
     final rng = Random();
     final remainingNumbers = _positions.keys
-        .where((num) => num >= _nextToTap)
+        .where((nVal) => nVal >= _nextToTap)
         .toList()
       ..shuffle(rng);
     final remainingCells = _positions.entries
@@ -273,6 +448,10 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   bool _isCellVisible(int r, int c) {
     final num = _numberAt(r, c);
     if (num == null) return false;
+    if (_exposureTimerFired) {
+      if (_isHintShowing && num == _nextToTap) return true;
+      return false;
+    }
     if (!_started) return true;          // show all before first tap
     if (_isHintShowing && num == _nextToTap) return true;
     return false;                        // hide all numbers after first tap
@@ -343,21 +522,58 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, size: 20),
             color: context.textMuted,
             onPressed: () => GameTutorialDialog.show(context, 'chimp', 'Chimp Test'),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                _isTutorialMode
-                    ? 'Tutorial'
-                    : (_playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}'),
-                style: AppTheme.numberStyle(
-                  color: AppTheme.patchesTeal,
-                  fontSize: context.scale(13),
+          GestureDetector(
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode
+                          ? 'Tutorial'
+                          : (_playDailyMode ? 'Daily' : 'Level ${_levelIndex + 1}'),
+                      style: AppTheme.numberStyle(
+                        color: AppTheme.patchesTeal,
+                        fontSize: context.scale(13),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!_isTutorialMode && !_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.patchesTeal),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -402,21 +618,40 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                             // Background Grid
                             ...List.generate(_gridSize, (r) =>
                               List.generate(_gridSize, (c) {
+                                final isDecoy = _decoyCells.contains((r, c));
+                                final showDecoy = isDecoy && !_started && !_exposureTimerFired;
                                 return Positioned(
                                   left: c * cs,
                                   top: r * cs,
                                   width: cs,
                                   height: cs,
-                                  child: Container(
-                                    margin: const EdgeInsets.all(3),
-                                    decoration: BoxDecoration(
-                                      color: context.bgCard,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: context.textMuted.withAlpha(75),
-                                        width: 1.2,
+                                  child: GestureDetector(
+                                    onTap: () => _onTap(r, c),
+                                    child: Container(
+                                      margin: const EdgeInsets.all(3),
+                                      decoration: BoxDecoration(
+                                        color: context.bgCard,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: showDecoy
+                                              ? Colors.redAccent.withAlpha(120)
+                                              : context.textMuted.withAlpha(75),
+                                          width: showDecoy ? 2.0 : 1.2,
+                                        ),
+                                        boxShadow: AppTheme.cardShadow,
                                       ),
-                                      boxShadow: AppTheme.cardShadow,
+                                      child: showDecoy
+                                          ? Center(
+                                              child: Text(
+                                                '✕',
+                                                style: GoogleFonts.outfit(
+                                                  fontSize: cs * 0.36,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: Colors.redAccent.withAlpha(180),
+                                                ),
+                                              ),
+                                            )
+                                          : null,
                                     ),
                                   ),
                                 );

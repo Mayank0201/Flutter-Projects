@@ -1,4 +1,7 @@
 import 'dart:math';
+import 'dart:async';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +38,11 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
+  bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+  final Set<int> _lockedWires = {};
 
   @override
   void initState() {
@@ -64,74 +72,50 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
-      
-      final seed = _currentLevel + 2026;
-      final rng = Random(seed);
+      _lockedWires.clear();
+      _gameTimer?.cancel();
+      _timeLeft = -1;
+      _timeBonusEarned = false;
 
-      if (_currentLevel < 5) {
-        _gridSize = 3;
-        _rotations = List.filled(9, 0);
-        if (_currentLevel == 0) {
-          _wireTypes = ["SRC", "E", "S", "S", "S", "E", "S", "E", "TGT"];
-          _rotations = [1, 1, 0, 0, 0, 1, 1, 3, 3];
-        } else if (_currentLevel == 1) {
-          _wireTypes = ["SRC", "E", "S", "S", "S", "S", "E", "E", "TGT"];
-          _rotations = [1, 0, 0, 0, 0, 0, 0, 1, 3];
-        } else if (_currentLevel == 2) {
-          _wireTypes = ["SRC", "S", "E", "S", "E", "E", "S", "E", "TGT"];
-          _rotations = [1, 1, 0, 2, 0, 1, 0, 3, 3];
-        } else if (_currentLevel == 3) {
-          _wireTypes = ["SRC", "E", "E", "E", "S", "S", "S", "E", "TGT"];
-          _rotations = [1, 0, 0, 0, 0, 0, 0, 1, 3];
-        } else if (_currentLevel == 4) {
-          _wireTypes = ["SRC", "E", "S", "E", "E", "S", "E", "S", "TGT"];
-          _rotations = [1, 0, 0, 0, 0, 0, 1, 0, 3];
-        }
-      } else {
-        int numTargets = 1;
-        if (_currentLevel < 8) {
-          _gridSize = 3;
-          numTargets = 1;
-        } else if (_currentLevel < 12) {
-          _gridSize = 3;
-          numTargets = 2;
-        } else if (_currentLevel < 17) {
-          _gridSize = 4;
-          numTargets = 2;
-        } else if (_currentLevel < 22) {
-          _gridSize = 4;
-          numTargets = 3;
-        } else if (_currentLevel < 28) {
-          _gridSize = 5;
-          numTargets = 3;
-        } else if (_currentLevel < 35) {
-          _gridSize = 5;
-          numTargets = 4;
-        } else if (_currentLevel < 42) {
-          _gridSize = 6;
-          numTargets = 4;
-        } else if (_currentLevel < 50) {
-          _gridSize = 6;
-          numTargets = 5;
-        } else if (_currentLevel < 60) {
-          _gridSize = 7;
-          numTargets = 5;
-        } else if (_currentLevel < 70) {
-          _gridSize = 7;
-          numTargets = 6;
+      final rng = _playDailyMode
+          ? Random(_currentLevel + 2026)
+          : RotationEngine.getDeterminism('circuitguide', _currentLevel);
+
+      int srcIdx = 0;
+      final List<int> tgts = [];
+      int srcNeighbor = 0;
+      final int W;
+      final bool generateProc = _isEndgame || (_currentLevel >= 5);
+
+      if (_isEndgame) {
+        int numTargets = 6;
+        if (_currentLevel >= 90) {
+          _gridSize = 5 + ((_currentLevel - 90) % 4);
+          numTargets = 3 + ((_currentLevel - 90) % 4);
         } else {
-          _gridSize = 8;
-          numTargets = 6;
+          if (_currentLevel < 35) {
+            _gridSize = 5;
+            numTargets = 4;
+          } else if (_currentLevel < 42) {
+            _gridSize = 6;
+            numTargets = 4;
+          } else if (_currentLevel < 50) {
+            _gridSize = 6;
+            numTargets = 5;
+          } else if (_currentLevel < 60) {
+            _gridSize = 7;
+            numTargets = 5;
+          } else if (_currentLevel < 70) {
+            _gridSize = 7;
+            numTargets = 6;
+          } else {
+            _gridSize = 8;
+            numTargets = 6;
+          }
         }
+        W = _gridSize;
         
-        final int W = _gridSize;
-        
-        // Choose source and target positions randomly on opposite borders
-        int srcIdx;
-        final List<int> tgts = [];
-        int srcNeighbor;
-        
-        final side = rng.nextInt(4); // 0: Top, 1: Right, 2: Bottom, 3: Left
+        final side = rng.nextInt(4);
         if (side == 0) {
           srcIdx = rng.nextInt(W);
           srcNeighbor = srcIdx + W;
@@ -146,10 +130,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           srcNeighbor = srcIdx + 1;
         }
 
-        // Place targets on the opposite border
         final int oppSide = (side + 2) % 4;
         final Set<int> chosenOffsets = {};
-        // Ensure we don't request more targets than available border cells
         final int targetCount = numTargets.clamp(1, W);
         while (chosenOffsets.length < targetCount) {
           chosenOffsets.add(rng.nextInt(W));
@@ -165,7 +147,104 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             tgts.add(o * W);
           }
         }
-        
+      } else {
+        if (_currentLevel < 5) {
+          _gridSize = 3;
+          _rotations = List.filled(9, 0);
+          if (_currentLevel == 0) {
+            _wireTypes = ["SRC", "E", "S", "S", "S", "E", "S", "E", "TGT"];
+            _rotations = [1, 1, 0, 0, 0, 1, 1, 3, 3];
+          } else if (_currentLevel == 1) {
+            _wireTypes = ["SRC", "E", "S", "S", "S", "S", "E", "E", "TGT"];
+            _rotations = [1, 0, 0, 0, 0, 0, 0, 1, 3];
+          } else if (_currentLevel == 2) {
+            _wireTypes = ["SRC", "S", "E", "S", "E", "E", "S", "E", "TGT"];
+            _rotations = [1, 1, 0, 2, 0, 1, 0, 3, 3];
+          } else if (_currentLevel == 3) {
+            _wireTypes = ["SRC", "E", "E", "E", "S", "S", "S", "E", "TGT"];
+            _rotations = [1, 0, 0, 0, 0, 0, 0, 1, 3];
+          } else if (_currentLevel == 4) {
+            _wireTypes = ["SRC", "E", "S", "E", "E", "S", "E", "S", "TGT"];
+            _rotations = [1, 0, 0, 0, 0, 0, 1, 0, 3];
+          }
+          W = _gridSize;
+          srcIdx = 0;
+          tgts.add(8);
+          srcNeighbor = 1;
+        } else {
+          int numTargets = 1;
+          if (_currentLevel < 8) {
+            _gridSize = 3;
+            numTargets = 1;
+          } else if (_currentLevel < 12) {
+            _gridSize = 3;
+            numTargets = 2;
+          } else if (_currentLevel < 17) {
+            _gridSize = 4;
+            numTargets = 2;
+          } else if (_currentLevel < 22) {
+            _gridSize = 4;
+            numTargets = 3;
+          } else if (_currentLevel < 28) {
+            _gridSize = 5;
+            numTargets = 3;
+          } else if (_currentLevel < 35) {
+            _gridSize = 5;
+            numTargets = 4;
+          } else if (_currentLevel < 42) {
+            _gridSize = 6;
+            numTargets = 4;
+          } else if (_currentLevel < 50) {
+            _gridSize = 6;
+            numTargets = 5;
+          } else if (_currentLevel < 60) {
+            _gridSize = 7;
+            numTargets = 5;
+          } else if (_currentLevel < 70) {
+            _gridSize = 7;
+            numTargets = 6;
+          } else {
+            _gridSize = 8;
+            numTargets = 6;
+          }
+          
+          W = _gridSize;
+          final side = rng.nextInt(4);
+          if (side == 0) {
+            srcIdx = rng.nextInt(W);
+            srcNeighbor = srcIdx + W;
+          } else if (side == 1) {
+            srcIdx = rng.nextInt(W) * W + (W - 1);
+            srcNeighbor = srcIdx - 1;
+          } else if (side == 2) {
+            srcIdx = W * (W - 1) + rng.nextInt(W);
+            srcNeighbor = srcIdx - W;
+          } else {
+            srcIdx = rng.nextInt(W) * W;
+            srcNeighbor = srcIdx + 1;
+          }
+
+          final int oppSide = (side + 2) % 4;
+          final Set<int> chosenOffsets = {};
+          final int targetCount = numTargets.clamp(1, W);
+          while (chosenOffsets.length < targetCount) {
+            chosenOffsets.add(rng.nextInt(W));
+          }
+          for (int o in chosenOffsets) {
+            if (oppSide == 0) {
+              tgts.add(o);
+            } else if (oppSide == 1) {
+              tgts.add(o * W + (W - 1));
+            } else if (oppSide == 2) {
+              tgts.add(W * (W - 1) + o);
+            } else {
+              tgts.add(o * W);
+            }
+          }
+        }
+      }
+
+      if (generateProc) {
         final Map<int, int> targetNeighbors = {};
         List<List<int>> connections = List.generate(W * W, (_) => <int>[]);
         
@@ -212,6 +291,18 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           Set<int> treeNodes = {srcIdx, srcNeighbor};
           success = true;
           
+          int walkBudget = 200;
+          if (!_playDailyMode && _currentLevel >= 30) {
+            if (_currentLevel >= 90) {
+              int combo = (_currentLevel - 90) % 6;
+              bool hasTortuosity = (combo == 0 || combo == 2 || combo == 4);
+              if (hasTortuosity) walkBudget = 350;
+            } else {
+              walkBudget = 200 + (_currentLevel - 30) * 10;
+              if (walkBudget > 400) walkBudget = 400;
+            }
+          }
+
           for (int tNeighbor in tNeighbors) {
             if (treeNodes.contains(tNeighbor)) continue;
             
@@ -221,7 +312,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             bool pathFound = false;
             int walkAttempts = 0;
             
-            while (walkAttempts < 200) {
+            while (walkAttempts < walkBudget) {
               walkAttempts++;
               int r = current ~/ W;
               int c = current % W;
@@ -260,6 +351,51 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             } else {
               success = false;
               break;
+            }
+          }
+
+          if (success) {
+            int tCount = 0;
+            int playableCount = 0;
+            for (int i = 0; i < W * W; i++) {
+              if (i != srcIdx && !tgts.contains(i) && connections[i].isNotEmpty) {
+                playableCount++;
+                if (connections[i].length == 3) {
+                  tCount++;
+                }
+              }
+            }
+
+            bool tortuosityOk = true;
+            if (!_playDailyMode && _currentLevel >= 30) {
+              bool checkTort = false;
+              if (_currentLevel < 90) {
+                checkTort = true;
+              } else {
+                int combo = (_currentLevel - 90) % 6;
+                checkTort = (combo == 0 || combo == 2 || combo == 4);
+              }
+              if (checkTort && treeNodes.length < W * 1.8) {
+                tortuosityOk = false;
+              }
+            }
+
+            bool junctionsOk = true;
+            if (!_playDailyMode && _currentLevel >= 45) {
+              bool checkJunc = false;
+              if (_currentLevel < 90) {
+                checkJunc = true;
+              } else {
+                int combo = (_currentLevel - 90) % 6;
+                checkJunc = (combo == 1 || combo == 2 || combo == 4);
+              }
+              if (checkJunc && playableCount > 0 && (tCount / playableCount) < 0.25) {
+                junctionsOk = false;
+              }
+            }
+
+            if (!tortuosityOk || !junctionsOk) {
+              success = false;
             }
           }
         }
@@ -339,11 +475,79 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       
       _solutionRotations = List.from(_rotations);
 
+      // Stage 5: Decoy Wires (L75+)
+      if (!_playDailyMode && _currentLevel >= 75) {
+        int decoyCount = 1 + (_currentLevel - 75) ~/ 4;
+        if (decoyCount > W) decoyCount = W;
+        if (_currentLevel >= 90) {
+          int combo = (_currentLevel - 90) % 6;
+          bool hasDecoy = (combo == 3 || combo == 4);
+          decoyCount = hasDecoy ? W : 0;
+        }
+
+        List<int> emptyIndices = [];
+        for (int i = 0; i < W * W; i++) {
+          if (_wireTypes[i] == "EMPTY" && i != srcIdx && !tgts.contains(i)) {
+            emptyIndices.add(i);
+          }
+        }
+        emptyIndices.shuffle(rng);
+        for (int i = 0; i < min(decoyCount, emptyIndices.length); i++) {
+          int idx = emptyIndices[i];
+          _wireTypes[idx] = rng.nextBool() ? "S" : "E";
+          _solutionRotations[idx] = rng.nextInt(4);
+          _rotations[idx] = rng.nextInt(4);
+        }
+      }
+
       final playRng = Random(_currentLevel * 43 + 999);
       for (int i = 0; i < _gridSize * _gridSize; i++) {
-        if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT") {
+        if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT" && _wireTypes[i] != "EMPTY") {
           _rotations[i] = playRng.nextInt(4);
+          // Stage 4: Scramble depth (L60+ ensures no pre-solved tiles)
+          bool checkScramble = false;
+          if (_currentLevel >= 60 && _currentLevel < 90) {
+            checkScramble = true;
+          } else if (_currentLevel >= 90) {
+            int combo = (_currentLevel - 90) % 6;
+            checkScramble = (combo == 2 || combo == 4 || combo == 5);
+          }
+          if (checkScramble && _rotations[i] == _solutionRotations[i]) {
+            _rotations[i] = (_solutionRotations[i] + 1 + playRng.nextInt(3)) % 4;
+          }
         }
+      }
+
+      if (_isEndgame) {
+        final List<int> candidates = [];
+        for (int i = 0; i < _gridSize * _gridSize; i++) {
+          if (_wireTypes[i] == "S" || _wireTypes[i] == "E" || _wireTypes[i] == "T") {
+            candidates.add(i);
+          }
+        }
+        candidates.shuffle(rng);
+        int lockCount = 1 + (_gridSize ~/ 2);
+        for (int i = 0; i < min(lockCount, candidates.length); i++) {
+          final lockedIdx = candidates[i];
+          _lockedWires.add(lockedIdx);
+          _rotations[lockedIdx] = _solutionRotations[lockedIdx];
+        }
+
+        _timeLeft = 25 + (_gridSize * 10);
+        _timeBonusEarned = true;
+        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (mounted) {
+            setState(() {
+              if (_timeLeft > 0) {
+                _timeLeft--;
+              } else {
+                _timeLeft = 0;
+                _timeBonusEarned = false;
+                _gameTimer?.cancel();
+              }
+            });
+          }
+        });
       }
     });
   }
@@ -448,9 +652,60 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
 
 
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _onRotate(int idx) {
     if (_isSuccess) return;
     if (_wireTypes[idx] == "SRC" || _wireTypes[idx] == "TGT" || _wireTypes[idx] == "EMPTY") return;
+    if (_lockedWires.contains(idx)) return;
 
     AudioManager.playClick();
     settingsNotifier.hapticTap();
@@ -462,6 +717,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     AudioManager.playSuccess();
     settingsNotifier.hapticSuccess();
     
@@ -470,6 +726,19 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     int highest = prefs.getInt(key) ?? 0;
     if (_currentLevel + 1 > highest) {
       await prefs.setInt(key, _currentLevel + 1);
+    }
+
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
 
     final earned = await HintManager.onLevelCleared('circuit_guide');
@@ -574,6 +843,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
   @override
   void dispose() {
+    _gameTimer?.cancel();
     AudioManager.resumeMusic();
     super.dispose();
   }
@@ -645,20 +915,56 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve, 
-                  fontSize: 14, 
-                  fontWeight: FontWeight.bold,
+          GestureDetector(
+            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      style: AppTheme.numberStyle(
+                        color: AppTheme.dustyMauve, 
+                        fontSize: 14, 
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!_isTutorialMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -716,6 +1022,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                                     activeColor: Colors.amber,
                                     mutedColor: context.textMuted.withOpacity(0.25),
                                     isLevel9: _currentLevel >= 9,
+                                    isLocked: _lockedWires.contains(idx),
                                   );
                                 },
                               ),
@@ -789,6 +1096,7 @@ class AnimatedCircuitNode extends StatelessWidget {
   final Color activeColor;
   final Color mutedColor;
   final bool isLevel9;
+  final bool isLocked;
 
   const AnimatedCircuitNode({
     super.key,
@@ -800,11 +1108,50 @@ class AnimatedCircuitNode extends StatelessWidget {
     required this.activeColor,
     required this.mutedColor,
     required this.isLevel9,
+    required this.isLocked,
   });
 
   @override
   Widget build(BuildContext context) {
     final double targetAngle = rotation * (pi / 2);
+    Widget tileContent = type == "EMPTY"
+        ? const SizedBox()
+        : TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: targetAngle),
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            builder: (context, angle, child) {
+              return CustomPaint(
+                painter: WirePainter(
+                  type: type,
+                  index: index,
+                  rotationAngle: angle,
+                  isConnected: isConnected,
+                  activeColor: activeColor,
+                  mutedColor: mutedColor,
+                  isLevel9: isLevel9,
+                ),
+              );
+            },
+          );
+
+    if (isLocked) {
+      tileContent = Stack(
+        children: [
+          tileContent,
+          const Positioned(
+            right: 2,
+            top: 2,
+            child: Icon(
+              Icons.lock,
+              size: 11,
+              color: Colors.redAccent,
+            ),
+          ),
+        ],
+      );
+    }
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -815,26 +1162,7 @@ class AnimatedCircuitNode extends StatelessWidget {
             width: 1.0,
           ),
         ),
-        child: type == "EMPTY"
-            ? null
-            : TweenAnimationBuilder<double>(
-                tween: Tween<double>(end: targetAngle),
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                builder: (context, angle, child) {
-                  return CustomPaint(
-                    painter: WirePainter(
-                      type: type,
-                      index: index,
-                      rotationAngle: angle,
-                      isConnected: isConnected,
-                      activeColor: activeColor,
-                      mutedColor: mutedColor,
-                      isLevel9: isLevel9,
-                    ),
-                  );
-                },
-              ),
+        child: tileContent,
       ),
     );
   }

@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -448,17 +450,41 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   int _hintCount = 0;
   bool _shuffleActive = false;
 
+  bool get _isWhisper => (!_playDailyMode && _levelIndex >= 120) || (_playDailyMode && _dailyModifierType == 'whisper');
+  bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+
+  int get _minWordLength {
+    if (_isTutorialMode) return 4;
+    if (_playDailyMode) return 4;
+    if (_levelIndex < 30) return 4;
+    if (_levelIndex >= 30 && _levelIndex < 45) return 4;
+    if (_levelIndex >= 45 && _levelIndex < 60) return 5;
+    if (_levelIndex >= 60 && _levelIndex < 90) return 6;
+    return 4 + ((_levelIndex - 90) % 3);
+  }
+
   int get _targetCount {
+    final int validCount = _level.validWords.where((w) => w.length >= _minWordLength && w.contains(_level.centerLetter)).length;
+    final int capMax = min(18, validCount);
+    final int capMin = min(4, validCount);
+
     if (_playDailyMode && _dailyModifierType == 'whisper') {
-      return 10;
+      return 10.clamp(capMin, capMax);
     }
-    // Dynamic difficulty scaling based on level index
+    if (_isEndgame) {
+      final computedTarget = _level.targetCount + 2;
+      return computedTarget.clamp(capMin, capMax);
+    }
     final computedTarget = 4 + (_levelIndex ~/ 3);
-    return computedTarget.clamp(4, min(18, _level.validWords.length));
+    return computedTarget.clamp(capMin, capMax);
   }
 
   @override
   void dispose() {
+    _gameTimer?.cancel();
     _currentDragNotifier.dispose();
     super.dispose();
   }
@@ -584,6 +610,19 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
+    _gameTimer?.cancel();
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
     if (_playDailyMode) {
       return;
     }
@@ -594,14 +633,13 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     setState(() {
       _hintCount = newCount;
     });
-    
     await _clearNormalState();
   }
 
   Future<void> _useHint() async {
     if (_won || _hintCount <= 0) return;
     String? targetWord;
-    final minLength = _levelIndex >= 60 ? 5 : (_levelIndex >= 29 ? 4 : 3);
+    final minLength = _minWordLength;
     for (final word in _level.validWords) {
       if (word.length >= minLength && word.contains(_level.centerLetter) && !_foundWords.contains(word)) {
         targetWord = word;
@@ -630,12 +668,84 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _currentDragNotifier.value = null;
     _message ='';
     _won = false;
+
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
+    if (!_playDailyMode && _levelIndex >= 30) {
+      _timeLeft = 45 + (_targetCount * 15);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 121',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('spellingbee')),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _reset() => setState(() => _loadLevel());
 
   String _maskWord(String w) {
-    if (_playDailyMode && _dailyModifierType == 'whisper') {
+    if (_isWhisper) {
       return w.replaceAll(_level.centerLetter, '?');
     }
     return w;
@@ -718,7 +828,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   void _submitWord() {
     if (_won || _currentGuess.isEmpty) return;
     final word = _currentGuess.join();
-    final minLength = 4;
+    final minLength = _minWordLength;
     if (word.length < minLength) {
       setState(() {
         _message = 'Word must be at least $minLength letters';
@@ -801,14 +911,47 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       appBar: AppBar(
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
-        title: Text(_isTutorialMode ? 'Tutorial' : 'Word Hive', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        title: GestureDetector(
+          onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _isTutorialMode ? 'Tutorial' : 'Word Hive (L. ${_levelIndex + 1})',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary, fontSize: 16),
+              ),
+              if (!_isTutorialMode && !_playDailyMode) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.edit, size: 14, color: AppTheme.accentFor('spellingbee')),
+              ],
+            ],
+          ),
+        ),
         centerTitle: true,
         actions: [
-          if (_shuffleActive && !_isTutorialMode)
-            IconButton(
-              icon: const Icon(Icons.skip_next_rounded),
-              tooltip: 'Skip Game',
-              onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'spellingbee'),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           IconButton(
             icon: Stack(
@@ -919,7 +1062,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Find $_targetCount words containing "${(_playDailyMode && _dailyModifierType == 'whisper') ? '?' : _level.centerLetter}"',
+                'Find $_targetCount words (min $_minWordLength letters) containing "${(_playDailyMode && _dailyModifierType == 'whisper') ? '?' : _level.centerLetter}"',
                 style: GoogleFonts.outfit(color: accentColor, fontSize: context.scale(13), fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 20),
@@ -1072,7 +1215,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                             ),
                             child: Center(
                               child: Text(
-                                (_playDailyMode && _dailyModifierType == 'whisper') ? '?' : _level.centerLetter,
+                                _isWhisper ? '?' : _level.centerLetter,
                                 style: GoogleFonts.outfit(
                                   fontSize: context.scale(22),
                                   fontWeight: FontWeight.w900,

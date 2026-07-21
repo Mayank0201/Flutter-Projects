@@ -1,5 +1,8 @@
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -32,6 +35,9 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   int _movesLeft = 12;
   int _hintCount = 0;
   bool _shuffleActive = false;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   final List<Color> _colors = [
     Colors.red.shade400,
@@ -40,11 +46,22 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     Colors.orange.shade400,
     Colors.purple.shade400,
     Colors.teal.shade400,
+    Colors.pink.shade400,
+    Colors.amber.shade400,
+    Colors.indigo.shade400,
   ];
 
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
+  bool _seedFromCenter = false;
+  int get _seedCell => _seedFromCenter ? (_gridSize ~/ 2) * _gridSize + (_gridSize ~/ 2) : 0;
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -69,6 +86,36 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     }
   }
 
+  bool _isFloodConnected(List<int> grid, int size, int obstacleVal) {
+    int startIdx = _seedFromCenter ? (size ~/ 2) * size + (size ~/ 2) : 0;
+    final visited = List.filled(size * size, false);
+    final queue = <int>[startIdx];
+    visited[startIdx] = true;
+    int visitedCount = 1;
+    int nonObstacles = grid.where((c) => c != obstacleVal).length;
+
+    int head = 0;
+    while (head < queue.length) {
+      int curr = queue[head++];
+      int r = curr ~/ size;
+      int c = curr % size;
+      final neighbors = [
+        if (r > 0) (r - 1) * size + c,
+        if (r < size - 1) (r + 1) * size + c,
+        if (c > 0) r * size + c - 1,
+        if (c < size - 1) r * size + c + 1,
+      ];
+      for (int n in neighbors) {
+        if (grid[n] != obstacleVal && !visited[n]) {
+          visited[n] = true;
+          queue.add(n);
+          visitedCount++;
+        }
+      }
+    }
+    return visitedCount == nonObstacles;
+  }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
@@ -82,11 +129,56 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         return;
       }
 
+      _gameTimer?.cancel();
+      _timeLeft = -1;
+      _timeBonusEarned = false;
+
       int minOptimal = 0;
       int maxOptimal = 0;
       int buffer = 0;
+      _seedFromCenter = false;
+      bool hasObstacles = false;
 
-      if (_currentLevel < 5) {
+      if (!_playDailyMode && _currentLevel >= 30) {
+        if (_currentLevel >= 30 && _currentLevel < 45) {
+          _gridSize = 9;
+          _numColors = 6;
+          minOptimal = 18;
+          maxOptimal = minOptimal + 2; // Tighter buffer
+          buffer = 0;
+        } else if (_currentLevel >= 45 && _currentLevel < 60) {
+          _gridSize = 9;
+          _numColors = 6 + min(2, (_currentLevel - 45) ~/ 7); // 7-8 colors
+          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
+          maxOptimal = minOptimal + 2;
+          buffer = 0;
+        } else if (_currentLevel >= 60 && _currentLevel < 75) {
+          _gridSize = 9;
+          _numColors = 7;
+          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
+          maxOptimal = minOptimal + 2;
+          buffer = 0;
+          _seedFromCenter = true; // Center seed
+        } else if (_currentLevel >= 75 && _currentLevel < 90) {
+          _gridSize = 9;
+          _numColors = 7;
+          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
+          maxOptimal = minOptimal + 2;
+          buffer = 0;
+          hasObstacles = true; // Obstacles
+        } else {
+          // Rotation (L90+)
+          _gridSize = 5 + ((_currentLevel - 90) % 5); // Rotates 5, 6, 7, 8, 9
+          _numColors = 4 + ((_currentLevel - 90) % 5); // Rotates 4, 5, 6, 7, 8
+          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
+          maxOptimal = minOptimal + 2;
+          buffer = 0;
+          
+          int combo = (_currentLevel - 90) % 6;
+          _seedFromCenter = (combo == 0 || combo == 2 || combo == 4);
+          hasObstacles = (combo == 1 || combo == 2 || combo == 3 || combo == 4);
+        }
+      } else if (_currentLevel < 5) {
         _gridSize = 5;
         _numColors = 4;
         minOptimal = 6;
@@ -118,7 +210,9 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         buffer = 0;
       }
 
-      final rng = Random(_currentLevel * 73 + 2026);
+      final rng = _playDailyMode
+          ? Random()
+          : RotationEngine.getDeterminism('colorflood', _currentLevel);
 
       bool found = false;
       int attempts = 0;
@@ -128,7 +222,26 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
 
       while (attempts < 20) {
         attempts++;
-        List<int> testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+        List<int> testGrid;
+        
+        if (hasObstacles) {
+          do {
+            testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+            double obstacleChance = 0.08 + rng.nextDouble() * 0.08;
+            if (_currentLevel >= 75 && _currentLevel < 90) {
+              obstacleChance = 0.08 + 0.08 * ((_currentLevel - 75) / 14.0);
+            }
+            for (int i = 0; i < testGrid.length; i++) {
+              if (i == _seedCell) continue;
+              if (rng.nextDouble() < obstacleChance) {
+                testGrid[i] = _numColors;
+              }
+            }
+          } while (!_isFloodConnected(testGrid, _gridSize, _numColors));
+        } else {
+          testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+        }
+        
         if (testGrid.every((c) => c == testGrid[0])) continue;
 
         int opt = _solveColorFlood(testGrid, _gridSize, _numColors);
@@ -139,19 +252,18 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             found = true;
             break;
           }
-          if ((opt - (minOptimal + maxOptimal) ~/ 2).abs() < (bestMoves - (minOptimal + maxOptimal) ~/ 2).abs()) {
-            bestGrid = testGrid;
+          if (opt < bestMoves) {
             bestMoves = opt;
+            bestGrid = testGrid;
             bestOpt = opt;
           }
         }
       }
 
-      if (!found) {
-        if (bestGrid.isNotEmpty) {
-          _grid = bestGrid;
-          _movesLeft = bestOpt + buffer;
-        } else {
+      if (!found && bestGrid.isNotEmpty) {
+        _grid = bestGrid;
+        _movesLeft = bestOpt + buffer;
+      } else if (!found) {
           _grid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
           if (_gridSize == 5) {
             _movesLeft = 11;
@@ -165,6 +277,23 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             _movesLeft = 18;
           }
         }
+
+      if (!_playDailyMode && _currentLevel >= 30) {
+        _timeLeft = 20 + (_gridSize * 8);
+        _timeBonusEarned = true;
+        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (mounted) {
+            setState(() {
+              if (_timeLeft > 0) {
+                _timeLeft--;
+              } else {
+                _timeLeft = 0;
+                _timeBonusEarned = false;
+                _gameTimer?.cancel();
+              }
+            });
+          }
+        });
       }
     });
   }
@@ -181,9 +310,16 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     
     while (head < queue.length && head < limit) {
       final (currentGrid, moves) = queue[head++];
-      
-      int firstColor = currentGrid[0];
-      if (currentGrid.every((c) => c == firstColor)) {
+      int seedIdx = _seedFromCenter ? (size ~/ 2) * size + (size ~/ 2) : 0;
+      int firstColor = currentGrid[seedIdx];
+      bool allMatched = true;
+      for (int i = 0; i < currentGrid.length; i++) {
+        if (currentGrid[i] != numColors && currentGrid[i] != firstColor) {
+          allMatched = false;
+          break;
+        }
+      }
+      if (allMatched) {
         return moves;
       }
       
@@ -192,9 +328,9 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         
         List<int> nextGrid = List<int>.from(currentGrid);
         
-        List<int> component = [0];
+        List<int> component = [seedIdx];
         List<bool> compVisited = List.filled(size * size, false);
-        compVisited[0] = true;
+        compVisited[seedIdx] = true;
         int compHead = 0;
         while (compHead < component.length) {
           int curr = component[compHead++];
@@ -246,6 +382,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     AudioManager.playSuccess();
     settingsNotifier.hapticSuccess();
 
@@ -254,6 +391,19 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     int highest = prefs.getInt(key) ?? 0;
     if (_currentLevel + 1 > highest) {
       await prefs.setInt(key, _currentLevel + 1);
+    }
+
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
 
     final earned = await HintManager.onLevelCleared('color_flood');
@@ -295,15 +445,15 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
 
   void _flood(int targetColor) {
     if (_movesLeft <= 0 || _isSuccess) return;
-    int original = _grid[0];
+    int original = _grid[_seedCell];
     if (original == targetColor) return;
 
     AudioManager.playClick();
     settingsNotifier.hapticTap();
 
     List<bool> visited = List.filled(_gridSize * _gridSize, false);
-    List<int> queue = [0];
-    visited[0] = true;
+    List<int> queue = [_seedCell];
+    visited[_seedCell] = true;
 
     while (queue.isNotEmpty) {
       int curr = queue.removeAt(0);
@@ -326,7 +476,14 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
 
     setState(() {
       _movesLeft--;
-      if (_grid.every((e) => e == targetColor)) {
+      bool isWin = true;
+      for (int i = 0; i < _grid.length; i++) {
+        if (_grid[i] != _numColors && _grid[i] != targetColor) {
+          isWin = false;
+          break;
+        }
+      }
+      if (isWin) {
         if (_isTutorialMode) {
           if (!_tutorialCompleted) {
             AudioManager.playSuccess();
@@ -347,6 +504,56 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         ));
       }
     });
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _useHint() async {
@@ -493,20 +700,56 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline, color: AppTheme.dustyMauve),
             tooltip: 'Rules',
             onPressed: _showRules,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve, 
-                  fontSize: 14, 
-                  fontWeight: FontWeight.bold,
+          GestureDetector(
+            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      style: AppTheme.numberStyle(
+                        color: AppTheme.dustyMauve, 
+                        fontSize: 14, 
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!_isTutorialMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -557,19 +800,27 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
                                     itemCount: _grid.length,
                                     itemBuilder: (context, idx) {
+                                      final val = _grid[idx];
+                                      final isObstacle = val == _numColors;
                                       return Container(
                                         decoration: BoxDecoration(
-                                          color: _colors[_grid[idx]],
+                                          color: isObstacle
+                                              ? Colors.grey.shade900
+                                              : _colors[val],
                                           border: Border.all(
                                             color: context.bgDark.withOpacity(0.12),
                                             width: 1.0,
                                           ),
                                         ),
-                                        child: idx == 0
+                                        child: isObstacle
                                             ? const Center(
-                                                child: Icon(Icons.home, color: Colors.white, size: 20),
+                                                child: Icon(Icons.close_rounded, color: Colors.white24, size: 14),
                                               )
-                                            : null,
+                                            : (idx == _seedCell
+                                                ? const Center(
+                                                    child: Icon(Icons.home, color: Colors.white, size: 20),
+                                                  )
+                                                : null),
                                       );
                                     },
                                   ),

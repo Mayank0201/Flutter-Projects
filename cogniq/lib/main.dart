@@ -37,6 +37,7 @@ import 'screens/games/slitherlink/slitherlink_screen.dart';
 import 'screens/games/masyu/masyu_screen.dart';
 import 'screens/games/bridges/bridges_screen.dart';
 import 'screens/games/sum_strike/sum_strike_screen.dart';
+import 'screens/games/beta/killer_sudoku_beta.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_manager.dart';
 import 'utils/audio_manager.dart';
@@ -223,6 +224,7 @@ class _CogniQAppState extends State<CogniQApp> with WidgetsBindingObserver {
             '/masyu': (ctx) => const MasyuScreen(),
             '/bridges': (ctx) => const BridgesScreen(),
             '/sumstrike': (ctx) => const SumStrikeScreen(),
+            '/killersudoku': (ctx) => const KillerSudokuBetaScreen(),
           },
         );
       },

@@ -13,6 +13,8 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 
@@ -37,6 +39,9 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   bool _isShadowed = false;
   Timer? _eclipseTimer;
   Timer? _chaosTimer;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   bool _chaosHasOdd = false;
   bool _chaosIsFirstCall = true;
@@ -72,6 +77,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   void dispose() {
     _eclipseTimer?.cancel();
     _chaosTimer?.cancel();
+    _gameTimer?.cancel();
     _shakeController.dispose();
     super.dispose();
   }
@@ -79,18 +85,26 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   int get _gridSide {
     if (_isDailyMode && _dailyModifierType == 'chaos') return 2;
     if (_isDailyMode && _dailyModifierType == 'hidden_rule') return 3;
+    if (!_isDailyMode && _levelIndex >= 90) {
+      return 5 + ((_levelIndex - 90) % 5); // Rotates 5x5 to 9x9
+    }
     if (_levelIndex < 2) return 2; // 2x2
     if (_levelIndex < 5) return 3; // 3x3
     if (_levelIndex < 10) return 4; // 4x4
     if (_levelIndex < 16) return 5; // 5x5
     if (_levelIndex < 23) return 6; // 6x6
     if (_levelIndex < 30) return 7; // 7x7
-    if (_levelIndex < 40) return 8; // 8x8
-    return 9; // 9x9 max
+    return 9; // 9x9 max from level 30 to 89
   }
 
   void _generateLevelColors({bool keepPosition = false}) {
-    final rand = Random();
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
+    final rand = (_isDailyMode || _levelIndex < 90)
+        ? Random()
+        : RotationEngine.getDeterminism('oddcolorout', _levelIndex);
     
     if (_isDailyMode && _dailyModifierType == 'chaos') {
       if (_chaosIsFirstCall) {
@@ -101,49 +115,80 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       }
     }
 
-    // Saturation and Lightness kept in zen-friendly pastel/moderate ranges
     final double saturation = (_isDailyMode && _dailyModifierType == 'monochrome') ? 0.0 : (0.55 + rand.nextDouble() * 0.35); 
     final double lightness = 0.40 + rand.nextDouble() * 0.35;
 
     double baseHue = rand.nextDouble() * 360.0;
     if (_isDailyMode && _dailyModifierType == 'hidden_rule') {
-      // 195.0 to 230.0 hue represents shades of blue
       baseHue = 195.0 + rand.nextDouble() * 35.0;
     }
 
     _baseColor = HSLColor.fromAHSL(1.0, baseHue, saturation, lightness).toColor();
 
+    bool isHueChannel = false;
+    bool hasNoise = false;
+    bool hasGradient = false;
+
+    if (!_isDailyMode) {
+      if (_levelIndex >= 45 && _levelIndex < 60) {
+        isHueChannel = true;
+      } else if (_levelIndex >= 60 && _levelIndex < 75) {
+        isHueChannel = true;
+        hasNoise = true;
+      } else if (_levelIndex >= 75 && _levelIndex < 90) {
+        isHueChannel = true;
+        hasNoise = true;
+        hasGradient = true;
+      } else if (_levelIndex >= 90) {
+        int combo = (_levelIndex - 90) % 6;
+        isHueChannel = (combo == 0 || combo == 2 || combo == 4);
+        hasNoise = (combo == 0 || combo == 3 || combo == 4 || combo == 5);
+        hasGradient = (combo == 1 || combo == 2 || combo == 3 || combo == 4);
+      }
+    }
+
     if (_isDailyMode && _dailyModifierType == 'hidden_rule') {
-      // Shift hue to a completely different non-blue color family (e.g. shift by 70 to 180 degrees)
       final double shift = 70.0 + rand.nextDouble() * 110.0;
       final double oddHue = (baseHue + shift) % 360.0;
       _oddColor = HSLColor.fromAHSL(1.0, oddHue, saturation, lightness).toColor();
     } else {
-      // Delta difference decreases linearly as level increases (gets harder)
-      final double minDelta = 0.04;
-      final double maxDelta = 0.10;
-      final double delta = maxDelta - (min(49, _levelIndex) / 49.0) * (maxDelta - minDelta);
-
-      final double shiftDirection = rand.nextBool() ? 1.0 : -1.0;
-      double oddLightness = lightness + (shiftDirection * delta);
-      
-      // Clamp to ensure it remains a valid visual color
-      if (oddLightness < 0.15 || oddLightness > 0.85) {
-        oddLightness = lightness - (shiftDirection * delta);
+      double delta;
+      if (!_isDailyMode && _levelIndex >= 30) {
+        delta = 0.012 + 0.088 * (30.0 / (30.0 + (_levelIndex - 30)));
+      } else {
+        final double minDelta = 0.04;
+        final double maxDelta = 0.10;
+        delta = maxDelta - (_levelIndex / 29.0) * (maxDelta - minDelta);
       }
 
-      // Dual-channel shift: also shift saturation slightly at harder levels
-      final double progress = min(49, _levelIndex) / 49.0;
-      final double satShift = progress * 0.06;
-      final double satDirection = rand.nextBool() ? 1.0 : -1.0;
-      double oddSaturation = saturation + (satDirection * satShift);
-      if (oddSaturation < 0.1 || oddSaturation > 0.95) {
-        oddSaturation = saturation - (satDirection * satShift);
+      double oddLightness = lightness;
+      double oddSaturation = saturation;
+      double oddHue = baseHue;
+
+      if (isHueChannel) {
+        final double shiftDirection = rand.nextBool() ? 1.0 : -1.0;
+        double hueShift = delta * 250.0;
+        oddHue = (baseHue + shiftDirection * hueShift) % 360.0;
+      } else {
+        final double shiftDirection = rand.nextBool() ? 1.0 : -1.0;
+        oddLightness = lightness + (shiftDirection * delta);
+        
+        if (oddLightness < 0.15 || oddLightness > 0.85) {
+          oddLightness = lightness - (shiftDirection * delta);
+        }
+
+        final double progress = min(49, _levelIndex) / 49.0;
+        final double satShift = progress * 0.06;
+        final double satDirection = rand.nextBool() ? 1.0 : -1.0;
+        oddSaturation = saturation + (satDirection * satShift);
+        if (oddSaturation < 0.1 || oddSaturation > 0.95) {
+          oddSaturation = saturation - (satDirection * satShift);
+        }
       }
 
       _oddColor = HSLColor.fromAHSL(
         1.0, 
-        baseHue, 
+        oddHue, 
         oddSaturation.clamp(0.0, 1.0), 
         oddLightness.clamp(0.15, 0.85)
       ).toColor();
@@ -163,15 +208,11 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
 
       if (_isDailyMode && _dailyModifierType == 'hidden_rule') {
         if (isOdd) {
-          // Odd color is a non-blue color family (e.g. green/yellow/red/orange/purple)
-          // Pick a random hue outside the blue range [190, 245]
           final double oddHue = rand.nextBool()
-              ? (45.0 + rand.nextDouble() * 100.0) // 45 to 145 (green/yellow/orange)
-              : (300.0 + rand.nextDouble() * 60.0); // 300 to 360 (purple/pink/red)
+              ? (45.0 + rand.nextDouble() * 100.0) 
+              : (300.0 + rand.nextDouble() * 60.0); 
           return HSLColor.fromAHSL(1.0, oddHue, saturation, lightness).toColor();
         } else {
-          // Base color is a random type of blue (hue in [190, 245])
-          // We also vary the lightness and saturation slightly so they are different types/shades of blue
           final double bHue = 190.0 + rand.nextDouble() * 55.0;
           final double bSat = 0.50 + rand.nextDouble() * 0.40;
           final double bLight = 0.35 + rand.nextDouble() * 0.30;
@@ -197,9 +238,59 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
           return _baseColor;
         }
       } else {
-        return isOdd ? _oddColor : _baseColor;
+        if (isOdd) {
+          return _oddColor;
+        }
+        if (!_isDailyMode && (hasGradient || hasNoise)) {
+          double cellHue = baseHue;
+          double cellSaturation = saturation;
+          double cellLightness = lightness;
+
+          if (hasGradient) {
+            double gradientFactor = (r + c) / (2 * (side - 1));
+            double gradMag = 0.015;
+            if (_levelIndex >= 75 && _levelIndex < 90) {
+              gradMag = 0.005 + 0.010 * ((_levelIndex - 75) / 14.0);
+            }
+            cellLightness += (gradientFactor - 0.5) * gradMag;
+          }
+          if (hasNoise) {
+            double noiseMag = 0.008;
+            if (_levelIndex >= 60 && _levelIndex < 75) {
+              noiseMag = 0.002 + 0.006 * ((_levelIndex - 60) / 14.0);
+            }
+            double noise = (rand.nextDouble() - 0.5) * noiseMag;
+            cellLightness += noise;
+          }
+
+          return HSLColor.fromAHSL(
+            1.0,
+            cellHue,
+            cellSaturation.clamp(0.0, 1.0),
+            cellLightness.clamp(0.15, 0.85),
+          ).toColor();
+        }
+        return _baseColor;
       }
     });
+
+    if (!_isDailyMode && _levelIndex >= 30) {
+      _timeLeft = 5 + side * 3;
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
 
     if (!keepPosition) {
       _startDailyTimers();
@@ -289,6 +380,56 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     }
   }
 
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 100',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('oddcolor')),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _generateLevelColors();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _savePersistedLevel(int lvl) async {
     if (_isDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
@@ -326,6 +467,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
 
     if (r == _oddRow && c == _oddCol) {
       // Correct!
+      _gameTimer?.cancel();
       AudioManager.playSuccess();
       if (_isTutorialMode) {
         setState(() {
@@ -340,6 +482,17 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       if (_isDailyMode) {
         // Handled by ChallengeClearedOverlay
         return;
+      }
+
+      if (_timeLeft > 0 && _timeBonusEarned) {
+        PointManager.addPoints(5);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     } else {
       if (_isTutorialMode) return;
@@ -481,6 +634,30 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 4 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 4 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'oddcolor', 'Odd Color Out'),
@@ -599,11 +776,21 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                               ),
                             )
                           else if (!_isDailyMode)
-                            AnimatedLevelIndicator(
-                              level: _levelIndex + 1,
-                              accentColor: context.textPrimary,
-                              fontSize: context.scale(20),
-                              fontWeight: FontWeight.bold,
+                            GestureDetector(
+                              onTap: _showJumpToLevelDialog,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AnimatedLevelIndicator(
+                                    level: _levelIndex + 1,
+                                    accentColor: context.textPrimary,
+                                    fontSize: context.scale(20),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit, size: 14, color: context.textPrimary),
+                                ],
+                              ),
                             )
                           else
                             Text(

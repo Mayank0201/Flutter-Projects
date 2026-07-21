@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../utils/point_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -12,6 +14,7 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/rotation_engine.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 
 class SumStrikeScreen extends StatefulWidget {
@@ -40,11 +43,20 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   bool _isHintShowing = false;
   int _hintIdx = -1;
   final Set<int> _wrongTaps = {};
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   @override
   void initState() {
     super.initState();
     _loadProgressAndLevel();
+  }
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadProgressAndLevel() async {
@@ -76,19 +88,109 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     }
   }
 
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _generatePuzzle();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _generatePuzzle() {
-    if (!_playDailyMode && _currentLevel >= 50) {
+    if (!_playDailyMode && _currentLevel >= 500) {
       return;
     }
-    final rand = Random();
-    
-    // Easy: 3x3, Medium: 4x4, Hard: 5x5
-    if (_currentLevel < 5) {
-      _gridSize = 3;
-    } else if (_currentLevel < 10) {
-      _gridSize = 4;
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
+    final rand = _playDailyMode
+        ? Random()
+        : RotationEngine.getDeterminism('sumstrike', _currentLevel);
+
+    bool allowNegatives = false;
+    double negativeChance = 0.0;
+    int maxNum = 9;
+    double maskThreshold = 0.45;
+
+    if (!_playDailyMode && _currentLevel >= 30) {
+      if (_currentLevel >= 30 && _currentLevel < 45) {
+        _gridSize = 5;
+        maxNum = 9 + ((_currentLevel - 30) ~/ 3);
+        if (maxNum > 15) maxNum = 15;
+      } else if (_currentLevel >= 45 && _currentLevel < 60) {
+        _gridSize = 5;
+        maxNum = 14;
+        allowNegatives = true;
+        negativeChance = 0.10 + min(0.20, (_currentLevel - 45) * 0.01);
+      } else if (_currentLevel >= 60 && _currentLevel < 80) {
+        _gridSize = 5;
+        maxNum = 15;
+        allowNegatives = true;
+        negativeChance = 0.25;
+        maskThreshold = 0.50; // Dense strike
+      } else {
+        // Rotation (L80+)
+        _gridSize = 3 + ((_currentLevel - 80) % 4); // Rotates 3x3, 4x4, 5x5, 6x6
+        maxNum = 9 + ((_currentLevel - 80) ~/ 10);
+        if (maxNum > 18) maxNum = 18;
+        allowNegatives = true;
+        negativeChance = 0.10 + min(0.25, (_currentLevel - 80) * 0.005);
+        int combo = (_currentLevel - 80) % 3;
+        if (combo == 0) {
+          maskThreshold = 0.50; // Dense strike combo
+        }
+      }
     } else {
-      _gridSize = 5;
+      if (_currentLevel < 5) {
+        _gridSize = 3;
+      } else if (_currentLevel < 10) {
+        _gridSize = 4;
+      } else {
+        _gridSize = 5;
+      }
     }
 
     final total = _gridSize * _gridSize;
@@ -97,18 +199,22 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
 
     bool generated = false;
 
-    // Try up to 50 attempts to find a uniquely solvable puzzle
     for (int attempt = 0; attempt < 50; attempt++) {
-      _grid = List.generate(total, (_) => rand.nextInt(9) + 1);
+      _grid = List.generate(total, (_) {
+        int val = rand.nextInt(maxNum) + 1;
+        if (allowNegatives && rand.nextDouble() < negativeChance) {
+          val = -val;
+        }
+        return val;
+      });
       
       List<bool> solution = [];
       int retries = 0;
       do {
-        solution = List.generate(total, (_) => rand.nextDouble() > 0.4);
+        solution = List.generate(total, (_) => rand.nextDouble() > maskThreshold);
         retries++;
-      } while (solution.where((k) => k).length < total * 0.3 && retries < 20);
+      } while (!_isNonTrivialMask(solution) && retries < 40);
 
-      // Compute targets for this candidate solution
       for (int r = 0; r < _gridSize; r++) {
         int rSum = 0;
         for (int c = 0; c < _gridSize; c++) {
@@ -129,7 +235,6 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         _colTargets[c] = cSum;
       }
 
-      // Check uniqueness of solution using backtracking
       final tempKeep = List.filled(total, false);
       final solutions = _countSumStrikeSolutions(0, tempKeep, 2);
       if (solutions == 1) {
@@ -139,15 +244,20 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       }
     }
 
-    // Fallback if no unique board found after 50 attempts
     if (!generated) {
-      _grid = List.generate(total, (_) => rand.nextInt(9) + 1);
+      _grid = List.generate(total, (_) {
+        int val = rand.nextInt(maxNum) + 1;
+        if (allowNegatives && rand.nextDouble() < negativeChance) {
+          val = -val;
+        }
+        return val;
+      });
       List<bool> solution = [];
       int retries = 0;
       do {
-        solution = List.generate(total, (_) => rand.nextDouble() > 0.4);
+        solution = List.generate(total, (_) => rand.nextDouble() > maskThreshold);
         retries++;
-      } while (solution.where((k) => k).length < total * 0.3 && retries < 20);
+      } while (!_isNonTrivialMask(solution) && retries < 40);
 
       for (int r = 0; r < _gridSize; r++) {
         int rSum = 0;
@@ -171,6 +281,24 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _hintIdx = -1;
     _isHintShowing = false;
     _wrongTaps.clear();
+
+    if (!_playDailyMode && _currentLevel >= 30) {
+      _timeLeft = 30 + (_gridSize * 10);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
   }
 
   int _rowSum(int r) {
@@ -192,34 +320,72 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   bool _isSumStrikePartialValid(int cellIdx, List<bool> tempKeep) {
     for (int r = 0; r < _gridSize; r++) {
       int determinedKeptSum = 0;
-      int undeterminedMaxSum = 0;
+      int minPossibleRemaining = 0;
+      int maxPossibleRemaining = 0;
       for (int c = 0; c < _gridSize; c++) {
         int idx = r * _gridSize + c;
         if (idx <= cellIdx) {
           if (tempKeep[idx]) determinedKeptSum += _grid[idx];
         } else {
-          undeterminedMaxSum += _grid[idx];
+          int val = _grid[idx];
+          if (val > 0) {
+            maxPossibleRemaining += val;
+          } else {
+            minPossibleRemaining += val;
+          }
         }
       }
-      if (determinedKeptSum > _rowTargets[r]) return false;
-      if (determinedKeptSum + undeterminedMaxSum < _rowTargets[r]) return false;
+      if (determinedKeptSum + minPossibleRemaining > _rowTargets[r]) return false;
+      if (determinedKeptSum + maxPossibleRemaining < _rowTargets[r]) return false;
     }
 
     for (int c = 0; c < _gridSize; c++) {
       int determinedKeptSum = 0;
-      int undeterminedMaxSum = 0;
+      int minPossibleRemaining = 0;
+      int maxPossibleRemaining = 0;
       for (int r = 0; r < _gridSize; r++) {
         int idx = r * _gridSize + c;
         if (idx <= cellIdx) {
           if (tempKeep[idx]) determinedKeptSum += _grid[idx];
         } else {
-          undeterminedMaxSum += _grid[idx];
+          int val = _grid[idx];
+          if (val > 0) {
+            maxPossibleRemaining += val;
+          } else {
+            minPossibleRemaining += val;
+          }
         }
       }
-      if (determinedKeptSum > _colTargets[c]) return false;
-      if (determinedKeptSum + undeterminedMaxSum < _colTargets[c]) return false;
+      if (determinedKeptSum + minPossibleRemaining > _colTargets[c]) return false;
+      if (determinedKeptSum + maxPossibleRemaining < _colTargets[c]) return false;
     }
 
+    return true;
+  }
+
+  bool _isNonTrivialMask(List<bool> sol) {
+    for (int r = 0; r < _gridSize; r++) {
+      bool anyKept = false, anyStruck = false;
+      for (int c = 0; c < _gridSize; c++) {
+        if (sol[r * _gridSize + c]) {
+          anyKept = true;
+        } else {
+          anyStruck = true;
+        }
+      }
+      if (!anyKept || !anyStruck) return false;
+    }
+    for (int c = 0; c < _gridSize; c++) {
+      bool anyKept = false, anyStruck = false;
+      for (int r = 0; r < _gridSize; r++) {
+        if (sol[r * _gridSize + c]) {
+          anyKept = true;
+        } else {
+          anyStruck = true;
+        }
+      }
+      if (!anyKept || !anyStruck) return false;
+    }
     return true;
   }
 
@@ -330,6 +496,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     final prefs = await SharedPreferences.getInstance();
     if (!_playDailyMode) {
       int highest = prefs.getInt('beta_level_sumplete') ?? 0;
@@ -337,6 +504,20 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         await prefs.setInt('beta_level_sumplete', _currentLevel + 1);
       }
     }
+
+    if (_timeBonusEarned && _timeLeft > 0) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+
     setState(() => _isSuccess = true);
   }
 
@@ -516,16 +697,52 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'sumstrike', 'Sum Strike'),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16, left: 8),
-            child: Center(
-              child: Text(
-                _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
+          GestureDetector(
+            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16, left: 8),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
+                      style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    if (!_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),

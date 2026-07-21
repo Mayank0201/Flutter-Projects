@@ -1,9 +1,13 @@
+import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 
 class KillerSudokuBetaScreen extends StatefulWidget {
   const KillerSudokuBetaScreen({super.key});
@@ -13,10 +17,18 @@ class KillerSudokuBetaScreen extends StatefulWidget {
 class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
+  int _gridSize = 4;
   List<int> _grid = List.filled(16, 0);
   List<int> _cages = [0, 0, 1, 1, 0, 2, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4];
   List<int> _cageSums = [9, 4, 7, 3, 9, 4, 4];
   int _selectedIdx = -1;
+  final Set<int> _givenCells = {};
+
+  bool _playDailyMode = false;
+  bool get _isEndgame => !_playDailyMode && _currentLevel >= 10;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   @override
   void initState() {
@@ -24,106 +36,344 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     _loadLevel();
   }
 
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
+
+  void _generateProceduralLevel() {
+    final rng = _playDailyMode
+        ? Random(_currentLevel * 777)
+        : RotationEngine.getDeterminism('killersudoku', _currentLevel);
+
+    int maxCageSize = 3;
+    int numGivens = 0;
+
+    if (!_playDailyMode && _currentLevel >= 10) {
+      if (_currentLevel >= 10 && _currentLevel < 25) {
+        _gridSize = 4;
+        maxCageSize = 3;
+        numGivens = 0;
+      } else if (_currentLevel >= 25 && _currentLevel < 40) {
+        _gridSize = 6;
+        maxCageSize = 3;
+        numGivens = 0;
+      } else if (_currentLevel >= 40 && _currentLevel < 55) {
+        _gridSize = 6;
+        maxCageSize = 4;
+        numGivens = 0;
+      } else if (_currentLevel >= 55 && _currentLevel < 70) {
+        _gridSize = 6;
+        maxCageSize = 4;
+        numGivens = max(0, 4 - ((_currentLevel - 55) ~/ 5)); // 4, 3, 2, 1 givens
+      } else if (_currentLevel >= 70 && _currentLevel < 90) {
+        _gridSize = 9;
+        maxCageSize = 4;
+        numGivens = 0;
+      } else {
+        // Rotation (L90+)
+        int combo = (_currentLevel - 90) % 3;
+        if (combo == 0) {
+          _gridSize = 4;
+          maxCageSize = 3;
+        } else if (combo == 1) {
+          _gridSize = 6;
+          maxCageSize = 4;
+        } else {
+          _gridSize = 9;
+          maxCageSize = 4;
+        }
+        numGivens = 0;
+      }
+    } else {
+      _gridSize = (_currentLevel % 2 == 0) ? 4 : 6;
+    }
+
+    int totalCells = _gridSize * _gridSize;
+    _grid = List.filled(totalCells, 0);
+    _givenCells.clear();
+
+    List<int> solved = List.filled(totalCells, 0);
+    _solveSudokuBoard(solved, 0, _gridSize, rng);
+
+    _cages = List.filled(totalCells, -1);
+    _cageSums = [];
+    int cageId = 0;
+
+    for (int i = 0; i < totalCells; i++) {
+      if (_cages[i] != -1) continue;
+
+      List<int> cageCells = [i];
+      _cages[i] = cageId;
+
+      int targetSize = 2 + rng.nextInt(maxCageSize - 1);
+      List<int> queue = [i];
+
+      while (queue.isNotEmpty && cageCells.length < targetSize) {
+        int curr = queue.removeAt(0);
+        int r = curr ~/ _gridSize;
+        int c = curr % _gridSize;
+
+        List<int> neighbors = [];
+        if (r > 0 && _cages[(r - 1) * _gridSize + c] == -1) neighbors.add((r - 1) * _gridSize + c);
+        if (r < _gridSize - 1 && _cages[(r + 1) * _gridSize + c] == -1) neighbors.add((r + 1) * _gridSize + c);
+        if (c > 0 && _cages[r * _gridSize + c - 1] == -1) neighbors.add(r * _gridSize + c - 1);
+        if (c < _gridSize - 1 && _cages[r * _gridSize + c + 1] == -1) neighbors.add(r * _gridSize + c + 1);
+
+        neighbors.shuffle(rng);
+        for (int nextCell in neighbors) {
+          if (cageCells.length < targetSize && !cageCells.contains(nextCell)) {
+            cageCells.add(nextCell);
+            _cages[nextCell] = cageId;
+            queue.add(nextCell);
+          }
+        }
+      }
+
+      int sum = cageCells.fold(0, (acc, idx) => acc + solved[idx]);
+      _cageSums.add(sum);
+      cageId++;
+    }
+
+    // Apply givens: prefill numGivens cells from the solved board
+    if (numGivens > 0) {
+      final List<int> indices = List.generate(totalCells, (index) => index)..shuffle(rng);
+      for (int i = 0; i < min(numGivens, totalCells); i++) {
+        final idx = indices[i];
+        _grid[idx] = solved[idx];
+        _givenCells.add(idx);
+      }
+    }
+  }
+
+  bool _solveSudokuBoard(List<int> board, int idx, int size, Random rng) {
+    if (idx == size * size) return true;
+    int r = idx ~/ size;
+    int c = idx % size;
+
+    List<int> digits = List.generate(size, (i) => i + 1)..shuffle(rng);
+    for (int d in digits) {
+      if (_isValidSudokuPlace(board, size, r, c, d)) {
+        board[idx] = d;
+        if (_solveSudokuBoard(board, idx + 1, size, rng)) return true;
+        board[idx] = 0;
+      }
+    }
+    return false;
+  }
+
+  bool _isValidSudokuPlace(List<int> board, int size, int r, int c, int val) {
+    for (int col = 0; col < size; col++) {
+      if (board[r * size + col] == val) return false;
+    }
+    for (int row = 0; row < size; row++) {
+      if (board[row * size + c] == val) return false;
+    }
+    int boxRows = size == 9 ? 3 : 2;
+    int boxCols = size == 4 ? 2 : 3;
+    int startR = (r ~/ boxRows) * boxRows;
+    int startC = (c ~/ boxCols) * boxCols;
+    for (int dr = 0; dr < boxRows; dr++) {
+      for (int dc = 0; dc < boxCols; dc++) {
+        if (board[(startR + dr) * size + (startC + dc)] == val) return false;
+      }
+    }
+    return true;
+  }
+
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
       _selectedIdx = -1;
-      _grid = List.filled(16, 0);
-      if (_currentLevel == 0) {
-        _cages = [0, 0, 1, 1, 2, 0, 3, 4, 2, 2, 3, 4, 5, 5, 6, 4];
-        _cageSums = [9, 4, 7, 3, 9, 4, 4];
-      } else if (_currentLevel == 1) {
-        _cages = [0, 1, 1, 1, 0, 0, 2, 2, 3, 4, 4, 2, 3, 5, 5, 5];
-        _cageSums = [7, 9, 8, 7, 3, 6];
-      } else if (_currentLevel == 2) {
-        _cages = [0, 1, 1, 2, 0, 3, 1, 2, 0, 3, 4, 2, 5, 3, 4, 6];
-        _cageSums = [7, 7, 9, 7, 6, 3, 1];
-      } else if (_currentLevel == 3) {
-        _cages = [0, 1, 1, 2, 0, 0, 1, 2, 3, 4, 5, 2, 3, 4, 5, 6];
-        _cageSums = [8, 8, 6, 5, 5, 4, 4];
-      } else if (_currentLevel == 4) {
-        _cages = [0, 0, 1, 1, 2, 0, 3, 3, 2, 4, 4, 3, 2, 5, 4, 6];
-        _cageSums = [7, 5, 9, 6, 10, 1, 2];
-      } else if (_currentLevel == 5) {
-        _cages = [0, 0, 1, 2, 3, 0, 1, 2, 3, 4, 4, 2, 5, 5, 6, 6];
-        _cageSums = [9, 5, 8, 5, 3, 4, 6];
-      } else if (_currentLevel == 6) {
-        _cages = [0, 0, 0, 1, 2, 3, 3, 1, 2, 4, 4, 5, 2, 6, 6, 5];
-        _cageSums = [8, 3, 9, 7, 3, 7, 3];
-      } else if (_currentLevel == 7) {
-        _cages = [0, 1, 1, 1, 0, 2, 3, 4, 0, 2, 3, 4, 5, 5, 6, 6];
-        _cageSums = [7, 8, 5, 5, 5, 5, 5];
-      } else if (_currentLevel == 8) {
-        _cages = [0, 0, 1, 1, 2, 3, 3, 4, 2, 5, 5, 4, 2, 6, 6, 6];
-        _cageSums = [3, 7, 9, 5, 3, 5, 8];
+      _gameTimer?.cancel();
+      _timeLeft = -1;
+      _timeBonusEarned = false;
+
+      if (_isEndgame) {
+        _generateProceduralLevel();
+        if (!_playDailyMode && _currentLevel >= 30) {
+          _timeLeft = _gridSize == 4 ? 90 : (_gridSize == 6 ? 180 : 300);
+          _timeBonusEarned = true;
+          _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+            if (mounted) {
+              setState(() {
+                if (_timeLeft > 0) {
+                  _timeLeft--;
+                } else {
+                  _timeLeft = 0;
+                  _timeBonusEarned = false;
+                  _gameTimer?.cancel();
+                }
+              });
+            }
+          });
+        }
       } else {
-        _cages = [0, 1, 2, 2, 0, 1, 3, 4, 5, 5, 3, 4, 6, 6, 6, 4];
-        _cageSums = [4, 6, 5, 5, 7, 5, 8];
+        _gridSize = 4;
+        _grid = List.filled(16, 0);
+        _givenCells.clear();
+        if (_currentLevel == 0) {
+          _cages = [0, 0, 1, 1, 2, 0, 3, 4, 2, 2, 3, 4, 5, 5, 6, 4];
+          _cageSums = [9, 4, 7, 3, 9, 4, 4];
+        } else if (_currentLevel == 1) {
+          _cages = [0, 1, 1, 1, 0, 0, 2, 2, 3, 4, 4, 2, 3, 5, 5, 5];
+          _cageSums = [7, 9, 8, 7, 3, 6];
+        } else if (_currentLevel == 2) {
+          _cages = [0, 1, 1, 2, 0, 3, 1, 2, 0, 3, 4, 2, 5, 3, 4, 6];
+          _cageSums = [7, 7, 9, 7, 6, 3, 1];
+        } else if (_currentLevel == 3) {
+          _cages = [0, 1, 1, 2, 0, 0, 1, 2, 3, 4, 5, 2, 3, 4, 5, 6];
+          _cageSums = [8, 8, 6, 5, 5, 4, 4];
+        } else if (_currentLevel == 4) {
+          _cages = [0, 0, 1, 1, 2, 0, 3, 3, 2, 4, 4, 3, 2, 5, 4, 6];
+          _cageSums = [7, 5, 9, 6, 10, 1, 2];
+        } else if (_currentLevel == 5) {
+          _cages = [0, 0, 1, 2, 3, 0, 1, 2, 3, 4, 4, 2, 5, 5, 6, 6];
+          _cageSums = [9, 5, 8, 5, 3, 4, 6];
+        } else if (_currentLevel == 6) {
+          _cages = [0, 0, 0, 1, 2, 3, 3, 1, 2, 4, 4, 5, 2, 6, 6, 5];
+          _cageSums = [8, 3, 9, 7, 3, 7, 3];
+        } else if (_currentLevel == 7) {
+          _cages = [0, 1, 1, 1, 0, 2, 3, 4, 0, 2, 3, 4, 5, 5, 6, 6];
+          _cageSums = [7, 8, 5, 5, 5, 5, 5];
+        } else if (_currentLevel == 8) {
+          _cages = [0, 0, 1, 1, 2, 3, 3, 4, 2, 5, 5, 4, 2, 6, 6, 6];
+          _cageSums = [3, 7, 9, 5, 3, 5, 8];
+        } else {
+          _cages = [0, 1, 2, 2, 0, 1, 3, 4, 5, 5, 3, 4, 6, 6, 6, 4];
+          _cageSums = [4, 6, 5, 5, 7, 5, 8];
+        }
       }
     });
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     final prefs = await SharedPreferences.getInstance();
     int highest = prefs.getInt('beta_level_killersudoku') ?? 0;
     if (_currentLevel + 1 > highest) {
       await prefs.setInt('beta_level_killersudoku', _currentLevel + 1);
     }
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
     setState(() => _isSuccess = true);
   }
 
   void _nextLevel() {
-    if (_currentLevel < 9) {
-      setState(() {
-        _currentLevel++;
-        _loadLevel();
-      });
-    } else {
-      Navigator.pop(context);
-    }
+    setState(() {
+      _currentLevel++;
+      _loadLevel();
+    });
   }
 
   void _checkSolution() {
     bool isValid = true;
-    for (int i = 0; i < 16; i++) {
+    int totalCells = _gridSize * _gridSize;
+    for (int i = 0; i < totalCells; i++) {
       if (_grid[i] == 0) isValid = false;
     }
     if (!isValid) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fill all cells!')));
       return;
     }
-    for (int i = 0; i < 4; i++) {
-      var row = [_grid[i*4], _grid[i*4+1], _grid[i*4+2], _grid[i*4+3]];
-      var col = [_grid[i], _grid[i+4], _grid[i+8], _grid[i+12]];
-      if (row.toSet().length != 4 || col.toSet().length != 4) isValid = false;
+    for (int i = 0; i < _gridSize; i++) {
+      var row = List.generate(_gridSize, (c) => _grid[i * _gridSize + c]);
+      var col = List.generate(_gridSize, (r) => _grid[r * _gridSize + i]);
+      if (row.toSet().length != _gridSize || col.toSet().length != _gridSize) isValid = false;
     }
-    // Check 2x2 boxes
-    for (int r = 0; r < 4; r += 2) {
-      for (int c = 0; c < 4; c += 2) {
-        var box = [
-          _grid[r * 4 + c],
-          _grid[r * 4 + c + 1],
-          _grid[(r + 1) * 4 + c],
-          _grid[(r + 1) * 4 + c + 1]
-        ];
-        if (box.toSet().length != 4) isValid = false;
+    int boxRows = 2;
+    int boxCols = _gridSize == 4 ? 2 : 3;
+    for (int r = 0; r < _gridSize; r += boxRows) {
+      for (int c = 0; c < _gridSize; c += boxCols) {
+        var box = <int>[];
+        for (int dr = 0; dr < boxRows; dr++) {
+          for (int dc = 0; dc < boxCols; dc++) {
+            box.add(_grid[(r + dr) * _gridSize + (c + dc)]);
+          }
+        }
+        if (box.toSet().length != _gridSize) isValid = false;
       }
     }
     Map<int, List<int>> cageVals = {};
-    for (int i = 0; i < 16; i++) {
-      cageVals.putIfAbsent(_cages[i], () => []).add(_grid[i]);
+    for (int i = 0; i < totalCells; i++) {
+      if (_cages[i] >= 0) {
+        cageVals.putIfAbsent(_cages[i], () => []).add(_grid[i]);
+      }
     }
     cageVals.forEach((cageId, vals) {
-      int sum = vals.reduce((a, b) => a + b);
-      if (sum != _cageSums[cageId] || vals.toSet().length != vals.length) {
-        isValid = false;
+      if (cageId < _cageSums.length) {
+        int sum = vals.reduce((a, b) => a + b);
+        if (sum != _cageSums[cageId] || vals.toSet().length != vals.length) {
+          isValid = false;
+        }
       }
     });
     if (isValid) {
       _onLevelCleared();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect solution. Check rows, columns, 2x2 boxes, and cage rules.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect solution. Check rows, columns, subgrids, and cage rules.')));
     }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 111',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showInstructions() {
@@ -188,6 +438,30 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
         title: Text('Killer Sudoku', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
             tooltip: 'Instructions',
@@ -198,9 +472,21 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(child: Text('Level ${_currentLevel + 1}/10', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold))),
+          GestureDetector(
+            onTap: _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                  ],
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -217,21 +503,21 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            'Fill the 4x4 grid with digits 1-4. Cages must sum to the target value without repeating digits.',
+                            'Fill the ${_gridSize}x${_gridSize} grid with digits 1-${_gridSize}. Cages must sum to the target value without repeating digits.',
                             style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 16),
                             RepaintBoundary(
                               child: Container(
-                                width: 280, height: 280,
+                                width: _gridSize == 4 ? 280 : 320, height: _gridSize == 4 ? 280 : 320,
                                 decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
                                 child: GridView.builder(
                                   physics: const NeverScrollableScrollPhysics(),
-                                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 4),
-                                  itemCount: 16,
+                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
+                                  itemCount: _gridSize * _gridSize,
                                   itemBuilder: (context, idx) {
-                                    int cageId = _cages[idx];
+                                    int cageId = (idx < _cages.length) ? _cages[idx] : 0;
                                     Color cageColor = Colors.primaries[cageId % Colors.primaries.length].withOpacity(0.12);
                                     bool isCageStart = _cages.indexOf(cageId) == idx;
                                     return GestureDetector(
@@ -243,20 +529,24 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                                         decoration: BoxDecoration(
                                           color: cageColor,
                                           border: Border(
-                                            top: BorderSide(color: idx >= 4 && _cages[idx - 4] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                            bottom: BorderSide(color: idx < 12 && _cages[idx + 4] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                            left: BorderSide(color: idx % 4 > 0 && _cages[idx - 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                            right: BorderSide(color: idx % 4 < 3 && _cages[idx + 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                            top: BorderSide(color: idx >= _gridSize && _cages[idx - _gridSize] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                            bottom: BorderSide(color: idx < _gridSize * (_gridSize - 1) && _cages[idx + _gridSize] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                            left: BorderSide(color: idx % _gridSize > 0 && _cages[idx - 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                            right: BorderSide(color: idx % _gridSize < _gridSize - 1 && _cages[idx + 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
                                           ),
                                         ),
                                         child: Stack(
                                           children: [
-                                            if (isCageStart)
+                                            if (isCageStart && cageId < _cageSums.length)
                                               Positioned(top: 2, left: 2, child: Text('${_cageSums[cageId]}', style: GoogleFonts.spaceGrotesk(fontSize: 10, fontWeight: FontWeight.bold))),
                                             Center(
                                               child: Text(
                                                 _grid[idx] == 0 ? "" : "${_grid[idx]}",
-                                                style: GoogleFonts.spaceGrotesk(fontSize: 18, fontWeight: FontWeight.bold, color: context.textPrimary),
+                                                style: GoogleFonts.spaceGrotesk(
+                                                  fontSize: _gridSize == 4 ? 18 : 15,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: _givenCells.contains(idx) ? Colors.blue.shade700 : context.textPrimary,
+                                                ),
                                               ),
                                             ),
                                             if (_selectedIdx == idx)
@@ -277,10 +567,10 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                for (int i = 1; i <= 4; i++) ...[
+                                for (int i = 1; i <= _gridSize; i++) ...[
                                   GestureDetector(
                                     onTap: () {
-                                      if (_selectedIdx != -1) {
+                                      if (_selectedIdx != -1 && !_givenCells.contains(_selectedIdx)) {
                                         settingsNotifier.hapticTap();
                                         setState(() {
                                           _grid[_selectedIdx] = i;
@@ -288,21 +578,21 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                                       }
                                     },
                                     child: Container(
-                                      width: 44, height: 44,
-                                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                                      width: _gridSize == 4 ? 44 : (_gridSize == 6 ? 38 : 30), height: _gridSize == 4 ? 44 : (_gridSize == 6 ? 38 : 30),
+                                      margin: const EdgeInsets.symmetric(horizontal: 4),
                                       decoration: BoxDecoration(
                                         color: AppTheme.dustyMauve,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Center(
-                                        child: Text('$i', style: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                                        child: Text('$i', style: GoogleFonts.spaceGrotesk(fontSize: _gridSize == 9 ? 15 : 18, fontWeight: FontWeight.bold, color: Colors.white)),
                                       ),
                                     ),
                                   ),
                                 ],
                                 GestureDetector(
                                   onTap: () {
-                                    if (_selectedIdx != -1) {
+                                    if (_selectedIdx != -1 && !_givenCells.contains(_selectedIdx)) {
                                       settingsNotifier.hapticTap();
                                       setState(() {
                                         _grid[_selectedIdx] = 0;
@@ -310,14 +600,14 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                                     }
                                   },
                                   child: Container(
-                                    width: 44, height: 44,
+                                    width: _gridSize == 9 ? 32 : 44, height: _gridSize == 9 ? 32 : 44,
                                     margin: const EdgeInsets.symmetric(horizontal: 6),
                                     decoration: BoxDecoration(
                                       color: Colors.red.shade800,
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: const Center(
-                                      child: Icon(Icons.clear, color: Colors.white),
+                                      child: Icon(Icons.clear, color: Colors.white, size: 18),
                                     ),
                                   ),
                                 ),
@@ -332,7 +622,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                                 border: Border.all(color: context.textMuted.withAlpha(20)),
                               ),
                               child: Text(
-                                '💡 Rule Details:\n• Sudoku rules: Row, column, and 2x2 boxes must contain 1, 2, 3, 4 without duplicates.\n• Cage sums: Dotted cage values must add up to the corner target number.\n• Cage duplicates: No number can repeat within a single cage.',
+                                '💡 Rule Details:\n• Sudoku rules: Row, column, and boxes must contain digits 1-$_gridSize without duplicates.\n• Cage sums: Dotted cage values must add up to the corner target number.\n• Cage duplicates: No number can repeat within a single cage.',
                                 style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
                               ),
                           ),

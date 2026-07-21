@@ -11,6 +11,8 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import '../../../widgets/buy_hints_dialog.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import '../../../utils/shuffle_manager.dart';
 
 class HueTile {
@@ -67,6 +69,11 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
 
   // Preview mode: shows which tiles are in correct position
   bool _showingPreview = false;
+  List<int> _distractorIndices = [];
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+  int _movesLeft = -1;
 
   @override
   void initState() {
@@ -78,6 +85,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
   @override
   void dispose() {
     _prismTimer?.cancel();
+    _gameTimer?.cancel();
     super.dispose();
   }
 
@@ -117,44 +125,72 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       _cols = 5;
       return;
     }
-    final tier = _levelIndex ~/ 5; // 0-based tier, each tier = 5 levels
+    if (!_isDailyMode && _levelIndex >= 30) {
+      if (_levelIndex >= 80) {
+        int size = 6 + ((_levelIndex - 80) % 5); // Rotates 6x6, 7x7, 8x8, 9x9, 10x10
+        _rows = size;
+        _cols = size;
+      } else if (_levelIndex >= 60 && _levelIndex < 80) {
+        // Stage 4: Progressive grid size
+        int tier = (_levelIndex - 60) ~/ 5;
+        if (tier == 0) {
+          _rows = 8; _cols = 8;
+        } else if (tier == 1) {
+          _rows = 9; _cols = 9;
+        } else if (tier == 2) {
+          _rows = 9; _cols = 10;
+        } else {
+          _rows = 10; _cols = 10;
+        }
+      } else if (_levelIndex >= 45 && _levelIndex < 60) {
+        // Stage 3: Three-color mixing
+        _rows = 7;
+        _cols = 7;
+      } else {
+        // Stage 2: Distractor cards
+        _rows = 6;
+        _cols = 6;
+      }
+      return;
+    }
+    final tier = _levelIndex ~/ 5;
     switch (tier) {
       case 0:
         _rows = 3;
         _cols = 3;
-        break; // level 1-5
+        break;
       case 1:
         _rows = 4;
         _cols = 4;
-        break; // level 6-10
+        break;
       case 2:
         _rows = 5;
         _cols = 5;
-        break; // level 11-15
+        break;
       case 3:
         _rows = 6;
         _cols = 6;
-        break; // level 16-20
+        break;
       case 4:
         _rows = 7;
         _cols = 7;
-        break; // level 21-25
+        break;
       case 5:
         _rows = 8;
         _cols = 8;
-        break; // level 26-30
+        break;
       case 6:
         _rows = 9;
         _cols = 9;
-        break; // level 31-35
+        break;
       case 7:
         _rows = 9;
         _cols = 10;
-        break; // level 36-40
+        break;
       case 8:
         _rows = 10;
         _cols = 10;
-        break; // level 41-45
+        break;
       default:
         final extraTiers = tier - 9;
         _rows = (10 + extraTiers ~/ 2).clamp(10, 12);
@@ -169,6 +205,9 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         (r == _rows - 1 && c == 0) ||
         (r == _rows - 1 && c == _cols - 1)) {
       return true;
+    }
+    if (!_isDailyMode && _levelIndex >= 30) {
+      return false;
     }
     if (_rows >= 6 && _cols >= 6) {
       final midR = _rows ~/ 2;
@@ -189,8 +228,15 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
   }
 
   void _generateSpectrum() {
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+    _movesLeft = -1;
+
     _setupGridDimensions();
-    final rand = _isDailyMode ? Random(_levelIndex * 12345) : Random();
+    final rand = (_isDailyMode || _levelIndex < 30)
+        ? Random()
+        : RotationEngine.getDeterminism('spectrum', _levelIndex);
 
     if (_isDailyMode && _dailyModifierType == 'monochrome') {
       _cTL = const Color(0xFFFFFFFF);
@@ -208,6 +254,28 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       _cTR = HSLColor.fromAHSL(1.0, h2, 0.80, 0.55).toColor();
       _cBL = HSLColor.fromAHSL(1.0, h3, 0.80, 0.55).toColor();
       _cBR = HSLColor.fromAHSL(1.0, h4, 0.80, 0.55).toColor();
+
+      // Stage 3: Three-color mixing (L45-59)
+      if (!_isDailyMode && _levelIndex >= 45 && _levelIndex < 60) {
+        _cBR = Color.lerp(_cBL, _cTR, 0.5)!;
+      } else if (!_isDailyMode && _levelIndex >= 80) {
+        int combo = (_levelIndex - 80) % 4;
+        if (combo == 2 || combo == 3) {
+          _cBR = Color.lerp(_cBL, _cTR, 0.5)!;
+        }
+      }
+    }
+
+    int distractorCount = 0;
+    if (!_isDailyMode && _levelIndex >= 30) {
+      if (_levelIndex >= 30 && _levelIndex < 45) {
+        distractorCount = 2 + (_levelIndex - 30) ~/ 4;
+      } else if (_levelIndex >= 60 && _levelIndex < 80) {
+        distractorCount = 3 + (_levelIndex - 60) ~/ 5;
+      } else if (_levelIndex >= 80) {
+        int combo = (_levelIndex - 80) % 4;
+        if (combo == 1 || combo == 3) distractorCount = 3;
+      }
     }
 
     // Create correct list of tiles
@@ -233,6 +301,31 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
             color: cellColor,
             isLocked: isLocked,
           ),
+        );
+      }
+    }
+
+    // Apply distractors if needed
+    _distractorIndices = [];
+    if (distractorCount > 0) {
+      final List<int> candidates = [];
+      for (int i = 0; i < allTiles.length; i++) {
+        if (!allTiles[i].isLocked) {
+          candidates.add(i);
+        }
+      }
+      candidates.shuffle(rand);
+      _distractorIndices = candidates.take(distractorCount).toList();
+      for (int idx in _distractorIndices) {
+        double dHue = (rand.nextDouble() * 360.0);
+        Color distractorColor = HSLColor.fromAHSL(1.0, dHue, 0.95, 0.45).toColor();
+        final original = allTiles[idx];
+        allTiles[idx] = HueTile(
+          id: original.id,
+          correctRow: original.correctRow,
+          correctCol: original.correctCol,
+          color: distractorColor,
+          isLocked: original.isLocked,
         );
       }
     }
@@ -288,10 +381,79 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     _selectedCol = null;
     _won = false;
 
+    if (!_isDailyMode && _levelIndex >= 30) {
+      _movesLeft = 15 + (_rows * _cols ~/ 3);
+      _timeLeft = 40 + (_rows * _cols ~/ 2);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+
     if (!_isInitializing) {
       _saveMidLevelState();
     }
     _startPrismTimer();
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number:', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 100',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('hue')),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _generateSpectrum();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _saveMidLevelState() async {
@@ -464,8 +626,23 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         _selectedRow = null;
         _selectedCol = null;
 
+        if (_movesLeft > 0) {
+          _movesLeft--;
+        }
+
         _checkWinCondition();
         _saveMidLevelState();
+
+        if (_movesLeft == 0 && !_won) {
+          AudioManager.playFail();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('No swaps left! Resetting...', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          _generateSpectrum();
+        }
       }
     });
   }
@@ -491,11 +668,23 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         });
         AudioManager.playSuccess();
       } else {
+        _gameTimer?.cancel();
         _won = true;
         _showingPreview = false;
         AudioManager.playSuccess();
         _savePersistedLevel(_levelIndex + 1);
         _clearMidLevelState();
+
+        if (_timeLeft > 0 && _timeBonusEarned) {
+          PointManager.addPoints(5);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+              backgroundColor: Colors.amber,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
       }
     }
   }
@@ -645,6 +834,30 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'hue', 'Spectrum'),
@@ -689,16 +902,28 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            _isTutorialMode
-                                ? 'Tutorial  •  ${_rows}×${_cols}'
-                                : _isDailyMode
-                                    ? 'Daily Challenge  •  ${_rows}×${_cols}'
-                                    : 'Level ${_levelIndex + 1}  •  ${_rows}×${_cols}',
-                            style: AppTheme.numberStyle(
-                              fontSize: context.scale(14),
-                              fontWeight: FontWeight.bold,
-                              color: context.textPrimary,
+                          GestureDetector(
+                            onTap: (_isTutorialMode || _isDailyMode) ? null : _showJumpToLevelDialog,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _isTutorialMode
+                                      ? 'Tutorial  •  ${_rows}×${_cols}'
+                                      : _isDailyMode
+                                          ? 'Daily Challenge  •  ${_rows}×${_cols}'
+                                          : 'Level ${_levelIndex + 1}  •  ${_rows}×${_cols}',
+                                  style: AppTheme.numberStyle(
+                                    fontSize: context.scale(14),
+                                    fontWeight: FontWeight.bold,
+                                    color: context.textPrimary,
+                                  ),
+                                ),
+                                if (!_isTutorialMode && !_isDailyMode) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit, size: 12, color: context.textPrimary),
+                                ],
+                              ],
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -707,7 +932,9 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                                 ? (_tutorialCompleted ? '✓ Solved!' : 'Drag/Swap tiles to order the spectrum')
                                 : _won
                                     ? '✓ Solved!'
-                                    : 'Swap tiles · tap 👁 to preview',
+                                    : (_movesLeft >= 0
+                                        ? 'Swaps left: $_movesLeft · tap 👁 to preview'
+                                        : 'Swap tiles · tap 👁 to preview'),
                             style: GoogleFonts.outfit(
                               fontSize: context.scale(11),
                               color: (_won || _tutorialCompleted)

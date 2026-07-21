@@ -1,5 +1,8 @@
 import 'dart:math';
+import 'dart:async';
 import 'dart:convert';
+import '../../../utils/rotation_engine.dart';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -45,6 +48,54 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   double _dailyModifierRadius = 2.0;
   String _dailyModifierName = '';
   String _dailyModifierDesc = '';
+
+  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  bool get _isLimitedFlagsActive {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 45) {
+      if (_levelIndex < 60) return true;
+      if (_levelIndex >= 90 && (_levelIndex - 90) % 3 == 0) return true;
+    }
+    return false;
+  }
+  bool get _isHiddenMinesActive {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 60) {
+      if (_levelIndex < 75) return true;
+      if (_levelIndex >= 90 && (_levelIndex - 90) % 3 == 1) return true;
+    }
+    return false;
+  }
+  bool get _isFogActive {
+    if (_playDailyMode) {
+      return _dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2';
+    }
+    if (_levelIndex >= 75) {
+      if (_levelIndex < 90) return true;
+      if (_levelIndex >= 90 && (_levelIndex - 90) % 3 == 2) return true;
+    }
+    return false;
+  }
+
+  int _countFlags() {
+    int count = 0;
+    for (int r = 0; r < _gridSize; r++) {
+      for (int c = 0; c < _gridSize; c++) {
+        if (_flagged[r][c]) count++;
+      }
+    }
+    return count;
+  }
+
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -190,11 +241,33 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   }
 
   void _loadLevel() {
-    // Sizing difficulty scaling:
-    // Continuous formula from 5x5 to 13x13 grid sizes.
-    _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
-    final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
-    _mineCount = (3 + (_levelIndex * 1.2).floor()).clamp(3, maxMines.floor());
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
+    if (_isEndgame) {
+      if (_levelIndex >= 90) {
+        _gridSize = 8 + ((_levelIndex - 90) % 6);
+        final double maxMines = ((_gridSize * _gridSize) - 9) * 0.28;
+        _mineCount = (_gridSize * _gridSize * 0.2).floor().clamp(10, maxMines.floor());
+      } else if (_levelIndex >= 75) {
+        _gridSize = 11;
+        _mineCount = 21 + ((_levelIndex - 75) ~/ 3);
+      } else if (_levelIndex >= 60) {
+        _gridSize = 10;
+        _mineCount = 16 + ((_levelIndex - 60) ~/ 3);
+      } else if (_levelIndex >= 45) {
+        _gridSize = 9;
+        _mineCount = 12 + ((_levelIndex - 45) ~/ 5);
+      } else {
+        _gridSize = 8;
+        _mineCount = 10 + ((_levelIndex - 30) ~/ 7);
+      }
+    } else {
+      _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
+      final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
+      _mineCount = (3 + (_levelIndex * 1.2).floor()).clamp(3, maxMines.floor());
+    }
 
     _mines = List.generate(_gridSize, (_) => List.filled(_gridSize, false));
     _revealed = List.generate(_gridSize, (_) => List.filled(_gridSize, false));
@@ -204,12 +277,82 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _won = false;
     _lost = false;
     _message = '';
+
+    if (_isEndgame) {
+      _timeLeft = 35 + (_gridSize * 9);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+  }
+
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_levelIndex + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 121',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('minesweeper')),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _levelIndex = val - 1;
+                  _loadLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   bool _isCorner(int r, int c) => (r == 0 || r == _gridSize - 1) && (c == 0 || c == _gridSize - 1);
 
   void _generateMines(int firstRow, int firstCol) {
-    final rand = Random();
+    final rand = _playDailyMode
+        ? Random()
+        : RotationEngine.getDeterminism('minesweeper', _levelIndex);
     int currentMineCount = _mineCount;
     final isHiddenRule = _playDailyMode && _dailyModifierType == 'hidden_rule';
     if (isHiddenRule) {
@@ -442,6 +585,19 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
+    _gameTimer?.cancel();
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
     if (widget.dailyLevelIndex != null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(PrefsKeys.gameLevel('minesweeper'), lvl + 1);
@@ -451,7 +607,6 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       setState(() {
         _hintCount = newCount;
       });
-      
     }
     await _clearNormalState();
   }
@@ -534,8 +689,16 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
 
   void _toggleFlag(int r, int c) {
     if (_revealed[r][c]) return;
+    final currentlyFlagged = _countFlags();
+    if (!_flagged[r][c] && _isLimitedFlagsActive && currentlyFlagged >= _mineCount) {
+      setState(() {
+        _message = "No more flags left! Unflag a cell first.";
+      });
+      return;
+    }
     setState(() {
       _flagged[r][c] = !_flagged[r][c];
+      _message = '';
       AudioManager.playClick();
 
       if (_playDailyMode && _dailyModifierType == 'blind') {
@@ -775,19 +938,55 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
               color: context.textMuted,
             ),
           ],
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                _isTutorialMode
-                    ? 'Tutorial'
-                    : _playDailyMode 
-                        ? 'Daily' 
-                        : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
-                style: AppTheme.numberStyle(
-                  color: accentColor,
-                  fontSize: context.scale(13),
-                  fontWeight: FontWeight.bold,
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          GestureDetector(
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode
+                          ? 'Tutorial'
+                          : _playDailyMode 
+                              ? 'Daily' 
+                              : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
+                      style: AppTheme.numberStyle(
+                        color: accentColor,
+                        fontSize: context.scale(13),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!_isTutorialMode && !_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.edit, size: 12, color: accentColor),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -862,14 +1061,15 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                     _buildStatsBadge(
                       icon: Icons.dangerous_outlined,
                       label: 'Mines',
-                      value: '$_mineCount',
+                      value: _isHiddenMinesActive ? '?' : '$_mineCount',
                       color: accentColor,
                     ),
                     _buildStatsBadge(
                       icon: Icons.flag_rounded,
                       label: 'Flags',
-                      value:
-                          '${_flagged.expand((f) => f).where((f) => f).length}',
+                      value: _isHiddenMinesActive
+                          ? '?'
+                          : '${_flagged.expand((f) => f).where((f) => f).length}',
                       color: Colors.redAccent,
                     ),
                   ],
@@ -890,14 +1090,14 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                   physics: const BouncingScrollPhysics(),
                   child: Center(
                     child: GestureDetector(
-                      onPanStart: _playDailyMode && (_dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2')
+                      onPanStart: _isFogActive
                           ? (_) {}
                           : null,
-                      onPanUpdate: _playDailyMode && (_dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2')
+                      onPanUpdate: _isFogActive
                           ? (_) {}
                           : null,
                       child: FogOverlay(
-                        enabled: _playDailyMode && (_dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2'),
+                        enabled: _isFogActive,
                         radius: (cellSize + 4) * _dailyModifierRadius * 1.35,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,

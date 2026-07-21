@@ -48,4 +48,5 @@ const List<GameInfo> kAllGames = [
   GameInfo(id:'masyu', name:'Pearl Loop', description:'Draw a loop through black and white pearls', emoji:'⭕', routeName:'/masyu'),
   GameInfo(id:'bridges', name:'Bridges', description:'Connect islands with bridges', emoji:'🌉', routeName:'/bridges'),
   GameInfo(id:'sumstrike', name:'Sum Strike', description:'Strike out numbers to match row and column sums', emoji:'➕', routeName:'/sumstrike'),
+  GameInfo(id:'killersudoku', name:'Killer Sudoku', description:'Fill grid with cage sums and Sudoku rules', emoji:'🔢', routeName:'/killersudoku'),
 ];

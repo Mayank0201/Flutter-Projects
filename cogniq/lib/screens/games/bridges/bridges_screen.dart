@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
+import '../../../utils/point_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +10,7 @@ import '../../../theme/settings_manager.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
+import '../../../utils/rotation_engine.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
@@ -50,6 +53,35 @@ class _BridgesScreenState extends State<BridgesScreen> {
   int _dragStartIsland = -1;
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
 
+  bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
+  bool get _isHiddenIslandsActive {
+    if (_playDailyMode) return false;
+    if (_currentLevel >= 45) {
+      if (_currentLevel < 75) return true;
+      if (_currentLevel >= 90 && (_currentLevel - 90) % 3 == 1) return true;
+    }
+    return false;
+  }
+  bool get _isFogActive {
+    if (_playDailyMode) return _dailyModifierType == 'fog';
+    if (_currentLevel >= 75) {
+      if (_currentLevel < 90) return true;
+      int combo = (_currentLevel - 90) % 3;
+      return combo == 2;
+    }
+    return false;
+  }
+  final Set<int> _hiddenIslands = {};
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -85,11 +117,58 @@ class _BridgesScreenState extends State<BridgesScreen> {
     }
   }
 
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 111',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _setupLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _setupLevel() {
-    if (!_playDailyMode && _currentLevel >= kBridgesLevels.length) {
-      return;
-    }
-    final level = kBridgesLevels[_playDailyMode ? (_currentLevel % kBridgesLevels.length) : _currentLevel];
+    final level = kBridgesLevels[_currentLevel % kBridgesLevels.length];
     _gridSize = level.gridSize;
     _islands = List.from(level.islands);
     _bridgeCounts.clear();
@@ -99,6 +178,55 @@ class _BridgesScreenState extends State<BridgesScreen> {
     _dragPositionNotifier.value = null;
     _isHintShowing = false;
     _hintIdx = -1;
+
+    _hiddenIslands.clear();
+    if (_isHiddenIslandsActive) {
+      final rng = RotationEngine.getDeterminism('bridges', _currentLevel);
+      final List<int> islandIndices = [];
+      for (int i = 0; i < _gridSize * _gridSize; i++) {
+        if (_islands[i] > 0) {
+          islandIndices.add(i);
+        }
+      }
+      double hideRatio = 0.0;
+      if (_currentLevel >= 45 && _currentLevel < 60) {
+        hideRatio = 0.25;
+      } else if (_currentLevel >= 60 && _currentLevel < 75) {
+        hideRatio = 0.40;
+      } else if (_currentLevel >= 75 && _currentLevel < 90) {
+        hideRatio = 0.60;
+      } else if (_currentLevel >= 90) {
+        hideRatio = 0.80;
+      }
+      final int countToHide = (islandIndices.length * hideRatio).round();
+      if (countToHide > 0) {
+        islandIndices.shuffle(rng);
+        for (int i = 0; i < countToHide; i++) {
+          _hiddenIslands.add(islandIndices[i]);
+        }
+      }
+    }
+
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+    if (_isEndgame) {
+      _timeLeft = 45 + (_gridSize * 10);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
   }
 
   List<List<int>> _getConnections() {
@@ -280,17 +408,6 @@ class _BridgesScreenState extends State<BridgesScreen> {
   void _onPanUpdate(DragUpdateDetails d, double cellSpacing, double origin) {
     if (_isSuccess || _dragStartIsland == -1) return;
     _dragPositionNotifier.value = d.localPosition;
-
-    int idx = _getIslandAt(d.localPosition, cellSpacing, origin);
-    if (idx != -1 && idx != _dragStartIsland) {
-      if (_toggleBridge(_dragStartIsland, idx)) {
-        setState(() {
-          _dragStartIsland = idx;
-          _selectedIsland = idx;
-          _dragPositionNotifier.value = _islandCenter(idx, cellSpacing, origin);
-        });
-      }
-    }
   }
 
   void _onPanEnd(DragEndDetails d) {
@@ -301,9 +418,18 @@ class _BridgesScreenState extends State<BridgesScreen> {
   void _onTapUp(TapUpDetails d, double cellSpacing, double origin) {
     if (_isSuccess) return;
     int idx = _getIslandAt(d.localPosition, cellSpacing, origin);
-    if (idx != -1) {
+
+    if (_dragStartIsland != -1 && idx != -1 && idx != _dragStartIsland && _islands[idx] > 0) {
+      if (_isAdjacent(_dragStartIsland, idx)) {
+        _toggleBridge(_dragStartIsland, idx);
+      }
+      _dragStartIsland = -1;
+      _dragPositionNotifier.value = null;
+      return;
+    }
+
+    if (idx != -1 && _islands[idx] > 0) {
       if (_selectedIsland == -1) {
-        settingsNotifier.hapticTap();
         setState(() {
           _selectedIsland = idx;
         });
@@ -312,15 +438,12 @@ class _BridgesScreenState extends State<BridgesScreen> {
           _selectedIsland = -1;
         });
       } else {
-        if (_toggleBridge(_selectedIsland, idx)) {
-          setState(() {
-            _selectedIsland = -1;
-          });
-        } else {
-          setState(() {
-            _selectedIsland = idx;
-          });
+        if (_isAdjacent(_selectedIsland, idx)) {
+          _toggleBridge(_selectedIsland, idx);
         }
+        setState(() {
+          _selectedIsland = -1;
+        });
       }
     } else {
       setState(() {
@@ -404,11 +527,24 @@ class _BridgesScreenState extends State<BridgesScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     final prefs = await SharedPreferences.getInstance();
     if (!_playDailyMode) {
       int highest = prefs.getInt('beta_level_bridges') ?? 0;
       if (_currentLevel + 1 > highest) {
         await prefs.setInt('beta_level_bridges', _currentLevel + 1);
+      }
+    }
+    if (_timeLeft > 0 && _timeBonusEarned) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     }
     setState(() => _isSuccess = true);
@@ -805,16 +941,52 @@ class _BridgesScreenState extends State<BridgesScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'bridges', 'Bridges'),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16, left: 8),
-            child: Center(
-              child: Text(
-                _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
+          GestureDetector(
+            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16, left: 8),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
+                      style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    if (!_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -854,7 +1026,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                               border: Border.all(color: context.textMuted.withAlpha(30)),
                             ),
                             child: FogOverlay(
-                              enabled: _playDailyMode && _dailyModifierType == 'fog',
+                              enabled: _isFogActive,
                               radius: cellSpacing * _dailyRadius,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
@@ -876,6 +1048,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                                       dragStartIsland: _dragStartIsland,
                                       hintIdx: _hintIdx,
                                       onGetBridges: _getCurrentBridges,
+                                      hiddenIslands: _hiddenIslands,
                                     ),
                                   ),
                                 ),
@@ -944,6 +1117,7 @@ class _BridgesPainter extends CustomPainter {
   final int dragStartIsland;
   final int hintIdx;
   final int Function(int) onGetBridges;
+  final Set<int> hiddenIslands;
 
   _BridgesPainter({
     required this.gridSize,
@@ -956,6 +1130,7 @@ class _BridgesPainter extends CustomPainter {
     required this.dragStartIsland,
     required this.hintIdx,
     required this.onGetBridges,
+    required this.hiddenIslands,
   }) : super(repaint: dragPosition);
 
   @override
@@ -1067,9 +1242,10 @@ class _BridgesPainter extends CustomPainter {
         canvas.drawCircle(center, radius, islandBorderPaint);
 
         // Draw island target number
+        final displayClue = hiddenIslands.contains(i) ? '?' : '$clue';
         final tp = TextPainter(
           text: TextSpan(
-            text: '$clue',
+            text: displayClue,
             style: GoogleFonts.spaceGrotesk(
               fontSize: radius * 1.1,
               fontWeight: FontWeight.bold,
@@ -1098,7 +1274,8 @@ class _BridgesPainter extends CustomPainter {
       old.origin != origin ||
       old.selectedIsland != selectedIsland ||
       old.dragStartIsland != dragStartIsland ||
-      old.hintIdx != hintIdx;
+      old.hintIdx != hintIdx ||
+      old.hiddenIslands != hiddenIslands;
 }
 
 class _SolverIsland {

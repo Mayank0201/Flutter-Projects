@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../utils/point_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -12,6 +14,7 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/rotation_engine.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import 'masyu_levels.dart';
 
@@ -40,9 +43,13 @@ class _MasyuScreenState extends State<MasyuScreen> {
   late List<int> _grid; // 0: empty, 1: white, 2: black
   Map<String, bool> _activeEdges = {}; // Key: "u-v" (u < v), Value: true/false
   Map<String, bool> _solutionEdges = {}; // Cached correct solution edges for hints
+  bool _solveAttempted = false;
   int _hintCount = 1;
   bool _isHintShowing = false;
   int _hintIdx = -1;
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
 
   // Drag loop variables
   int _dragStartCell = -1;
@@ -55,6 +62,13 @@ class _MasyuScreenState extends State<MasyuScreen> {
   void initState() {
     super.initState();
     _loadProgressAndLevel();
+  }
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    _dragPositionNotifier.dispose();
+    super.dispose();
   }
 
   Future<void> _loadProgressAndLevel() async {
@@ -86,13 +100,64 @@ class _MasyuScreenState extends State<MasyuScreen> {
     }
   }
 
+  void _showJumpToLevelDialog() {
+    final controller = TextEditingController(text: '${_currentLevel + 1}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.bgCard,
+        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: context.textPrimary),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: 'e.g. 50',
+                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1) {
+                Navigator.pop(context);
+                setState(() {
+                  _currentLevel = val - 1;
+                  _setupLevel();
+                });
+              }
+            },
+            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _setupLevel() {
-    if (!_playDailyMode && _currentLevel >= _kLevels.length) {
+    if (!_playDailyMode && _currentLevel >= 500) {
       return;
     }
-    final level = _kLevels[_playDailyMode ? (_currentLevel % _kLevels.length) : _currentLevel];
-    _gridSize = level.gridSize;
-    _grid = List.from(level.pearls);
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
     _activeEdges.clear();
     _isSuccess = false;
     _dragStartCell = -1;
@@ -100,6 +165,304 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _dragPositionNotifier.value = null;
     _isHintShowing = false;
     _hintIdx = -1;
+    _solutionEdges = {};
+    _solveAttempted = false;
+
+    if (!_playDailyMode && _currentLevel >= 30) {
+      _generateEndgameLevel(_currentLevel);
+    } else {
+      final level = _kLevels[_playDailyMode ? (_currentLevel % _kLevels.length) : _currentLevel];
+      _gridSize = level.gridSize;
+      _grid = List.from(level.pearls);
+    }
+
+    if (!_playDailyMode && _currentLevel >= 30) {
+      _timeLeft = 30 + (_gridSize * 15);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+            }
+          });
+        }
+      });
+    }
+  }
+
+  void _generateEndgameLevel(int levelIndex) {
+    final rand = RotationEngine.getDeterminism('masyu', levelIndex);
+    if (levelIndex >= 90) {
+      _gridSize = 5 + ((levelIndex - 90) % 5);
+    } else if (levelIndex >= 75) {
+      _gridSize = 8;
+    } else if (levelIndex >= 60) {
+      _gridSize = 7;
+    } else if (levelIndex >= 45) {
+      _gridSize = 6;
+    } else {
+      _gridSize = 5;
+    }
+    final total = _gridSize * _gridSize;
+    _grid = List.filled(total, 0);
+
+    bool isStraight(int a, int b, int c) {
+      int rA = a ~/ _gridSize, cA = a % _gridSize;
+      int rB = b ~/ _gridSize, cB = b % _gridSize;
+      int rC = c ~/ _gridSize, cC = c % _gridSize;
+      return (rA == rB && rB == rC) || (cA == cB && cB == cC);
+    }
+
+    for (int attempt = 0; attempt < 500; attempt++) {
+      final loop = _generateRandomLoop(_gridSize, rand);
+      if (loop == null) continue;
+
+      final candidates = <int>[];
+      final pearlTypes = <int, int>{};
+      final K = loop.length;
+
+      for (int i = 0; i < K; i++) {
+        int prev = loop[(i - 1 + K) % K];
+        int curr = loop[i];
+        int next = loop[(i + 1) % K];
+        if (isStraight(prev, curr, next)) {
+          pearlTypes[curr] = 1;
+        } else {
+          pearlTypes[curr] = 2;
+        }
+        candidates.add(curr);
+      }
+
+      candidates.shuffle(rand);
+
+      double decayVal = RotationEngine.getDecayValue(
+        level: levelIndex - 30,
+        start: 0.45,
+        floor: 0.22,
+        rate: 60.0,
+      );
+      int targetCount = (total * decayVal).round();
+      if (targetCount < _gridSize + 1) targetCount = _gridSize + 1;
+      if (targetCount > candidates.length) targetCount = candidates.length;
+
+      double blackRatio = 0.35 + (0.25 * ((levelIndex - 30) / (levelIndex - 30 + 100)));
+      if (blackRatio > 0.65) blackRatio = 0.65;
+
+      final selectedGrid = List.filled(total, 0);
+      int placed = 0;
+      int maxBlacks = (targetCount * blackRatio).round();
+      int placedBlacks = 0;
+
+      for (final cell in candidates) {
+        if (placed >= targetCount) break;
+        int type = pearlTypes[cell]!;
+        if (type == 2 && placedBlacks >= maxBlacks) continue;
+        selectedGrid[cell] = type;
+        if (type == 2) placedBlacks++;
+        placed++;
+      }
+
+      for (final cell in candidates) {
+        if (placed >= targetCount) break;
+        if (selectedGrid[cell] == 0) {
+          int type = pearlTypes[cell]!;
+          selectedGrid[cell] = type;
+          placed++;
+        }
+      }
+
+      if (_countMasyuSolutions(selectedGrid, _gridSize, 2) == 1) {
+        _grid = selectedGrid;
+        return;
+      }
+    }
+
+    _gridSize = 5;
+    _grid = [0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 0, 0, 0];
+  }
+
+  List<int>? _generateRandomLoop(int gridSize, Random rand) {
+    final totalCells = gridSize * gridSize;
+    final visited = List.filled(totalCells, false);
+    final startCell = rand.nextInt(totalCells);
+    visited[startCell] = true;
+
+    List<int> getNeighbors(int idx) {
+      final r = idx ~/ gridSize;
+      final c = idx % gridSize;
+      final res = <int>[];
+      if (r > 0) res.add(idx - gridSize);
+      if (r < gridSize - 1) res.add(idx + gridSize);
+      if (c > 0) res.add(idx - 1);
+      if (c < gridSize - 1) res.add(idx + 1);
+      return res;
+    }
+
+    List<int>? cycle;
+
+    bool dfs(int curr, List<int> path) {
+      if (path.length >= 6) {
+        final startNeighbors = getNeighbors(startCell);
+        if (startNeighbors.contains(curr)) {
+          if (rand.nextDouble() < 0.15) {
+            cycle = List.from(path);
+            return true;
+          }
+        }
+      }
+
+      final neighbors = getNeighbors(curr)..shuffle(rand);
+      for (final next in neighbors) {
+        if (next == startCell) continue;
+        if (!visited[next]) {
+          visited[next] = true;
+          path.add(next);
+          if (dfs(next, path)) return true;
+          path.removeLast();
+          visited[next] = false;
+        }
+      }
+      return false;
+    }
+
+    for (int attempt = 0; attempt < 200; attempt++) {
+      visited.fillRange(0, totalCells, false);
+      visited[startCell] = true;
+      cycle = null;
+      if (dfs(startCell, [startCell])) {
+        return cycle;
+      }
+    }
+    return null;
+  }
+
+  int _countMasyuSolutions(List<int> grid, int gridSize, int maxSolutions) {
+    int startCell = -1;
+    for (int i = 0; i < grid.length; i++) {
+      if (grid[i] > 0) {
+        startCell = i;
+        break;
+      }
+    }
+    if (startCell == -1) return 0;
+
+    final totalCells = gridSize * gridSize;
+
+    List<int> getNeighbors(int idx) {
+      final r = idx ~/ gridSize;
+      final c = idx % gridSize;
+      final res = <int>[];
+      if (r > 0) res.add(idx - gridSize);
+      if (r < gridSize - 1) res.add(idx + gridSize);
+      if (c > 0) res.add(idx - 1);
+      if (c < gridSize - 1) res.add(idx + 1);
+      return res;
+    }
+
+    bool isStraight(int a, int b, int c) {
+      int rA = a ~/ gridSize, cA = a % gridSize;
+      int rB = b ~/ gridSize, cB = b % gridSize;
+      int rC = c ~/ gridSize, cC = c % gridSize;
+      return (rA == rB && rB == rC) || (cA == cB && cB == cC);
+    }
+
+    bool isTurn(int a, int b, int c) {
+      return !isStraight(a, b, c);
+    }
+
+    bool validateLoop(List<int> loop) {
+      final K = loop.length;
+      final loopSet = Set<int>.from(loop);
+      for (int i = 0; i < grid.length; i++) {
+        if (grid[i] > 0 && !loopSet.contains(i)) return false;
+      }
+
+      for (int j = 0; j < K; j++) {
+        int idx = loop[j];
+        int pearl = grid[idx];
+        if (pearl == 0) continue;
+
+        int prev = loop[(j - 1 + K) % K];
+        int next = loop[(j + 1) % K];
+        int prevPrev = loop[(j - 2 + K) % K];
+        int nextNext = loop[(j + 2) % K];
+
+        if (pearl == 1) {
+          if (!isStraight(prev, idx, next)) return false;
+          bool prevTurns = isTurn(prevPrev, prev, idx);
+          bool nextTurns = isTurn(idx, next, nextNext);
+          if (!prevTurns && !nextTurns) return false;
+        } else if (pearl == 2) {
+          if (!isTurn(prev, idx, next)) return false;
+          bool prevStraight = isStraight(prevPrev, prev, idx);
+          bool nextStraight = isStraight(idx, next, nextNext);
+          if (!prevStraight || !nextStraight) return false;
+        }
+      }
+      return true;
+    }
+
+    int solutionsCount = 0;
+    final visited = List.filled(totalCells, false);
+
+    bool dfs(int curr, List<int> path) {
+      if (path.length >= 4) {
+        final startNeighbors = getNeighbors(startCell);
+        if (startNeighbors.contains(curr)) {
+          if (validateLoop(path)) {
+            solutionsCount++;
+            if (solutionsCount >= maxSolutions) return true;
+          }
+        }
+      }
+
+      final neighbors = getNeighbors(curr);
+      for (final next in neighbors) {
+        if (next == startCell) continue;
+        if (!visited[next]) {
+          if (path.length >= 2) {
+            int prevIdx = path[path.length - 2];
+            int pearlIdx = path[path.length - 1];
+            int pearlType = grid[pearlIdx];
+            if (pearlType == 1) {
+              if (!isStraight(prevIdx, pearlIdx, next)) continue;
+            } else if (pearlType == 2) {
+              if (!isTurn(prevIdx, pearlIdx, next)) continue;
+            }
+          }
+
+          if (path.length >= 3) {
+            int prevIdx = path[path.length - 2];
+            int pearlIdx = path[path.length - 1];
+            if (grid[prevIdx] == 2) {
+              if (!isStraight(prevIdx, pearlIdx, next)) continue;
+            }
+          }
+
+          visited[next] = true;
+          path.add(next);
+          if (dfs(next, path)) return true;
+          path.removeLast();
+          visited[next] = false;
+        }
+      }
+      return false;
+    }
+
+    visited[startCell] = true;
+    dfs(startCell, [startCell]);
+
+    return solutionsCount;
+  }
+
+  void _ensureSolution() {
+    if (_solveAttempted) return;
+    _solveAttempted = true;
     _solutionEdges = _solveMasyu() ?? {};
   }
 
@@ -512,6 +875,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    _gameTimer?.cancel();
     final prefs = await SharedPreferences.getInstance();
     if (!_playDailyMode) {
       int highest = prefs.getInt('beta_level_masyu') ?? 0;
@@ -519,6 +883,20 @@ class _MasyuScreenState extends State<MasyuScreen> {
         await prefs.setInt('beta_level_masyu', _currentLevel + 1);
       }
     }
+    
+    if (_timeBonusEarned && _timeLeft > 0) {
+      await PointManager.addPoints(5);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speed Bonus! Earned +5 Points!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.black)),
+            backgroundColor: Colors.amber,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+
     setState(() => _isSuccess = true);
   }
 
@@ -533,6 +911,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   void _showHint() {
+    _ensureSolution();
     if (_solutionEdges.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -753,16 +1132,52 @@ class _MasyuScreenState extends State<MasyuScreen> {
                   }
                 : null,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16, left: 8),
-            child: Center(
-              child: Text(
-                _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
+          GestureDetector(
+            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16, left: 8),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
+                      style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    if (!_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
