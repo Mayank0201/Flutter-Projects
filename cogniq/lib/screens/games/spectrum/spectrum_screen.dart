@@ -129,9 +129,8 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     }
     if (!_isDailyMode && _levelIndex >= 30) {
       if (_levelIndex >= 80) {
-        int size = 6 + ((_levelIndex - 80) % 5); // Rotates 6x6, 7x7, 8x8, 9x9, 10x10
-        _rows = size;
-        _cols = size;
+        _rows = 10;
+        _cols = 10;
       } else if (_levelIndex >= 60 && _levelIndex < 80) {
         // Stage 4: Progressive grid size
         int tier = (_levelIndex - 60) ~/ 5;
@@ -946,7 +945,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                                 ),
                                 if (!_isTutorialMode && !_isDailyMode) ...[
                                   const SizedBox(width: 4),
-                                  Icon(Icons.edit, size: 12, color: context.textPrimary),
+                                  Icon(null, size: 12, color: context.textPrimary),
                                 ],
                               ],
                             ),
@@ -1061,7 +1060,8 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                                   height: cellW - 2,
                                   margin: const EdgeInsets.all(1),
                                   decoration: BoxDecoration(
-                                    color: (_isDailyMode && _dailyModifierType == 'prism')
+                                    color: ((_isDailyMode && _dailyModifierType == 'prism') ||
+                                            (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('prism')))
                                         ? (() {
                                             final hsl = HSLColor.fromColor(tile.color);
                                             return HSLColor.fromAHSL(

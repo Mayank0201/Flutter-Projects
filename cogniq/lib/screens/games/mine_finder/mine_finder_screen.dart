@@ -282,6 +282,9 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              _lost = true;
+              _message = 'Time is up!';
             }
           });
         }
@@ -999,7 +1002,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      Icon(Icons.edit, size: 12, color: accentColor),
+                      Icon(null, size: 12, color: accentColor),
                     ],
                   ],
                 ),

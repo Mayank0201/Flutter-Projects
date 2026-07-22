@@ -584,7 +584,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.patchesTeal),
+                      const Icon(null, size: 12, color: AppTheme.patchesTeal),
                     ],
                   ],
                 ),

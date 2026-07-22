@@ -92,8 +92,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       if (_isEndgame) {
         int numTargets = 6;
         if (_currentLevel >= 90) {
-          _gridSize = 5 + ((_currentLevel - 90) % 4);
-          numTargets = 3 + ((_currentLevel - 90) % 4);
+          _gridSize = 8;
+          numTargets = 6;
         } else {
           if (_currentLevel < 35) {
             _gridSize = 5;
@@ -268,135 +268,140 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         List<List<int>> connections = List.generate(W * W, (_) => <int>[]);
         
         bool success = false;
-        int attempts = 0;
-        while (!success && attempts < 1000) {
-          attempts++;
-          for (int i = 0; i < W * W; i++) {
-            connections[i] = [];
-          }
-          
-          connections[srcIdx].add(srcNeighbor);
-          connections[srcNeighbor].add(srcIdx);
-          
-          targetNeighbors.clear();
-          final List<int> tNeighbors = [];
-          for (int t in tgts) {
-            int tNeighbor = -1;
-            List<int> candidates = [];
-            int r = t ~/ W;
-            int c = t % W;
-            if (r == 0) candidates.add(t + W);
-            if (r == W - 1) candidates.add(t - W);
-            if (c == 0) candidates.add(t + 1);
-            if (c == W - 1) candidates.add(t - 1);
-            
-            candidates.removeWhere((n) => tgts.contains(n) || n == srcIdx);
-            
-            if (candidates.isNotEmpty) {
-              tNeighbor = candidates[0];
-            } else {
-              if (r == 0) tNeighbor = t + W;
-              else if (r == W - 1) tNeighbor = t - W;
-              else if (c == 0) tNeighbor = t + 1;
-              else tNeighbor = t - 1;
-            }
-            
-            targetNeighbors[t] = tNeighbor;
-            tNeighbors.add(tNeighbor);
-            connections[t].add(tNeighbor);
-            connections[tNeighbor].add(t);
-          }
-          
-          Set<int> treeNodes = {srcIdx, srcNeighbor};
-          success = true;
-          
-          int walkBudget = 200;
-          if (!_playDailyMode && _currentLevel >= 30) {
-            bool hasTortuosity = _activeModifiers.contains('tortuosity');
-            if (hasTortuosity) walkBudget = 350;
-          }
-
-          for (int tNeighbor in tNeighbors) {
-            if (treeNodes.contains(tNeighbor)) continue;
-            
-            List<int> path = [tNeighbor];
-            Set<int> pathSet = {tNeighbor};
-            int current = tNeighbor;
-            bool pathFound = false;
-            int walkAttempts = 0;
-            
-            while (walkAttempts < walkBudget) {
-              walkAttempts++;
-              int r = current ~/ W;
-              int c = current % W;
-              List<int> neighbors = [];
-              if (r > 0) neighbors.add(current - W);
-              if (r < W - 1) neighbors.add(current + W);
-              if (c > 0) neighbors.add(current - 1);
-              if (c < W - 1) neighbors.add(current + 1);
-              
-              neighbors.removeWhere((n) => n == srcIdx || tgts.contains(n));
-              neighbors.removeWhere((n) => treeNodes.contains(n) && (connections[n].length >= 3));
-              
-              if (neighbors.isEmpty) break;
-              
-              int nextNode = neighbors[rng.nextInt(neighbors.length)];
-              if (treeNodes.contains(nextNode)) {
-                path.add(nextNode);
-                pathFound = true;
-                break;
-              }
-              if (!pathSet.contains(nextNode)) {
-                path.add(nextNode);
-                pathSet.add(nextNode);
-                current = nextNode;
-              }
-            }
-            
-            if (pathFound) {
-              for (int i = 0; i < path.length - 1; i++) {
-                int u = path[i];
-                int v = path[i + 1];
-                connections[u].add(v);
-                connections[v].add(u);
-                treeNodes.add(u);
-              }
-            } else {
-              success = false;
-              break;
-            }
-          }
-
-          if (success) {
-            int tCount = 0;
-            int playableCount = 0;
+        int generationRetries = 0;
+        while (!success && generationRetries < 10) {
+          generationRetries++;
+          int attempts = 0;
+          final retryRng = Random(rng.nextInt(1000000) + generationRetries);
+          while (!success && attempts < 1000) {
+            attempts++;
             for (int i = 0; i < W * W; i++) {
-              if (i != srcIdx && !tgts.contains(i) && connections[i].isNotEmpty) {
-                playableCount++;
-                if (connections[i].length == 3) {
-                  tCount++;
+              connections[i] = [];
+            }
+            
+            connections[srcIdx].add(srcNeighbor);
+            connections[srcNeighbor].add(srcIdx);
+            
+            targetNeighbors.clear();
+            final List<int> tNeighbors = [];
+            for (int t in tgts) {
+              int tNeighbor = -1;
+              List<int> candidates = [];
+              int r = t ~/ W;
+              int c = t % W;
+              if (r == 0) candidates.add(t + W);
+              if (r == W - 1) candidates.add(t - W);
+              if (c == 0) candidates.add(t + 1);
+              if (c == W - 1) candidates.add(t - 1);
+              
+              candidates.removeWhere((n) => tgts.contains(n) || n == srcIdx);
+              
+              if (candidates.isNotEmpty) {
+                tNeighbor = candidates[0];
+              } else {
+                if (r == 0) tNeighbor = t + W;
+                else if (r == W - 1) tNeighbor = t - W;
+                else if (c == 0) tNeighbor = t + 1;
+                else tNeighbor = t - 1;
+              }
+              
+              targetNeighbors[t] = tNeighbor;
+              tNeighbors.add(tNeighbor);
+              connections[t].add(tNeighbor);
+              connections[tNeighbor].add(t);
+            }
+            
+            Set<int> treeNodes = {srcIdx, srcNeighbor};
+            success = true;
+            
+            int walkBudget = 200;
+            if (!_playDailyMode && _currentLevel >= 30) {
+              bool hasTortuosity = _activeModifiers.contains('timer'); // wait, the modifier is tortuosity
+              if (_activeModifiers.contains('tortuosity')) walkBudget = 350;
+            }
+
+            for (int tNeighbor in tNeighbors) {
+              if (treeNodes.contains(tNeighbor)) continue;
+              
+              List<int> path = [tNeighbor];
+              Set<int> pathSet = {tNeighbor};
+              int current = tNeighbor;
+              bool pathFound = false;
+              int walkAttempts = 0;
+              
+              while (walkAttempts < walkBudget) {
+                walkAttempts++;
+                int r = current ~/ W;
+                int c = current % W;
+                List<int> neighbors = [];
+                if (r > 0) neighbors.add(current - W);
+                if (r < W - 1) neighbors.add(current + W);
+                if (c > 0) neighbors.add(current - 1);
+                if (c < W - 1) neighbors.add(current + 1);
+                
+                neighbors.removeWhere((n) => n == srcIdx || tgts.contains(n));
+                neighbors.removeWhere((n) => treeNodes.contains(n) && (connections[n].length >= 3));
+                
+                if (neighbors.isEmpty) break;
+                
+                int nextNode = neighbors[retryRng.nextInt(neighbors.length)];
+                if (treeNodes.contains(nextNode)) {
+                  path.add(nextNode);
+                  pathFound = true;
+                  break;
+                }
+                if (!pathSet.contains(nextNode)) {
+                  path.add(nextNode);
+                  pathSet.add(nextNode);
+                  current = nextNode;
                 }
               }
-            }
-
-            bool tortuosityOk = true;
-            if (!_playDailyMode && _currentLevel >= 30) {
-              bool checkTort = _activeModifiers.contains('tortuosity');
-              if (checkTort && treeNodes.length < W * 1.8) {
-                tortuosityOk = false;
+              
+              if (pathFound) {
+                for (int i = 0; i < path.length - 1; i++) {
+                  int u = path[i];
+                  int v = path[i + 1];
+                  connections[u].add(v);
+                  connections[v].add(u);
+                  treeNodes.add(u);
+                }
+              } else {
+                success = false;
+                break;
               }
             }
 
-            bool junctionsOk = true;
-            if (!_playDailyMode && _currentLevel >= 30) {
-              bool checkJunc = _activeModifiers.contains('junctionDensity');
-              if (checkJunc && playableCount > 0 && (tCount / playableCount) < 0.25) {
-                junctionsOk = false;
+            if (success) {
+              int tCount = 0;
+              int playableCount = 0;
+              for (int i = 0; i < W * W; i++) {
+                if (i != srcIdx && !tgts.contains(i) && connections[i].isNotEmpty) {
+                  playableCount++;
+                  if (connections[i].length == 3) {
+                    tCount++;
+                  }
+                }
               }
-            }
 
-            if (!tortuosityOk || !junctionsOk) {
-              success = false;
+              bool tortuosityOk = true;
+              if (!_playDailyMode && _currentLevel >= 30 && generationRetries < 5) {
+                bool checkTort = _activeModifiers.contains('tortuosity');
+                if (checkTort && treeNodes.length < W * 1.8) {
+                  tortuosityOk = false;
+                }
+              }
+
+              bool junctionsOk = true;
+              if (!_playDailyMode && _currentLevel >= 30 && generationRetries < 5) {
+                bool checkJunc = _activeModifiers.contains('junctionDensity');
+                if (checkJunc && playableCount > 0 && (tCount / playableCount) < 0.25) {
+                  junctionsOk = false;
+                }
+              }
+
+              if (!tortuosityOk || !junctionsOk) {
+                success = false;
+              }
             }
           }
         }
@@ -529,6 +534,26 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             });
           }
         });
+      }
+    });
+  }
+
+  void _resetBoard() {
+    setState(() {
+      _isSuccess = false;
+      _lockedWires.clear();
+      final playRng = Random();
+      for (int i = 0; i < _gridSize * _gridSize; i++) {
+        if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT" && _wireTypes[i] != "EMPTY") {
+          _rotations[i] = playRng.nextInt(4);
+          bool checkScramble = false;
+          if (_currentLevel >= 30) {
+            checkScramble = _activeModifiers.contains('scrambleDepth');
+          }
+          if (checkScramble && _rotations[i] == _solutionRotations[i]) {
+            _rotations[i] = (_solutionRotations[i] + 1 + playRng.nextInt(3)) % 4;
+          }
+        }
       }
     });
   }
@@ -928,7 +953,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -945,7 +970,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1031,7 +1056,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                             side: BorderSide(color: context.textMuted.withAlpha(40)),
                           ),
                         ),
-                        onPressed: _loadLevel,
+                        onPressed: _resetBoard,
                         icon: const Icon(Icons.refresh),
                         label: Text('Reset Board', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
                       ),

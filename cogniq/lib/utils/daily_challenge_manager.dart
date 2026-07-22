@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:home_widget/home_widget.dart';
 import '../models/game_info.dart';
-import 'hint_manager.dart';
 import 'notification_manager.dart';
 import 'prefs_keys.dart';
+import 'point_manager.dart';
 
 class DailyChallenge {
   final String difficulty; // 'Easy', 'Medium', 'Hard'
@@ -1097,9 +1097,9 @@ class DailyChallengeManager {
     // Push stars to widget
     await syncStarsToWidget();
 
-    // Award rewards based on completions
-    int hintsToAward = (completedCount == 3) ? 2 : 1;
-    await HintManager.addHints(gameId, hintsToAward);
+    // Award rewards based on completions (points instead of hints)
+    int pointsToAward = (completedCount == 3) ? 50 : 25;
+    await PointManager.addPoints(pointsToAward);
 
     // Update streak
     int streak = prefs.getInt(PrefsKeys.dailyV2Streak) ?? 0;

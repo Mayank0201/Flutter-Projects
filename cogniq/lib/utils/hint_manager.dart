@@ -88,12 +88,14 @@ class HintManager {
       }
     }
 
-    // Award 1 hint every 5 levels
+    // Award 1 hint every 5 levels - disabled: no one should award hints
+    /*
     if (count > 0 && count % 5 == 0) {
       final current = await getHints(gameId);
       await prefs.setInt(PrefsKeys.gameHints(gameId), current + 1);
       return true; // Earned a hint!
     }
+    */
 
     return false; // Earned points but no hint
   }

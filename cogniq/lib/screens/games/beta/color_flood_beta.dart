@@ -156,14 +156,14 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
           _numColors = 7;
         } else {
           // Rotation (L90+)
-          _gridSize = 5 + ((_currentLevel - 90) % 5); // Rotates 5, 6, 7, 8, 9
-          _numColors = 4 + ((_currentLevel - 90) % 5); // Rotates 4, 5, 6, 7, 8
+          _gridSize = 9;
+          _numColors = 8;
         }
 
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'colorflood',
           levelIndex: _currentLevel,
-          pool: ['buffer', 'colourCount', 'centerSeed', 'obstacles', 'timer'],
+          pool: ['centerSeed', 'timer'],
           minActive: 2,
           maxActive: 3,
           smallGrid: (_gridSize <= 6),
@@ -172,9 +172,9 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
         maxOptimal = minOptimal + 2;
 
-        buffer = _activeModifiers.contains('buffer') ? 2 : 0;
+        buffer = 0;
         _seedFromCenter = _activeModifiers.contains('centerSeed');
-        hasObstacles = _activeModifiers.contains('obstacles');
+        hasObstacles = false;
       } else {
         _activeModifiers = {};
         if (_currentLevel < 5) {
@@ -727,7 +727,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -744,7 +744,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

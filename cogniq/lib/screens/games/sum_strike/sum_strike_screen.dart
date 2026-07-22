@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../utils/prefs_keys.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/loss_overlay.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
@@ -48,6 +50,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
+  bool _gameOver = false;
   Set<String> _activeModifiers = {};
 
   @override
@@ -102,7 +105,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            Text('Enter level number (1 - 200):', style: GoogleFonts.outfit(color: context.textSecondary)),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
@@ -148,6 +151,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
+    _gameOver = false;
     _wrongTaps.clear();
 
     if (!_playDailyMode && _currentLevel >= 30) {
@@ -320,6 +324,8 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              _gameOver = true;
             }
           });
         }
@@ -752,7 +758,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'sumstrike', 'Sum Strike'),
           ),
           GestureDetector(
-            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -765,7 +771,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1002,6 +1008,19 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                     },
                   ),
                 ),
+              ),
+            ),
+          if (_gameOver)
+            Positioned.fill(
+              child: LossOverlay(
+                onTryAgain: () {
+                  setState(() {
+                    _gameOver = false;
+                    _generatePuzzle();
+                  });
+                },
+                subtitle: 'You ran out of time!',
+                accentColor: AppTheme.dustyMauve,
               ),
             ),
         ],

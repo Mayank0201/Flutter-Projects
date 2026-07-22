@@ -15,6 +15,7 @@ import '../../../utils/rotation_engine.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/loss_overlay.dart';
 
 class SpellingBeeLevel {
   final String centerLetter;
@@ -455,6 +456,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   bool get _isWhisper => !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('whisper');
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
   Timer? _gameTimer;
+  bool _gameOver = false;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
 
@@ -664,8 +666,8 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
     setState(() {
       _hintCount = newCount;
-      final clue = targetWord!.substring(0, 1).toUpperCase();
-      _message = 'Hint: Try a word starting with "$clue" (${targetWord.length} letters)';
+      final clue = _isWhisper ? '?' : targetWord!.substring(0, 1).toUpperCase();
+      _message = 'Hint: Try a word starting with "$clue" (${targetWord!.length} letters)';
       AudioManager.playClick();
     });
   }
@@ -679,6 +681,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _currentDragNotifier.value = null;
     _message ='';
     _won = false;
+    _gameOver = false;
 
     if (!_playDailyMode && _levelIndex >= 30) {
       _activeModifiers = RotationEngine.getActiveModifiers(
@@ -709,6 +712,8 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              _gameOver = true;
             }
           });
         }
@@ -946,7 +951,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               ),
               if (!_isTutorialMode && !_playDailyMode) ...[
                 const SizedBox(width: 4),
-                Icon(Icons.edit, size: 14, color: AppTheme.accentFor('spellingbee')),
+                Icon(null, size: 14, color: AppTheme.accentFor('spellingbee')),
               ],
             ],
           ),
@@ -1342,6 +1347,19 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
             onComplete: () {
               Navigator.pop(context, true);
             },
+          ),
+        ),
+      if (_gameOver)
+        Positioned.fill(
+          child: LossOverlay(
+            onTryAgain: () {
+              setState(() {
+                _gameOver = false;
+                _loadLevel();
+              });
+            },
+            subtitle: 'You ran out of time!',
+            accentColor: accentColor,
           ),
         ),
       // if (_isTutorialMode)

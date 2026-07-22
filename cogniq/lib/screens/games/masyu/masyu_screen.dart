@@ -111,7 +111,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
+            Text('Enter level number (1 - 205):', style: GoogleFonts.outfit(color: context.textSecondary)),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
@@ -1145,7 +1145,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
           GestureDetector(
-            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -1158,7 +1158,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

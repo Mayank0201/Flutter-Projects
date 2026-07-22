@@ -619,7 +619,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             onPressed: _showHint,
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -628,7 +628,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                   children: [
                     Text('Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
                     const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    const Icon(null, size: 12, color: AppTheme.dustyMauve),
                   ],
                 ),
               ),
@@ -649,12 +649,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'Fill the ${_gridSize}x${_gridSize} grid with digits 1-${_gridSize}. Cages must sum to the target value without repeating digits.',
-                            style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
+
                             RepaintBoundary(
                               child: Container(
                                 width: _gridSize == 4 ? 280 : 320, height: _gridSize == 4 ? 280 : 320,
@@ -759,19 +754,6 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                                   ),
                                 ),
                               ],
-                            ),
-                            const SizedBox(height: 16),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: context.bgCard,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: context.textMuted.withAlpha(20)),
-                              ),
-                              child: Text(
-                                '💡 Rule Details:\n• Sudoku rules: Row, column, and boxes must contain digits 1-$_gridSize without duplicates.\n• Cage sums: Dotted cage values must add up to the corner target number.\n• Cage duplicates: No number can repeat within a single cage.',
-                                style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
-                              ),
                           ),
                         ],
                       ),

@@ -663,7 +663,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _isTutorialMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -680,7 +680,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -694,7 +694,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         child: Stack(
           children: [
           Padding(
-            padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 12),
             child: Column(
               children: [
                 Expanded(
@@ -710,7 +710,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             color: _isMemorizing ? Colors.amber : context.textPrimary,
                           ),
                         ),
-                        if (!_isMemorizing && _isEndgame && _transformType > 0) ...[
+                        if (_isEndgame && _transformType > 0) ...[
                           const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -742,7 +742,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                           ),
                         ],
 
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 12),
                         RepaintBoundary(
                           child: GestureDetector(
                             onPanStart: _onPanStart,
@@ -778,18 +778,16 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                                           child: Center(
                                             child: Builder(
                                               builder: (context) {
-                                                bool isDistractor = _isMemorizing && _distractorDots.contains(idx);
+                                                bool isDistractor = _distractorDots.contains(idx);
                                                 bool isHighlighted = _isMemorizing
-                                                    ? _targetPattern.contains(idx)
+                                                    ? (_targetPattern.contains(idx) || isDistractor)
                                                     : (_userPattern.contains(idx) || _hintDot == idx);
-                                                Color dotColor = isDistractor
-                                                    ? Colors.red.shade700
-                                                    : (isHighlighted
-                                                        ? (_isMemorizing
-                                                            ? Colors.amber
-                                                            : (_hintDot == idx ? Colors.amber : AppTheme.dustyMauve))
-                                                        : context.textMuted.withOpacity(0.3));
-                                                double dotSize = isDistractor ? 16.0 : (isHighlighted ? 20.0 : 12.0);
+                                                Color dotColor = isHighlighted
+                                                    ? (_isMemorizing
+                                                        ? Colors.amber
+                                                        : (_hintDot == idx ? Colors.amber : AppTheme.dustyMauve))
+                                                    : context.textMuted.withOpacity(0.3);
+                                                double dotSize = isHighlighted ? 20.0 : 12.0;
                                                 return Container(
                                                   width: dotSize,
                                                   height: dotSize,
@@ -810,7 +808,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                           ),
                         ),
                         if (_isMemorizing) ...[
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 12),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppTheme.dustyMauve,
@@ -822,7 +820,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             child: Text('READY', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16)),
                           ),
                         ],
-                        const SizedBox(height: 36),
+                        const SizedBox(height: 12),
                         if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                           AutoNextCountdown(
                             onNext: _nextLevel,

@@ -16,6 +16,7 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
 import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/loss_overlay.dart';
 
 class ZipLevel {
   final int rows, cols;
@@ -57,6 +58,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
+  bool _gameOver = false;
 
   @override
   void dispose() {
@@ -445,6 +447,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
+    _gameOver = false;
 
     _level = _getDynamicLevel(_levelIndex);
     _solution = _solveZip(_level);
@@ -511,6 +514,8 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              _gameOver = true;
             }
           });
         }
@@ -830,7 +835,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             ),
                   if (!_isTutorialMode && !_isDailyMode) ...[
                     const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 14, color: AppTheme.zipPink),
+                    const Icon(null, size: 14, color: AppTheme.zipPink),
                   ],
                 ],
               ),
@@ -1054,15 +1059,19 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
             },
           ),
         ),
-      // if (_isTutorialMode)
-      //   InteractiveTutorialOverlay(
-      //     instruction: _tutorialCompleted
-      //         ? "Nice! You successfully traced the path and filled the grid."
-      //         : "Touch the starting tile and drag your finger to trace a continuous path. Visit the waypoints in order!",
-      //     isCompleted: _tutorialCompleted,
-      //     onSkip: _finishTutorial,
-      //     onStartGame: _finishTutorial,
-      //   ),
+      if (_gameOver)
+        Positioned.fill(
+          child: LossOverlay(
+            onTryAgain: () {
+              setState(() {
+                _gameOver = false;
+                _loadLevel();
+              });
+            },
+            subtitle: 'You ran out of time!',
+            accentColor: AppTheme.zipPink,
+          ),
+        ),
     ],
   ),
 );

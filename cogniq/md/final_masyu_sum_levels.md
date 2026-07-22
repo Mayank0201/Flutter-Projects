@@ -1,19 +1,61 @@
-class SumStrikeLevel {
-  final int gridSize;
-  final List<int> grid;
-  final List<int> solution; // 1 = keep, 0 = strike
-  final List<int> rowTargets;
-  final List<int> colTargets;
-  const SumStrikeLevel({
-    required this.gridSize,
-    required this.grid,
-    required this.solution,
-    required this.rowTargets,
-    required this.colTargets,
-  });
-}
+# final_masyu_sum_levels.md — Final Generated Level Data (Sum Strike + Masyu)
 
-const List<SumStrikeLevel> kSumStrikeLevels = [
+**Generated:** 2026-07-22. All level data below is **offline pre-computed and solver-verified** — nothing is
+generated at runtime, so there is no on-load solve/freeze and every level is guaranteed valid.
+
+| Set | Count | Guarantee | Source file |
+|---|---|---|---|
+| **Sum Strike** | **200** | z3-verified: unique solution + non-trivial mask (every row/col has at least 1 kept and 1 struck) + no pre-satisfied line | `masyu_gen/sumstrike_levels_backup.dart` |
+| **Masyu 8x8** | **30** (levels 151-180) | z3-verified: unique closed-loop solution, distinct from every other board | `masyu_gen/masyu_8x8_backup.dart` |
+| **Masyu 9x9** | **25** (levels 181-205) | z3-verified unique + distinct (pearl-rich for solid uniqueness) | `masyu_gen/masyu_9x9_backup.dart` |
+
+> **Verification note.** The Masyu solver (`masyu_z3.py`) is hardened so a resource-starved `unknown` from z3 is
+> **never** mistaken for `unsat` or for a passing uniqueness check. Every emitted board was re-verified in isolation
+> before being kept, and every board's solution is distinct from all others. Sum Strike uniqueness is a
+> linear-arithmetic z3 check (fast, exact).
+
+---
+
+## 1. Sum Strike — wiring
+
+`sum_strike_levels.dart` already defines `class SumStrikeLevel` and `const List<SumStrikeLevel> kSumStrikeLevels`,
+and `sum_strike_screen.dart:175-183` already consumes it for curated levels (`!daily && level < kSumStrikeLevels.length`).
+**Action:** replace the body of `kSumStrikeLevels` with the **200** entries in Appendix A (they supersede the old 120;
+levels 1-120 are byte-identical, 121-200 are new denser 6x6 + a new 7x7 tier). No screen changes needed — the
+curated-vs-runtime switch already keys off `kSumStrikeLevels.length`, so the game will simply serve 200 curated levels.
+
+Class shape (already present — do not redefine):
+
+    class SumStrikeLevel {
+      final int gridSize;
+      final List<int> grid;        // row-major cell values (can be negative)
+      final List<int> solution;    // row-major keep/strike mask: 1 = kept, 0 = struck
+      final List<int> rowTargets;  // sum of kept cells per row
+      final List<int> colTargets;  // sum of kept cells per col
+      const SumStrikeLevel({
+        required this.gridSize, required this.grid, required this.solution,
+        required this.rowTargets, required this.colTargets,
+      });
+    }
+
+## 2. Masyu — wiring
+
+`masyu_levels.dart` defines `class MasyuLevel { final int gridSize; final List<int> pearls; ... }` and
+`const List<MasyuLevel> kMasyuLevels`. `pearls` is a row-major array: `0` = empty, `1` = white pearl, `2` = black pearl.
+`masyu_screen.dart:153-174` (`_setupLevel`) loads a level with a pure data copy — **no solve on load** — so adding
+these boards cannot reintroduce the old L50+ freeze.
+
+**Action:**
+- **Levels 151-180 (8x8):** ensure the 30 entries in Appendix B occupy this range.
+- **Levels 181-205 (9x9):** replace this range with the 25 entries in Appendix C.
+- **Also:** update the jump-to-level dialog max — `masyu_screen.dart:114` still reads "1 - 150"; set it to **205**.
+
+---
+
+## Appendix A — Sum Strike (200 levels, z3-verified)
+
+```dart
+// SAFE BACKUP: 200 unique + non-trivial + no-presat Sum Strike levels (z3-verified)
   // #1 (3x3, 5 struck, unique)
   SumStrikeLevel(gridSize: 3, grid: [4, 6, 1, 1, 1, 1, 3, 1, 4], solution: [1, 0, 0, 1, 0, 1, 0, 1, 0], rowTargets: [4, 2, 1], colTargets: [5, 1, 1]),
   // #2 (3x3, 4 struck, unique)
@@ -414,4 +456,132 @@ const List<SumStrikeLevel> kSumStrikeLevels = [
   SumStrikeLevel(gridSize: 7, grid: [-4, 15, 6, -9, -9, 2, 13, 6, 2, 8, -4, 10, 2, 7, -10, 6, 9, 1, 11, -12, 5, 14, -5, 10, 10, 12, 17, 1, 14, -6, 12, -11, -9, 10, 10, -18, 1, 2, 8, 1, 17, -18, 17, -5, -17, -14, -5, 3, 15], solution: [0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1], rowTargets: [19, 20, 27, 15, 26, 9, 13], colTargets: [20, 18, 31, -1, 8, 15, 38]),
   // #200 (7x7, 24 struck, negatives, unique)
   SumStrikeLevel(gridSize: 7, grid: [6, 18, 9, 12, -17, 15, 5, 1, 12, -10, 11, 14, -15, 8, -15, 13, -11, -12, -9, 1, -11, -3, 4, 14, 13, -18, 11, -7, -16, -16, 18, 7, 5, 5, -14, 8, 5, -15, 3, 1, -10, 4, 10, 2, -6, 15, 7, 13, 9], solution: [1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0], rowTargets: [16, 7, -31, 42, 7, -6, 9], colTargets: [7, 36, -4, 22, -25, 0, 8]),
-];
+```
+
+---
+
+## Appendix B - Masyu 8x8 (30 levels, z3-verified) - levels 151-180
+
+```dart
+// SAFE BACKUP: 30 unique+distinct 8x8 Masyu levels (z3-verified)
+  // 8x8 backup #1 (10 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [2, 1, 0, 1, 0, 0, 0, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #2 (12 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [2, 1, 1, 2, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #3 (10 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 2, 1, 0, 0, 0, 1, 0, 0, 1, 2]),
+  // 8x8 backup #4 (10 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 1, 0, 1, 2, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #5 (12 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 2, 1, 1, 2, 0, 0, 0, 0]),
+  // 8x8 backup #6 (12 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 2, 1, 1, 2]),
+  // 8x8 backup #7 (11 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0]),
+  // 8x8 backup #8 (11 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 1, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #9 (9 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #10 (13 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 1, 2, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #11 (10 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #12 (11 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
+  // 8x8 backup #13 (14 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 1, 0, 1, 2, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #14 (14 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 1, 0, 0, 0, 0, 1, 2, 0, 1, 0, 1, 2, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #15 (14 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 2, 1, 0, 1, 0, 2, 1, 0, 0, 0, 0, 1, 0]),
+  // 8x8 backup #16 (12 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
+  // 8x8 backup #17 (16 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 2]),
+  // 8x8 backup #18 (17 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 1, 0, 1, 2, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0]),
+  // 8x8 backup #19 (14 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2]),
+  // 8x8 backup #20 (17 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 2, 1, 0, 2, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0]),
+  // 8x8 backup #21 (13 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0]),
+  // 8x8 backup #22 (16 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 1, 2]),
+  // 8x8 backup #23 (14 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #24 (14 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #25 (16 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 2, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2]),
+  // 8x8 backup #26 (17 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 1, 0, 1, 2, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #27 (16 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 8x8 backup #28 (17 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0]),
+  // 8x8 backup #29 (17 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0]),
+  // 8x8 backup #30 (15 pearls, unique)
+  MasyuLevel(gridSize: 8, pearls: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 1, 0, 2, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+```
+
+---
+
+## Appendix C - Masyu 9x9 (25 levels, z3-verified) - levels 181-205
+
+**All 25 verified-unique-and-distinct 9x9 boards.** Splice into levels 181-205. Each is a z3-proved unique closed-loop whose solution is distinct from every other board.
+
+```dart
+// SAFE BACKUP: 25 unique+distinct 9x9 Masyu levels (z3-verified)
+  // 9x9 backup #1 (11 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0, 0]),
+  // 9x9 backup #2 (11 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 2]),
+  // 9x9 backup #3 (13 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [2, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #4 (15 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 2, 1, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #5 (12 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #6 (14 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #7 (12 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #8 (17 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [2, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 2, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #9 (13 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #10 (15 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #11 (13 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #12 (14 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0, 0]),
+  // 9x9 backup #13 (16 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 0, 0, 1, 0, 0]),
+  // 9x9 backup #14 (19 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0, 0]),
+  // 9x9 backup #15 (14 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [2, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #16 (15 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #17 (22 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 1, 0, 0, 1, 2, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 2, 1, 2, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 2, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #18 (20 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 2, 1, 0, 0, 0, 2, 1, 0, 0, 1, 2, 0, 0, 0]),
+  // 9x9 backup #19 (16 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]),
+  // 9x9 backup #20 (20 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [2, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 2, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #21 (17 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0, 0]),
+  // 9x9 backup #22 (17 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #23 (17 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #24 (18 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 2, 1, 2, 1, 0, 0, 0, 0, 2, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  // 9x9 backup #25 (19 pearls, unique)
+  MasyuLevel(gridSize: 9, pearls: [2, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 2, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+```

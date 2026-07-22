@@ -49,6 +49,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   int _chaosTimeLeft = 4;
   int _chaosTickId = 0;
   bool _gameOver = false;
+  int _attempts = 0;
 
   late int _oddRow;
   late int _oddCol;
@@ -98,14 +99,16 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     return 9; // 9x9 max from level 30 to 89
   }
 
-  void _generateLevelColors({bool keepPosition = false}) {
-    _gameTimer?.cancel();
-    _timeLeft = -1;
-    _timeBonusEarned = false;
+  void _generateLevelColors({bool keepPosition = false, bool keepTimer = false}) {
+    if (!keepTimer) {
+      _gameTimer?.cancel();
+      _timeLeft = -1;
+      _timeBonusEarned = false;
+    }
 
     final rand = (_isDailyMode || _levelIndex < 90)
         ? Random()
-        : RotationEngine.getDeterminism('oddcolorout', _levelIndex);
+        : RotationEngine.getDeterminism('oddcolorout', _levelIndex + _attempts);
     
     if (_isDailyMode && _dailyModifierType == 'chaos') {
       if (_chaosIsFirstCall) {
@@ -135,7 +138,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
         final activeMods = RotationEngine.getActiveModifiers(
           gameId: 'oddcolorout',
           levelIndex: _levelIndex,
-          pool: ['deltaTightness', 'hueChannel', 'noise', 'gradient', 'timer'],
+          pool: ['hueChannel', 'noise', 'gradient', 'timer'],
           smallGrid: _gridSide <= 5,
         );
         isHueChannel = activeMods.contains('hueChannel');
@@ -144,12 +147,12 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       }
     }
 
+    double delta = 0.0;
     if (_isDailyMode && _dailyModifierType == 'hidden_rule') {
       final double shift = 70.0 + rand.nextDouble() * 110.0;
       final double oddHue = (baseHue + shift) % 360.0;
       _oddColor = HSLColor.fromAHSL(1.0, oddHue, saturation, lightness).toColor();
     } else {
-      double delta;
       if (!_isDailyMode && _levelIndex >= 30) {
         delta = 0.04 * (30.0 / (30.0 + (_levelIndex - 30)));
       } else {
@@ -233,14 +236,11 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
           return _baseColor;
         }
       } else {
-        if (isOdd) {
-          return _oddColor;
-        }
-        if (!_isDailyMode && (hasGradient || hasNoise)) {
-          double cellHue = baseHue;
-          double cellSaturation = saturation;
-          double cellLightness = lightness;
+        double cellHue = baseHue;
+        double cellSaturation = saturation;
+        double cellLightness = lightness;
 
+        if (!_isDailyMode && (hasGradient || hasNoise)) {
           if (hasGradient) {
             double gradientFactor = (r + c) / (2 * (side - 1));
             if (isHueChannel) {
@@ -260,23 +260,42 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
               cellLightness += (rand.nextDouble() - 0.5) * noiseMag;
             }
           }
-
-          return HSLColor.fromAHSL(
-            1.0,
-            cellHue % 360.0,
-            cellSaturation.clamp(0.0, 1.0),
-            cellLightness.clamp(0.15, 0.85),
-          ).toColor();
         }
-        return _baseColor;
+
+        if (isOdd) {
+          if (isHueChannel) {
+            final double shiftDirection = rand.nextBool() ? 1.0 : -1.0;
+            double hueShift = delta * 250.0;
+            cellHue = (cellHue + shiftDirection * hueShift);
+          } else {
+            final double shiftDirection = rand.nextBool() ? 1.0 : -1.0;
+            cellLightness = cellLightness + (shiftDirection * delta);
+            
+            if (cellLightness < 0.15 || cellLightness > 0.85) {
+              cellLightness = cellLightness - (shiftDirection * delta);
+            }
+
+            final double progress = min(49, _levelIndex) / 49.0;
+            final double satShift = progress * 0.06;
+            final double satDirection = rand.nextBool() ? 1.0 : -1.0;
+            cellSaturation = cellSaturation + (satDirection * satShift);
+          }
+        }
+
+        return HSLColor.fromAHSL(
+          1.0,
+          cellHue % 360.0,
+          cellSaturation.clamp(0.0, 1.0),
+          cellLightness.clamp(0.15, 0.85),
+        ).toColor();
       }
     });
 
-    if (!_isDailyMode && _levelIndex >= 30) {
+    if (!keepTimer && !_isDailyMode && _levelIndex >= 30) {
       final activeMods = RotationEngine.getActiveModifiers(
         gameId: 'oddcolorout',
         levelIndex: _levelIndex,
-        pool: ['deltaTightness', 'hueChannel', 'noise', 'gradient', 'timer'],
+        pool: ['hueChannel', 'noise', 'gradient', 'timer'],
         smallGrid: _gridSide <= 5,
       );
       if (activeMods.contains('timer')) {
@@ -291,10 +310,9 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
             } else {
               _gameTimer?.cancel();
               AudioManager.playFail();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Time is up! Restarting level...'), duration: Duration(seconds: 1)),
-              );
-              _generateLevelColors();
+              setState(() {
+                _gameOver = true;
+              });
             }
           }
         });
@@ -506,10 +524,13 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       }
     } else {
       if (_isTutorialMode) return;
-      // Wrong cell - form a new color grid with same difficulty
       AudioManager.playFail();
       setState(() {
-        _generateLevelColors();
+        if (_timeLeft > 0) {
+          _timeLeft = max(0, _timeLeft - 3);
+        }
+        _attempts++;
+        _generateLevelColors(keepTimer: true);
       });
       _shakeController.forward(from: 0.0);
     }
@@ -567,6 +588,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     setState(() {
       _levelCleared = false;
       _levelIndex++;
+      _attempts = 0;
       _savePersistedLevel(_levelIndex);
       _generateLevelColors();
     });
@@ -580,6 +602,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       _chaosTickId = 0;
       _chaosHasOdd = false;
       _chaosIsFirstCall = true;
+      _attempts++;
       _generateLevelColors();
     });
   }
@@ -676,12 +699,6 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       ),
       body: Stack(
         children: [
-          if (_gameOver)
-            LossOverlay(
-              onTryAgain: _resetGame,
-              subtitle: 'Out of time or tapped identical cells!',
-              accentColor: accentColor,
-            ),
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -787,7 +804,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                             )
                           else if (!_isDailyMode)
                             GestureDetector(
-                              onTap: _showJumpToLevelDialog,
+                              onTap: null,
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -798,7 +815,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                                     fontWeight: FontWeight.bold,
                                   ),
                                   const SizedBox(width: 4),
-                                  Icon(Icons.edit, size: 14, color: context.textPrimary),
+                                  Icon(null, size: 14, color: context.textPrimary),
                                 ],
                               ),
                             )
@@ -949,6 +966,14 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
           //     onSkip: _finishTutorial,
           //     onStartGame: _finishTutorial,
           //   ),
+          if (_gameOver)
+            Positioned.fill(
+              child: LossOverlay(
+                onTryAgain: _resetGame,
+                subtitle: 'Out of time or tapped identical cells!',
+                accentColor: accentColor,
+              ),
+            ),
         ],
       ),
     );

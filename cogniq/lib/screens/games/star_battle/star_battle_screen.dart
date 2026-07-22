@@ -16,6 +16,7 @@ import '../../../utils/audio_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/loss_overlay.dart';
 import '../../../theme/settings_manager.dart';
 class QueensLevel {
   final int n;
@@ -370,6 +371,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
+  bool _gameOver = false;
 
   // Drag-to-place-X state
   int _dragTargetState = -1; // -1=not dragging, 0=erasing, 1=placing X
@@ -1016,6 +1018,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
+    _gameOver = false;
 
     _activeModifiers = {};
     int n = 5;
@@ -1026,9 +1029,9 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         n = 9;
       } else {
         // Rotation (L90+)
-        n = 6 + ((_levelIndex - 90) % 5); // Rotates 6, 7, 8, 9, 10
+        n = 10;
       }
-      final pool = ['gridSize', 'regionContortion', 'timer'];
+      final pool = ['regionContortion', 'timer'];
       if (n > 7) {
         pool.add('twoStarMode');
       }
@@ -1075,6 +1078,8 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              _gameOver = true;
             }
           });
         }
@@ -1445,7 +1450,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         ),
                   if (!_isTutorialMode && !_playDailyMode) ...[
                     const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 12, color: AppTheme.queensOrange),
+                    const Icon(null, size: 12, color: AppTheme.queensOrange),
                   ],
                 ],
               ),
@@ -1720,15 +1725,19 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               );
             }),
           ),
-          // if (_isTutorialMode)
-          //   InteractiveTutorialOverlay(
-          //     instruction: _tutorialCompleted
-          //         ? "Nice! You successfully solved the Star Battle puzzle."
-          //         : "Place exactly 1 star in every row, column, and colored region. Stars cannot touch each other, not even diagonally!",
-          //     isCompleted: _tutorialCompleted,
-          //     onSkip: _finishTutorial,
-          //     onStartGame: _finishTutorial,
-          //   ),
+          if (_gameOver)
+            Positioned.fill(
+              child: LossOverlay(
+                onTryAgain: () {
+                  setState(() {
+                    _gameOver = false;
+                    _loadLevel();
+                  });
+                },
+                subtitle: 'You ran out of time!',
+                accentColor: AppTheme.queensOrange,
+              ),
+            ),
         ],
       ),
     );

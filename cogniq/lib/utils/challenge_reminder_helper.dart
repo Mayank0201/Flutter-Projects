@@ -59,7 +59,10 @@ class ChallengeReminderHelper {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pushNamed(context, '/daily');
+            },
             child: Text(
               'Start Solving',
               style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),

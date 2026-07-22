@@ -1193,6 +1193,29 @@ class _SudokuScreenState extends State<SudokuScreen> {
     super.dispose();
   }
 
+  void _endScanPhase() {
+    _blackoutTimer?.cancel();
+    setState(() {
+      _isScanPhase = false;
+      _inRecallTest = true;
+      _recallPlacedCount = 0;
+      _recallCorrectSelections.clear();
+      _selectedRow = -1;
+      _selectedCol = -1;
+      _message = 'Recall Phase! Place $_recallTargetCount numbers correctly.';
+      
+      // Hide all user-placed numbers that are not locked
+      for (int r = 0; r < _level.size; r++) {
+        for (int c = 0; c < _level.size; c++) {
+          if (_level.startBoard[r][c] == 0 && !_lockedRecallCells.contains((r, c))) {
+            _board[r][c] = 0;
+          }
+        }
+      }
+      AudioManager.playClick();
+    });
+  }
+
   void _startBlackoutTimer() {
     _blackoutTimer?.cancel();
     if (_isEclipseActive) {
@@ -1214,23 +1237,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
             if (_blackoutCountdown > 1) {
               _blackoutCountdown--;
             } else {
-              _isScanPhase = false;
-              _inRecallTest = true;
-              _recallPlacedCount = 0;
-              _recallCorrectSelections.clear();
-              _selectedRow = -1;
-              _selectedCol = -1;
-              _message = 'Recall Phase! Place $_recallTargetCount numbers correctly.';
-              
-              // Hide all user-placed numbers that are not locked
-              for (int r = 0; r < _level.size; r++) {
-                for (int c = 0; c < _level.size; c++) {
-                  if (_level.startBoard[r][c] == 0 && !_lockedRecallCells.contains((r, c))) {
-                    _board[r][c] = 0;
-                  }
-                }
-              }
-              AudioManager.playClick();
+              _endScanPhase();
             }
           }
         });
@@ -1649,6 +1656,9 @@ class _SudokuScreenState extends State<SudokuScreen> {
             timer.cancel();
             return;
           }
+          if (_isEclipseActive && _isScanPhase) {
+            return;
+          }
           setState(() {
             if (_timeLeft > 0) {
               _timeLeft--;
@@ -1656,6 +1666,10 @@ class _SudokuScreenState extends State<SudokuScreen> {
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              setState(() {
+                _gameOver = true;
+              });
             }
           });
         });
@@ -2110,7 +2124,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      Icon(Icons.edit, size: 12, color: accentColor),
+                      Icon(null, size: 12, color: accentColor),
                     ],
                   ],
                 ),
@@ -2170,7 +2184,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                         const SizedBox(width: 8),
                         Text(
                           _isScanPhase
-                              ? 'SCAN PHASE: Study the board! $_blackoutCountdown s'
+                              ? 'SCAN PHASE: Memorize $_recallTargetCount cells! $_blackoutCountdown s'
                               : 'RECALL PHASE: Place $_recallTargetCount numbers! ($_recallPlacedCount/$_recallTargetCount)',
                           style: GoogleFonts.spaceGrotesk(
                             fontSize: context.scale(16),
@@ -2180,6 +2194,22 @@ class _SudokuScreenState extends State<SudokuScreen> {
                         ),
                       ],
                     ),
+                    if (_isScanPhase) ...[
+                      const SizedBox(height: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        ),
+                        onPressed: _endScanPhase,
+                        child: Text(
+                          'I\'m Ready',
+                          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                   ],
                   // Sudoku Board Display

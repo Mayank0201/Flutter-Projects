@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../utils/prefs_keys.dart';
+import '../../../utils/shuffle_manager.dart';
+import '../../../widgets/loss_overlay.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../utils/rotation_engine.dart';
@@ -53,6 +55,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
   int _dragStartIsland = -1;
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
 
+  bool _gameOver = false;
   Set<String> _activeModifiers = {};
 
   bool get _isEndgame {
@@ -186,6 +189,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
     _islands = List.from(level.islands);
     _bridgeCounts.clear();
     _isSuccess = false;
+    _gameOver = false;
     _dragStartIsland = -1;
     _selectedIsland = -1;
     _dragPositionNotifier.value = null;
@@ -228,6 +232,8 @@ class _BridgesScreenState extends State<BridgesScreen> {
               _timeLeft = 0;
               _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              _gameOver = true;
             }
           });
         }
@@ -552,6 +558,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
       if (_currentLevel + 1 > highest) {
         await prefs.setInt('beta_level_bridges', _currentLevel + 1);
       }
+      await HintManager.onLevelCleared('bridges');
     }
     if (_timeLeft > 0 && _timeBonusEarned) {
       await PointManager.addPoints(5);
@@ -988,7 +995,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'bridges', 'Bridges'),
           ),
           GestureDetector(
-            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -1001,7 +1008,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1116,6 +1123,19 @@ class _BridgesScreenState extends State<BridgesScreen> {
                     },
                   ),
                 ),
+              ),
+            ),
+          if (_gameOver)
+            Positioned.fill(
+              child: LossOverlay(
+                onTryAgain: () {
+                  setState(() {
+                    _gameOver = false;
+                    _setupLevel();
+                  });
+                },
+                subtitle: 'You ran out of time!',
+                accentColor: AppTheme.dustyMauve,
               ),
             ),
         ],
