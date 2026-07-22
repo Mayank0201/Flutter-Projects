@@ -1162,10 +1162,13 @@ class _SudokuScreenState extends State<SudokuScreen> {
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
   bool get _isEclipseActive {
     if (_playDailyMode && _dailyModifierType == 'eclipse') return true;
-    if (!_playDailyMode && _levelIndex >= 75) {
-      if (_levelIndex < 90) return true;
-      int combo = (_levelIndex - 90) % 3;
-      return combo == 2;
+    if (!_playDailyMode && _levelIndex >= 30) {
+      final activeMods = RotationEngine.getActiveModifiers(
+        gameId: 'sudoku',
+        levelIndex: _levelIndex,
+        pool: ['clueThinning', 'variantRule', 'eclipse', 'timer'],
+      );
+      return activeMods.contains('eclipse');
     }
     return false;
   }
@@ -1486,21 +1489,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
         baseLevel = levels9[index % levels9.length];
       }
     } else {
-      if (index >= 30) {
-        if (index >= 90) {
-          final combo = (index - 90) % 3;
-          final targetSize = combo == 0 ? 4 : (combo == 1 ? 6 : 9);
-          baseLevel = targetSize == 4
-              ? levels4[index % levels4.length]
-              : (targetSize == 6 ? levels6[index % levels6.length] : levels9[index % levels9.length]);
-        } else if (index >= 75 && index < 90) {
-          baseLevel = levels9[index % levels9.length];
-        } else if (index >= 45 && index < 75) {
-          baseLevel = levels9[index % levels9.length];
-        } else {
-          baseLevel = levels6[index % levels6.length];
-        }
-      } else if (index < 10) {
+      if (index < 10) {
         baseLevel = levels4[index % levels4.length];
       } else if (index < 25) {
         baseLevel = levels6[(index - 10) % levels6.length];

@@ -497,8 +497,7 @@ class _HomeScreenState extends State<HomeScreen>
               ElevatedButton(
                 onPressed: () {
                   Navigator.of(context).pop();
-                  setState(() {
-                    _currentTab = 1;
+                  Navigator.pushNamed(context, '/daily').then((_) {
                     _loadDailyChallengeInfo();
                   });
                 },

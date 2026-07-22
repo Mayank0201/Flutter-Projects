@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,8 @@ import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/audio_manager.dart';
+import '../../../utils/rotation_engine.dart';
 
 class KakuroScreen extends StatefulWidget {
   const KakuroScreen({super.key});
@@ -38,10 +41,21 @@ class _KakuroScreenState extends State<KakuroScreen> {
   int _hintIdx = -1;
   bool _isLoading = true;
 
+  Set<String> _activeModifiers = {};
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  bool _timeBonusEarned = false;
+
   @override
   void initState() {
     super.initState();
     _loadProgressAndGenerate();
+  }
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadProgressAndGenerate() async {
@@ -108,6 +122,23 @@ class _KakuroScreenState extends State<KakuroScreen> {
   ];
 
   void _generatePuzzle() {
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+
+    if (!_playDailyMode && _currentLevel >= 30) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'kakuro',
+        levelIndex: _currentLevel,
+        pool: ['timer'],
+        minActive: 1,
+        maxActive: 1,
+        smallGrid: false,
+      );
+    } else {
+      _activeModifiers = {};
+    }
+
     // Determine size based on level
     if (_currentLevel < 5) {
       _gridSize = 4;
@@ -164,6 +195,29 @@ class _KakuroScreenState extends State<KakuroScreen> {
       _hintIdx = -1;
       _isLoading = false;
     });
+
+    if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
+      _timeLeft = 60 + (_gridSize * 15);
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            if (_timeLeft > 0) {
+              _timeLeft--;
+            } else {
+              _timeLeft = 0;
+              _timeBonusEarned = false;
+              _gameTimer?.cancel();
+              AudioManager.playFail();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Time is up! Restarting level...'), duration: Duration(seconds: 1)),
+              );
+              _generatePuzzle();
+            }
+          });
+        }
+      });
+    }
   }
 
   // Returns horizontal segment starting at or before index
@@ -507,6 +561,30 @@ class _KakuroScreenState extends State<KakuroScreen> {
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer,
+                      color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_timeLeft s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(

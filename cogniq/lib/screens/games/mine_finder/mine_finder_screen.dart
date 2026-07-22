@@ -50,19 +50,19 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   String _dailyModifierDesc = '';
 
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  Set<String> _activeModifiers = {};
+
   bool get _isLimitedFlagsActive {
     if (_playDailyMode) return false;
-    if (_levelIndex >= 45) {
-      if (_levelIndex < 60) return true;
-      if (_levelIndex >= 90 && (_levelIndex - 90) % 3 == 0) return true;
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('limitedFlags');
     }
     return false;
   }
   bool get _isHiddenMinesActive {
     if (_playDailyMode) return false;
-    if (_levelIndex >= 60) {
-      if (_levelIndex < 75) return true;
-      if (_levelIndex >= 90 && (_levelIndex - 90) % 3 == 1) return true;
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('hiddenCount');
     }
     return false;
   }
@@ -70,11 +70,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     if (_playDailyMode) {
       return _dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2';
     }
-    if (_levelIndex >= 75) {
-      if (_levelIndex < 90) return true;
-      if (_levelIndex >= 90 && (_levelIndex - 90) % 3 == 2) return true;
-    }
-    return false;
+    return false; // Fog is removed for normal/endgame levels!
   }
 
   int _countFlags() {
@@ -245,28 +241,24 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _timeLeft = -1;
     _timeBonusEarned = false;
 
-    if (_isEndgame) {
-      if (_levelIndex >= 90) {
-        _gridSize = 8 + ((_levelIndex - 90) % 6);
-        final double maxMines = ((_gridSize * _gridSize) - 9) * 0.28;
-        _mineCount = (_gridSize * _gridSize * 0.2).floor().clamp(10, maxMines.floor());
-      } else if (_levelIndex >= 75) {
-        _gridSize = 11;
-        _mineCount = 21 + ((_levelIndex - 75) ~/ 3);
-      } else if (_levelIndex >= 60) {
-        _gridSize = 10;
-        _mineCount = 16 + ((_levelIndex - 60) ~/ 3);
-      } else if (_levelIndex >= 45) {
-        _gridSize = 9;
-        _mineCount = 12 + ((_levelIndex - 45) ~/ 5);
-      } else {
-        _gridSize = 8;
-        _mineCount = 10 + ((_levelIndex - 30) ~/ 7);
-      }
+    bool isHighLevel = !_playDailyMode && _levelIndex >= 30;
+    if (isHighLevel) {
+      _gridSize = (10 + ((_levelIndex - 30) ~/ 4)).clamp(10, 16);
+      final double maxMines = ((_gridSize * _gridSize) - 9) * 0.28;
+      _mineCount = (_gridSize * _gridSize * 0.22).floor().clamp(12, maxMines.floor());
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'mines',
+        levelIndex: _levelIndex,
+        pool: ['limitedFlags', 'hiddenCount', 'timer'],
+        minActive: 2,
+        maxActive: 3,
+        smallGrid: _gridSize <= 10,
+      );
     } else {
       _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
       final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
       _mineCount = (3 + (_levelIndex * 1.2).floor()).clamp(3, maxMines.floor());
+      _activeModifiers = {};
     }
 
     _mines = List.generate(_gridSize, (_) => List.filled(_gridSize, false));
@@ -278,7 +270,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _lost = false;
     _message = '';
 
-    if (_isEndgame) {
+    if (isHighLevel && _activeModifiers.contains('timer')) {
       _timeLeft = 35 + (_gridSize * 9);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -718,6 +710,9 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         }
       }
     });
+
+    _checkWin();
+
     if (_won || _lost) {
       _clearNormalState();
     } else {
@@ -726,17 +721,33 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   }
 
   void _checkWin() {
-    bool hasWon = true;
+    bool allSafeRevealed = true;
     for (int r = 0; r < _gridSize; r++) {
       for (int c = 0; c < _gridSize; c++) {
         if (!_mines[r][c] && !_revealed[r][c]) {
-          hasWon = false;
+          allSafeRevealed = false;
           break;
         }
       }
     }
 
-    if (hasWon) {
+    bool allMinesFlagged = true;
+    if (_isHiddenMinesActive) {
+      for (int r = 0; r < _gridSize; r++) {
+        for (int c = 0; c < _gridSize; c++) {
+          if (_mines[r][c] != _flagged[r][c]) {
+            allMinesFlagged = false;
+            break;
+          }
+        }
+      }
+    } else {
+      allMinesFlagged = false;
+    }
+
+    bool hasWon = allSafeRevealed || allMinesFlagged;
+
+    if (hasWon && !_won && !_lost) {
       if (_isTutorialMode) {
         setState(() {
           _tutorialCompleted = true;
@@ -744,8 +755,12 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         });
         AudioManager.playSuccess();
       } else {
-        _won = true;
-        _message = 'Safe path cleared! Level complete.';
+        setState(() {
+          _won = true;
+          _message = _isHiddenMinesActive && allMinesFlagged
+              ? 'All mines successfully flagged!'
+              : 'Safe path cleared! Level complete.';
+        });
         AudioManager.playSuccess();
         _savePersistedLevel(_levelIndex);
       }

@@ -43,6 +43,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
   final Set<int> _lockedWires = {};
+  Set<String> _activeModifiers = {};
 
   @override
   void initState() {
@@ -73,6 +74,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     setState(() {
       _isSuccess = false;
       _lockedWires.clear();
+      _activeModifiers.clear();
       _gameTimer?.cancel();
       _timeLeft = -1;
       _timeBonusEarned = false;
@@ -114,6 +116,15 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           }
         }
         W = _gridSize;
+        bool isSmallGrid = (_gridSize <= 5);
+        _activeModifiers = RotationEngine.getActiveModifiers(
+          gameId: 'circuitguide',
+          levelIndex: _currentLevel,
+          pool: ['tortuosity', 'junctionDensity', 'decoyWires', 'scrambleDepth', 'timer'],
+          minActive: 2,
+          maxActive: 3,
+          smallGrid: isSmallGrid,
+        );
         
         final side = rng.nextInt(4);
         if (side == 0) {
@@ -130,23 +141,27 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           srcNeighbor = srcIdx + 1;
         }
 
-        final int oppSide = (side + 2) % 4;
-        final Set<int> chosenOffsets = {};
-        final int targetCount = numTargets.clamp(1, W);
-        while (chosenOffsets.length < targetCount) {
-          chosenOffsets.add(rng.nextInt(W));
-        }
-        for (int o in chosenOffsets) {
-          if (oppSide == 0) {
-            tgts.add(o);
-          } else if (oppSide == 1) {
-            tgts.add(o * W + (W - 1));
-          } else if (oppSide == 2) {
-            tgts.add(W * (W - 1) + o);
+        final otherSides = [0, 1, 2, 3]..remove(side);
+        final Set<int> chosenIndices = {};
+        final int targetCount = numTargets.clamp(1, W * 2);
+        while (chosenIndices.length < targetCount) {
+          final targetSide = otherSides[rng.nextInt(otherSides.length)];
+          final offset = rng.nextInt(W);
+          int targetIdx;
+          if (targetSide == 0) {
+            targetIdx = offset;
+          } else if (targetSide == 1) {
+            targetIdx = offset * W + (W - 1);
+          } else if (targetSide == 2) {
+            targetIdx = W * (W - 1) + offset;
           } else {
-            tgts.add(o * W);
+            targetIdx = offset * W;
+          }
+          if (targetIdx != srcIdx) {
+            chosenIndices.add(targetIdx);
           }
         }
+        tgts.addAll(chosenIndices);
       } else {
         if (_currentLevel < 5) {
           _gridSize = 3;
@@ -224,23 +239,27 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             srcNeighbor = srcIdx + 1;
           }
 
-          final int oppSide = (side + 2) % 4;
-          final Set<int> chosenOffsets = {};
-          final int targetCount = numTargets.clamp(1, W);
-          while (chosenOffsets.length < targetCount) {
-            chosenOffsets.add(rng.nextInt(W));
-          }
-          for (int o in chosenOffsets) {
-            if (oppSide == 0) {
-              tgts.add(o);
-            } else if (oppSide == 1) {
-              tgts.add(o * W + (W - 1));
-            } else if (oppSide == 2) {
-              tgts.add(W * (W - 1) + o);
+          final otherSides = [0, 1, 2, 3]..remove(side);
+          final Set<int> chosenIndices = {};
+          final int targetCount = numTargets.clamp(1, W * 2);
+          while (chosenIndices.length < targetCount) {
+            final targetSide = otherSides[rng.nextInt(otherSides.length)];
+            final offset = rng.nextInt(W);
+            int targetIdx;
+            if (targetSide == 0) {
+              targetIdx = offset;
+            } else if (targetSide == 1) {
+              targetIdx = offset * W + (W - 1);
+            } else if (targetSide == 2) {
+              targetIdx = W * (W - 1) + offset;
             } else {
-              tgts.add(o * W);
+              targetIdx = offset * W;
+            }
+            if (targetIdx != srcIdx) {
+              chosenIndices.add(targetIdx);
             }
           }
+          tgts.addAll(chosenIndices);
         }
       }
 
@@ -293,14 +312,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           
           int walkBudget = 200;
           if (!_playDailyMode && _currentLevel >= 30) {
-            if (_currentLevel >= 90) {
-              int combo = (_currentLevel - 90) % 6;
-              bool hasTortuosity = (combo == 0 || combo == 2 || combo == 4);
-              if (hasTortuosity) walkBudget = 350;
-            } else {
-              walkBudget = 200 + (_currentLevel - 30) * 10;
-              if (walkBudget > 400) walkBudget = 400;
-            }
+            bool hasTortuosity = _activeModifiers.contains('tortuosity');
+            if (hasTortuosity) walkBudget = 350;
           }
 
           for (int tNeighbor in tNeighbors) {
@@ -368,27 +381,15 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
             bool tortuosityOk = true;
             if (!_playDailyMode && _currentLevel >= 30) {
-              bool checkTort = false;
-              if (_currentLevel < 90) {
-                checkTort = true;
-              } else {
-                int combo = (_currentLevel - 90) % 6;
-                checkTort = (combo == 0 || combo == 2 || combo == 4);
-              }
+              bool checkTort = _activeModifiers.contains('tortuosity');
               if (checkTort && treeNodes.length < W * 1.8) {
                 tortuosityOk = false;
               }
             }
 
             bool junctionsOk = true;
-            if (!_playDailyMode && _currentLevel >= 45) {
-              bool checkJunc = false;
-              if (_currentLevel < 90) {
-                checkJunc = true;
-              } else {
-                int combo = (_currentLevel - 90) % 6;
-                checkJunc = (combo == 1 || combo == 2 || combo == 4);
-              }
+            if (!_playDailyMode && _currentLevel >= 30) {
+              bool checkJunc = _activeModifiers.contains('junctionDensity');
               if (checkJunc && playableCount > 0 && (tCount / playableCount) < 0.25) {
                 junctionsOk = false;
               }
@@ -476,14 +477,9 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       _solutionRotations = List.from(_rotations);
 
       // Stage 5: Decoy Wires (L75+)
-      if (!_playDailyMode && _currentLevel >= 75) {
-        int decoyCount = 1 + (_currentLevel - 75) ~/ 4;
+      if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('decoyWires')) {
+        int decoyCount = 1 + (_currentLevel - 30) ~/ 4;
         if (decoyCount > W) decoyCount = W;
-        if (_currentLevel >= 90) {
-          int combo = (_currentLevel - 90) % 6;
-          bool hasDecoy = (combo == 3 || combo == 4);
-          decoyCount = hasDecoy ? W : 0;
-        }
 
         List<int> emptyIndices = [];
         for (int i = 0; i < W * W; i++) {
@@ -506,11 +502,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           _rotations[i] = playRng.nextInt(4);
           // Stage 4: Scramble depth (L60+ ensures no pre-solved tiles)
           bool checkScramble = false;
-          if (_currentLevel >= 60 && _currentLevel < 90) {
-            checkScramble = true;
-          } else if (_currentLevel >= 90) {
-            int combo = (_currentLevel - 90) % 6;
-            checkScramble = (combo == 2 || combo == 4 || combo == 5);
+          if (_currentLevel >= 30) {
+            checkScramble = _activeModifiers.contains('scrambleDepth');
           }
           if (checkScramble && _rotations[i] == _solutionRotations[i]) {
             _rotations[i] = (_solutionRotations[i] + 1 + playRng.nextInt(3)) % 4;
@@ -518,21 +511,9 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         }
       }
 
-      if (_isEndgame) {
-        final List<int> candidates = [];
-        for (int i = 0; i < _gridSize * _gridSize; i++) {
-          if (_wireTypes[i] == "S" || _wireTypes[i] == "E" || _wireTypes[i] == "T") {
-            candidates.add(i);
-          }
-        }
-        candidates.shuffle(rng);
-        int lockCount = 1 + (_gridSize ~/ 2);
-        for (int i = 0; i < min(lockCount, candidates.length); i++) {
-          final lockedIdx = candidates[i];
-          _lockedWires.add(lockedIdx);
-          _rotations[lockedIdx] = _solutionRotations[lockedIdx];
-        }
+      _lockedWires.clear();
 
+      if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
         _timeLeft = 25 + (_gridSize * 10);
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -866,6 +847,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     }
 
     final connected = _getConnectedStatus();
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final double boardSize = min(screenWidth * 0.88, 360.0);
 
     return Scaffold(
       backgroundColor: context.bgDark,
@@ -993,8 +976,8 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                         ),
                         const SizedBox(height: 36),
                         Container(
-                          width: 240, 
-                          height: 240,
+                          width: boardSize, 
+                          height: boardSize,
                           decoration: BoxDecoration(
                             color: context.bgCard,
                             border: Border.all(

@@ -52,12 +52,32 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   bool _exposureTimerFired = false;
   final Set<(int, int)> _decoyCells = {};
 
+  Set<String> _activeModifiers = {};
+
   int get _chimpCycle => (_levelIndex < _levels.length) ? 0 : ((_levelIndex - _levels.length) ~/ 11);
-  bool get _hasTimedExposure => !_playDailyMode && _chimpCycle >= 1;
-  bool get _hasPositionShuffle => !_playDailyMode && _chimpCycle >= 3;
+  bool get _hasTimedExposure {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('numbersHide') && _levelIndex >= 45;
+    }
+    return _chimpCycle >= 1;
+  }
+  bool get _hasPositionShuffle {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('positionShuffle');
+    }
+    return _chimpCycle >= 3;
+  }
   bool get _hasDecoyTiles => !_playDailyMode && _chimpCycle >= 4;
 
-  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  bool get _isEndgame {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('timer');
+    }
+    return false;
+  }
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
@@ -137,11 +157,6 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   }
 
   (int, int) _getChimpConfig(int index) {
-    if (!_playDailyMode && index >= 120) {
-      int numCount = 4 + ((index - 120) % 12);
-      int gridSize = (numCount <= 6) ? 3 : (numCount <= 9 ? 4 : (numCount <= 12 ? 5 : 6));
-      return (gridSize, numCount);
-    }
     if (index < _levels.length) {
       return _levels[index];
     }
@@ -167,31 +182,26 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
 
     final cfg = _getChimpConfig(_levelIndex);
     _gridSize = cfg.$1; _n = cfg.$2;
+
+    if (!_playDailyMode && _levelIndex >= 30) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'chimp',
+        levelIndex: _levelIndex,
+        pool: ['numbersHide', 'spatialSpread', 'positionShuffle', 'timer'],
+        minActive: 2,
+        maxActive: 3,
+        smallGrid: _gridSize <= 4,
+      );
+    } else {
+      _activeModifiers = {};
+    }
+
     _positions = _randomPositions();
     _started = false;
     _nextToTap = 1; _won = false; _failed = false;
     _correctTapCount = 0;
     _chaosShuffleDone = false;
     _glowingCells.clear();
-
-    if (_hasDecoyTiles) {
-      final rng = _playDailyMode
-          ? Random()
-          : RotationEngine.getDeterminism('chimp', _levelIndex + 9999);
-      final occupied = _positions.values.toSet();
-      final int numDecoys = min(5, (_gridSize * _gridSize - _n) ~/ 4);
-      int decoysAdded = 0;
-      int attempts = 0;
-      while (decoysAdded < numDecoys && attempts < 100) {
-        attempts++;
-        final r = rng.nextInt(_gridSize);
-        final c = rng.nextInt(_gridSize);
-        if (!occupied.contains((r, c)) && !_decoyCells.contains((r, c))) {
-          _decoyCells.add((r, c));
-          decoysAdded++;
-        }
-      }
-    }
 
     if (_hasTimedExposure) {
       final double exposureSecs = max(2.0, 6.0 - _chimpCycle * 0.5);
@@ -205,19 +215,22 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     }
 
     if (_isEndgame) {
-      _timeLeft = 8 + (_n * 3);
+      _timeLeft = 5 * _n;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
-          setState(() {
-            if (_timeLeft > 0) {
+          if (_timeLeft > 0) {
+            setState(() {
               _timeLeft--;
-            } else {
-              _timeLeft = 0;
-              _timeBonusEarned = false;
-              _gameTimer?.cancel();
-            }
-          });
+            });
+          } else {
+            _gameTimer?.cancel();
+            AudioManager.playFail();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Time is up! Restarting level...'), duration: Duration(seconds: 1)),
+            );
+            _loadLevel();
+          }
         }
       });
     }

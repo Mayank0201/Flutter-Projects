@@ -11,6 +11,7 @@ import'../../../theme/app_theme.dart';
 import'../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/prefs_keys.dart';
+import '../../../utils/rotation_engine.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
@@ -449,8 +450,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
   int _hintCount = 0;
   bool _shuffleActive = false;
+  Set<String> _activeModifiers = {};
 
-  bool get _isWhisper => (!_playDailyMode && _levelIndex >= 120) || (_playDailyMode && _dailyModifierType == 'whisper');
+  bool get _isWhisper => !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('whisper');
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
   Timer? _gameTimer;
   int _timeLeft = -1;
@@ -459,11 +461,20 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   int get _minWordLength {
     if (_isTutorialMode) return 4;
     if (_playDailyMode) return 4;
-    if (_levelIndex < 30) return 4;
-    if (_levelIndex >= 30 && _levelIndex < 45) return 4;
-    if (_levelIndex >= 45 && _levelIndex < 60) return 5;
-    if (_levelIndex >= 60 && _levelIndex < 90) return 6;
-    return 4 + ((_levelIndex - 90) % 3);
+    if (_levelIndex < 45) return 4;
+    if (_levelIndex < 60) return 5;
+    
+    int desired = 6;
+    if (_levelIndex >= 90) {
+      desired = 5 + ((_levelIndex - 90) % 2);
+    }
+    
+    int validCount = _level.validWords.where((w) => w.length >= desired && w.contains(_level.centerLetter)).length;
+    while (desired > 4 && validCount < 4) {
+      desired--;
+      validCount = _level.validWords.where((w) => w.length >= desired && w.contains(_level.centerLetter)).length;
+    }
+    return desired;
   }
 
   int get _targetCount {
@@ -669,11 +680,24 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _message ='';
     _won = false;
 
+    if (!_playDailyMode && _levelIndex >= 30) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'spellingbee',
+        levelIndex: _levelIndex,
+        pool: ['whisper', 'timer'],
+        minActive: 1,
+        maxActive: 2,
+        smallGrid: false,
+      );
+    } else {
+      _activeModifiers = {};
+    }
+
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
 
-    if (!_playDailyMode && _levelIndex >= 30) {
+    if (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('timer')) {
       _timeLeft = 45 + (_targetCount * 15);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -840,7 +864,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     }
     if (!word.contains(_level.centerLetter)) {
       setState(() {
-        final displayCenter = (_playDailyMode && _dailyModifierType == 'whisper') ? '?' : _level.centerLetter;
+        final displayCenter = _isWhisper ? '?' : _level.centerLetter;
         _message ='Must contain center letter "$displayCenter"';
         _currentGuess.clear();
         _selectedIndices.clear();
@@ -1062,7 +1086,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Find $_targetCount words (min $_minWordLength letters) containing "${(_playDailyMode && _dailyModifierType == 'whisper') ? '?' : _level.centerLetter}"',
+                'Find $_targetCount words (min $_minWordLength letters) containing "${_isWhisper ? '?' : _level.centerLetter}"',
                 style: GoogleFonts.outfit(color: accentColor, fontSize: context.scale(13), fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 20),
@@ -1136,7 +1160,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            (_playDailyMode && _dailyModifierType == 'whisper')
+                            _isWhisper
                                 ? _currentGuess.map((char) => char == _level.centerLetter ? '?' : char).join()
                                 : _currentGuess.join(),
                             style: GoogleFonts.outfit(

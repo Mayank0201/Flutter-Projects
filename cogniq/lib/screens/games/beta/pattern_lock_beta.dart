@@ -40,8 +40,8 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
   bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
+  Set<String> _activeModifiers = {};
   List<int> _distractorDots = [];
-  bool _isReverse = false;
   int _transformType = 0;
   Timer? _gameTimer;
   int _timeLeft = -1;
@@ -52,8 +52,8 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
 
   int get _gridN {
     if (!_playDailyMode && _currentLevel >= 30) {
-      if (_currentLevel >= 90) {
-        return 3 + ((_currentLevel - 90) % 5); // Rotates 3, 4, 5, 6, 7
+      if (_currentLevel >= 80) {
+        return 6 + ((_currentLevel - 80) % 2); // Rotates 6, 7
       }
       return 7;
     }
@@ -116,6 +116,35 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     }
   }
 
+  void _startSolveTimer() {
+    _gameTimer?.cancel();
+    _timeLeft = 10 + (_gridN * 5);
+    _timeBonusEarned = true;
+    _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          if (_timeLeft > 0) {
+            _timeLeft--;
+          } else {
+            _timeLeft = 0;
+            _timeBonusEarned = false;
+            _gameTimer?.cancel();
+          }
+        });
+      }
+    });
+  }
+
+  void _onReadyTapped() {
+    _memorizeTimer?.cancel();
+    setState(() {
+      _isMemorizing = false;
+      if (_isEndgame) {
+        _startSolveTimer();
+      }
+    });
+  }
+
   void _loadLevel() {
     _memorizeTimer?.cancel();
     _gameTimer?.cancel();
@@ -133,43 +162,30 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
           : RotationEngine.getDeterminism('patternlock', _currentLevel);
       
       int targetLength = 3 + (_currentLevel ~/ 2);
-      _isReverse = false;
       _transformType = 0;
       _distractorDots = [];
 
       if (!_playDailyMode && _currentLevel >= 30) {
-        if (_currentLevel >= 30 && _currentLevel < 45) {
-          targetLength = 6;
-          _transformType = 0;
-        } else if (_currentLevel >= 45 && _currentLevel < 60) {
-          targetLength = 6;
-          _transformType = 0;
-        } else if (_currentLevel >= 60 && _currentLevel < 75) {
-          targetLength = 7;
-          _transformType = 0;
-          _isReverse = true;
-        } else if (_currentLevel >= 75 && _currentLevel < 90) {
-          targetLength = 7;
-          _transformType = 1; // 90 CW Rotation
-        } else {
-          targetLength = (5 + (_currentLevel % 3)).clamp(5, 8);
-          int combo = (_currentLevel - 90) % 6;
-          _isReverse = (combo == 1 || combo == 3 || combo == 5);
-          _transformType = (combo == 2 || combo == 3 || combo == 4) ? (1 + rng.nextInt(2)) : 0;
+        _activeModifiers = RotationEngine.getActiveModifiers(
+          gameId: 'patternlock',
+          levelIndex: _currentLevel,
+          pool: ['pathComplexity', 'distractorDots', 'gridSize', 'boardTransform', 'memorizeTimer'],
+          minActive: 2,
+          maxActive: 3,
+          smallGrid: (n <= 5),
+        );
+        targetLength = (5 + (_currentLevel % 3)).clamp(5, 8);
+        if (_activeModifiers.contains('boardTransform')) {
+          _transformType = 1 + rng.nextInt(3); // CW, 180, or Mirror
         }
       } else {
+        _activeModifiers = {};
         targetLength = targetLength.clamp(3, n * n);
-        _transformType = 0;
       }
 
       bool checkComplexity = false;
       if (!_playDailyMode && _currentLevel >= 30) {
-        if (_currentLevel < 90) {
-          checkComplexity = true;
-        } else {
-          int combo = (_currentLevel - 90) % 6;
-          checkComplexity = (combo == 0 || combo == 4 || combo == 5);
-        }
+        checkComplexity = _activeModifiers.contains('pathComplexity');
       }
 
       int attempts = 0;
@@ -237,20 +253,18 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       }
       
       if (!pathOk) {
-        _targetPattern = List.generate(targetLength, (index) => index);
+        RotationEngine.logFallback('patternlock', _currentLevel);
+        _targetPattern = _generateValidWalkPath(_gridN, targetLength, rng);
       }
 
       bool hasDistractors = false;
-      if (!_playDailyMode) {
-        if (_currentLevel >= 45 && _currentLevel < 60) {
-          hasDistractors = true;
-        } else if (_currentLevel >= 90) {
-          int combo = (_currentLevel - 90) % 6;
-          hasDistractors = (combo == 0 || combo == 4);
-        }
+      if (_playDailyMode) {
+        hasDistractors = false;
+      } else if (_currentLevel >= 30) {
+        hasDistractors = _activeModifiers.contains('distractorDots');
       }
       if (hasDistractors) {
-        int count = 2 + (_currentLevel - 45) ~/ 4;
+        int count = 2 + (_currentLevel - 30) ~/ 10;
         if (count > 5) count = 5;
         final List<int> candidates = [];
         for (int i = 0; i < n * n; i++) {
@@ -262,33 +276,21 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         _distractorDots = candidates.take(count).toList();
       }
 
-      double durationSeconds = max(1.5, targetLength * 0.6);
-      
-      _memorizeTimer = Timer(Duration(milliseconds: (durationSeconds * 1000).toInt()), () {
-        if (mounted) {
-          setState(() {
-            _isMemorizing = false;
+      bool hasMemorizeTimer = _playDailyMode || (_currentLevel >= 30 && _activeModifiers.contains('memorizeTimer'));
 
-            if (_isEndgame) {
-              _timeLeft = 10 + (n * 5);
-              _timeBonusEarned = true;
-              _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-                if (mounted) {
-                  setState(() {
-                    if (_timeLeft > 0) {
-                      _timeLeft--;
-                    } else {
-                      _timeLeft = 0;
-                      _timeBonusEarned = false;
-                      _gameTimer?.cancel();
-                    }
-                  });
-                }
-              });
-            }
-          });
-        }
-      });
+      if (hasMemorizeTimer) {
+        double durationSeconds = max(1.5, targetLength * 0.6);
+        _memorizeTimer = Timer(Duration(milliseconds: (durationSeconds * 1000).toInt()), () {
+          if (mounted) {
+            setState(() {
+              _isMemorizing = false;
+              if (_isEndgame) {
+                _startSolveTimer();
+              }
+            });
+          }
+        });
+      }
     });
   }
 
@@ -345,10 +347,8 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         ? _targetPattern.map((idx) => _transformIndex(idx, _gridN, _transformType)).toList()
         : _targetPattern;
 
-    bool win = _isReverse
-        ? listEquals(_userPattern, targetPattern.reversed.toList())
-        : (listEquals(_userPattern, targetPattern) || 
-           listEquals(_userPattern, targetPattern.reversed.toList()));
+    bool win = listEquals(_userPattern, targetPattern) || 
+               listEquals(_userPattern, targetPattern.reversed.toList());
 
     if (win) {
       _gameTimer?.cancel();
@@ -374,6 +374,34 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         _userPattern = [];
       });
     }
+  }
+
+  List<int> _generateValidWalkPath(int n, int len, Random rng) {
+    int curr = rng.nextInt(n * n);
+    List<int> path = [curr];
+    Set<int> visited = {curr};
+    
+    for (int step = 1; step < len; step++) {
+      int r = curr ~/ n;
+      int c = curr % n;
+      List<int> neighbors = [];
+      for (int dr = -1; dr <= 1; dr++) {
+        for (int dc = -1; dc <= 1; dc++) {
+          if (dr == 0 && dc == 0) continue;
+          int nr = r + dr;
+          int nc = c + dc;
+          if (nr >= 0 && nr < n && nc >= 0 && nc < n) {
+            int nIdx = nr * n + nc;
+            if (!visited.contains(nIdx)) neighbors.add(nIdx);
+          }
+        }
+      }
+      if (neighbors.isEmpty) break;
+      curr = neighbors[rng.nextInt(neighbors.length)];
+      path.add(curr);
+      visited.add(curr);
+    }
+    return path;
   }
 
   Future<void> _onLevelCleared() async {
@@ -713,33 +741,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             ),
                           ),
                         ],
-                        if (!_isMemorizing && _isReverse) ...[
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.amber.withOpacity(0.4), width: 1),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.swap_horiz, color: Colors.amber, size: 16),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'REVERSE MODE: DRAW BACKWARD FROM FINISH TO START',
-                                  style: GoogleFonts.spaceGrotesk(
-                                    color: Colors.amber,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.1,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+
                         const SizedBox(height: 24),
                         RepaintBoundary(
                           child: GestureDetector(
@@ -807,6 +809,19 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             ),
                           ),
                         ),
+                        if (_isMemorizing) ...[
+                          const SizedBox(height: 24),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.dustyMauve,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            ),
+                            onPressed: _onReadyTapped,
+                            child: Text('READY', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16)),
+                          ),
+                        ],
                         const SizedBox(height: 36),
                         if (_isSuccess && !_playDailyMode && !_isTutorialMode)
                           AutoNextCountdown(

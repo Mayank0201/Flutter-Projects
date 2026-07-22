@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -130,20 +131,16 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     bool hasGradient = false;
 
     if (!_isDailyMode) {
-      if (_levelIndex >= 45 && _levelIndex < 60) {
-        isHueChannel = true;
-      } else if (_levelIndex >= 60 && _levelIndex < 75) {
-        isHueChannel = true;
-        hasNoise = true;
-      } else if (_levelIndex >= 75 && _levelIndex < 90) {
-        isHueChannel = true;
-        hasNoise = true;
-        hasGradient = true;
-      } else if (_levelIndex >= 90) {
-        int combo = (_levelIndex - 90) % 6;
-        isHueChannel = (combo == 0 || combo == 2 || combo == 4);
-        hasNoise = (combo == 0 || combo == 3 || combo == 4 || combo == 5);
-        hasGradient = (combo == 1 || combo == 2 || combo == 3 || combo == 4);
+      if (_levelIndex >= 30) {
+        final activeMods = RotationEngine.getActiveModifiers(
+          gameId: 'oddcolorout',
+          levelIndex: _levelIndex,
+          pool: ['deltaTightness', 'hueChannel', 'noise', 'gradient', 'timer'],
+          smallGrid: _gridSide <= 5,
+        );
+        isHueChannel = activeMods.contains('hueChannel');
+        hasNoise = activeMods.contains('noise');
+        hasGradient = activeMods.contains('gradient');
       }
     }
 
@@ -154,11 +151,9 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     } else {
       double delta;
       if (!_isDailyMode && _levelIndex >= 30) {
-        delta = 0.012 + 0.088 * (30.0 / (30.0 + (_levelIndex - 30)));
+        delta = 0.04 * (30.0 / (30.0 + (_levelIndex - 30)));
       } else {
-        final double minDelta = 0.04;
-        final double maxDelta = 0.10;
-        delta = maxDelta - (_levelIndex / 29.0) * (maxDelta - minDelta);
+        delta = 0.10 - (_levelIndex / 29.0) * 0.06;
       }
 
       double oddLightness = lightness;
@@ -248,24 +243,27 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
 
           if (hasGradient) {
             double gradientFactor = (r + c) / (2 * (side - 1));
-            double gradMag = 0.015;
-            if (_levelIndex >= 75 && _levelIndex < 90) {
-              gradMag = 0.005 + 0.010 * ((_levelIndex - 75) / 14.0);
+            if (isHueChannel) {
+              double gradHueMag = 35.0;
+              cellHue += (gradientFactor - 0.5) * gradHueMag;
+            } else {
+              double gradMag = 0.05;
+              cellLightness += (gradientFactor - 0.5) * gradMag;
             }
-            cellLightness += (gradientFactor - 0.5) * gradMag;
           }
           if (hasNoise) {
-            double noiseMag = 0.008;
-            if (_levelIndex >= 60 && _levelIndex < 75) {
-              noiseMag = 0.002 + 0.006 * ((_levelIndex - 60) / 14.0);
+            if (isHueChannel) {
+              double noiseHueMag = 15.0;
+              cellHue += (rand.nextDouble() - 0.5) * noiseHueMag;
+            } else {
+              double noiseMag = 0.03;
+              cellLightness += (rand.nextDouble() - 0.5) * noiseMag;
             }
-            double noise = (rand.nextDouble() - 0.5) * noiseMag;
-            cellLightness += noise;
           }
 
           return HSLColor.fromAHSL(
             1.0,
-            cellHue,
+            cellHue % 360.0,
             cellSaturation.clamp(0.0, 1.0),
             cellLightness.clamp(0.15, 0.85),
           ).toColor();
@@ -275,21 +273,32 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     });
 
     if (!_isDailyMode && _levelIndex >= 30) {
-      _timeLeft = 5 + side * 3;
-      _timeBonusEarned = true;
-      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (mounted) {
-          setState(() {
+      final activeMods = RotationEngine.getActiveModifiers(
+        gameId: 'oddcolorout',
+        levelIndex: _levelIndex,
+        pool: ['deltaTightness', 'hueChannel', 'noise', 'gradient', 'timer'],
+        smallGrid: _gridSide <= 5,
+      );
+      if (activeMods.contains('timer')) {
+        _timeLeft = 25;
+        _timeBonusEarned = true;
+        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (mounted) {
             if (_timeLeft > 0) {
-              _timeLeft--;
+              setState(() {
+                _timeLeft--;
+              });
             } else {
-              _timeLeft = 0;
-              _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Time is up! Restarting level...'), duration: Duration(seconds: 1)),
+              );
+              _generateLevelColors();
             }
-          });
-        }
-      });
+          }
+        });
+      }
     }
 
     if (!keepPosition) {
@@ -381,6 +390,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   }
 
   void _showJumpToLevelDialog() {
+    if (!kDebugMode) return;
     final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,

@@ -118,9 +118,8 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           _gridSize = 8;
           _numColors = 6;
         } else {
-          // Rotation (L80+)
-          _gridSize = 4 + ((_currentLevel - 80) % 5); // Rotates 4x4 to 8x8
-          _numColors = 3 + ((_currentLevel - 80) % 4); // Rotates 3-6 color pairs
+          _gridSize = 6 + ((_currentLevel - 80) % 3);
+          _numColors = (4 + ((_currentLevel - 80) % 3)).clamp(2, (_gridSize * _gridSize) ~/ 4);
         }
       } else if (_currentLevel < 5) {
         _gridSize = 4;
@@ -131,12 +130,9 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
       } else if (_currentLevel < 20) {
         _gridSize = 6;
         _numColors = 4;
-      } else if (_currentLevel < 35) {
+      } else {
         _gridSize = 7;
         _numColors = 5;
-      } else {
-        _gridSize = 8;
-        _numColors = 6;
       }
 
       _grid = List.filled(_gridSize * _gridSize, 0);
@@ -147,16 +143,16 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           ? Random(_currentLevel + 2026)
           : RotationEngine.getDeterminism('colourlink', _currentLevel);
 
+      final activeMods = RotationEngine.getActiveModifiers(
+        gameId: 'colourlink',
+        levelIndex: _currentLevel,
+        pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer'],
+        smallGrid: _gridSize <= 5,
+      );
+
       int wallCount = 0;
-      if (!_playDailyMode && _currentLevel >= 60) {
-        if (_currentLevel < 80) {
-          wallCount = 1 + (_currentLevel - 60) ~/ 5;
-        } else {
-          int combo = (_currentLevel - 80) % 3;
-          if (combo == 1 || combo == 2) {
-            wallCount = 1 + _gridSize ~/ 2;
-          }
-        }
+      if (!_playDailyMode && _currentLevel >= 30 && activeMods.contains('walls')) {
+        wallCount = 1 + (_gridSize ~/ 2);
       }
       
       bool generated = false;
@@ -178,72 +174,97 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           }
         }
 
-        bool success = true;
-
+        // Initialize heads for each path
+        List<int> currentHeads = [];
+        bool initOk = true;
         for (int c = 1; c <= _numColors; c++) {
           List<int> empties = [];
           for (int i = 0; i < board.length; i++) {
             if (board[i] == 0) empties.add(i);
           }
-          if (empties.isEmpty) { success = false; break; }
-          int current = empties[rng.nextInt(empties.length)];
-          testPaths[c - 1].add(current);
-          board[current] = c;
+          if (empties.isEmpty) { initOk = false; break; }
+          int startIdx = empties[rng.nextInt(empties.length)];
+          board[startIdx] = c;
+          testPaths[c - 1].add(startIdx);
+          currentHeads.add(startIdx);
+        }
+        if (!initOk) continue;
 
-          int len = 3 + rng.nextInt(max(3, _gridSize));
-          if (!_playDailyMode && _currentLevel >= 45) {
-            int extra = ((_currentLevel - 45) ~/ 4);
-            if (_currentLevel >= 80) {
-              int combo = (_currentLevel - 80) % 3;
-              if (combo == 0 || combo == 2) {
-                extra = _gridSize;
-              }
-            }
-            len = 3 + _gridSize + extra;
-          }
-
-          for (int step = 0; step < len; step++) {
-            int r = current ~/ _gridSize;
-            int cCell = current % _gridSize;
+        // Grow paths until the board is completely full or we get stuck
+        bool stuck = false;
+        while (board.contains(0)) {
+          // Find which paths can grow
+          List<int> activePathIds = [];
+          for (int c = 1; c <= _numColors; c++) {
+            int head = currentHeads[c - 1];
+            int r = head ~/ _gridSize;
+            int colCell = head % _gridSize;
             List<int> neighbors = [];
-            if (r > 0 && board[current - _gridSize] == 0) neighbors.add(current - _gridSize);
-            if (r < _gridSize - 1 && board[current + _gridSize] == 0) neighbors.add(current + _gridSize);
-            if (cCell > 0 && board[current - 1] == 0) neighbors.add(current - 1);
-            if (cCell < _gridSize - 1 && board[current + 1] == 0) neighbors.add(current + 1);
-
-            if (neighbors.isEmpty) break;
-            int nextNode = neighbors[rng.nextInt(neighbors.length)];
-            testPaths[c - 1].add(nextNode);
-            board[nextNode] = c;
-            current = nextNode;
+            if (r > 0 && board[head - _gridSize] == 0) neighbors.add(head - _gridSize);
+            if (r < _gridSize - 1 && board[head + _gridSize] == 0) neighbors.add(head + _gridSize);
+            if (colCell > 0 && board[head - 1] == 0) neighbors.add(head - 1);
+            if (colCell < _gridSize - 1 && board[head + 1] == 0) neighbors.add(head + 1);
+            if (neighbors.isNotEmpty) {
+              activePathIds.add(c);
+            }
           }
-          if (testPaths[c - 1].length < 2) { success = false; break; }
+
+          if (activePathIds.isEmpty) {
+            stuck = true;
+            break;
+          }
+
+          // Pick a random active path to grow by 1 step
+          int chosenC = activePathIds[rng.nextInt(activePathIds.length)];
+          int head = currentHeads[chosenC - 1];
+          int r = head ~/ _gridSize;
+          int colCell = head % _gridSize;
+          List<int> neighbors = [];
+          if (r > 0 && board[head - _gridSize] == 0) neighbors.add(head - _gridSize);
+          if (r < _gridSize - 1 && board[head + _gridSize] == 0) neighbors.add(head + _gridSize);
+          if (colCell > 0 && board[head - 1] == 0) neighbors.add(head - 1);
+          if (colCell < _gridSize - 1 && board[head + 1] == 0) neighbors.add(head + 1);
+
+          int nextCell = neighbors[rng.nextInt(neighbors.length)];
+          board[nextCell] = chosenC;
+          testPaths[chosenC - 1].add(nextCell);
+          currentHeads[chosenC - 1] = nextCell;
         }
 
-        if (success) {
+        if (!stuck) {
+          bool pathsValid = true;
           for (int c = 1; c <= _numColors; c++) {
-            int ep1 = testPaths[c - 1].first;
-            int ep2 = testPaths[c - 1].last;
-            _grid[ep1] = c;
-            _grid[ep2] = c;
+            if (testPaths[c - 1].length < 2) {
+              pathsValid = false;
+              break;
+            }
           }
-          _solutionPaths = testPaths;
-          generated = true;
-          break;
+          if (pathsValid) {
+            for (int c = 1; c <= _numColors; c++) {
+              int ep1 = testPaths[c - 1].first;
+              int ep2 = testPaths[c - 1].last;
+              _grid[ep1] = c;
+              _grid[ep2] = c;
+            }
+            _solutionPaths = testPaths;
+            generated = true;
+            break;
+          }
         }
       }
 
       if (!generated) {
+        RotationEngine.logFallback('colourlink', _currentLevel);
         _gridSize = 4;
         _numColors = 2;
         _grid = List.filled(16, 0);
         _paths = List.generate(2, (_) => []);
         _wallCells.clear();
-        _grid[0] = 1; _grid[15] = 1;
-        _grid[3] = 2; _grid[12] = 2;
+        _grid[0] = 1; _grid[4] = 1;
+        _grid[8] = 2; _grid[12] = 2;
         _solutionPaths = [
-          [0, 1, 5, 9, 13, 14, 15],
-          [3, 2, 6, 10, 11, 7, 8, 12]
+          [0, 1, 2, 3, 7, 6, 5, 4],
+          [8, 9, 10, 11, 15, 14, 13, 12]
         ];
       }
 

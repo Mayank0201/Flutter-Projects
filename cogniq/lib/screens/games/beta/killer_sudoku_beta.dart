@@ -8,6 +8,8 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import '../../../utils/hint_manager.dart';
+import '../../../widgets/buy_hints_dialog.dart';
 
 class KillerSudokuBetaScreen extends StatefulWidget {
   const KillerSudokuBetaScreen({super.key});
@@ -23,9 +25,12 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   List<int> _cageSums = [9, 4, 7, 3, 9, 4, 4];
   int _selectedIdx = -1;
   final Set<int> _givenCells = {};
+  List<int> _solution = [];
+  int _hintCount = 0;
 
   bool _playDailyMode = false;
   bool get _isEndgame => !_playDailyMode && _currentLevel >= 10;
+  Set<String> _activeModifiers = {};
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
@@ -50,7 +55,24 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     int maxCageSize = 3;
     int numGivens = 0;
 
-    if (!_playDailyMode && _currentLevel >= 10) {
+    if (!_playDailyMode && _currentLevel >= 30) {
+      if (_currentLevel >= 30 && _currentLevel < 50) {
+        _gridSize = 6;
+      } else {
+        _gridSize = 9;
+      }
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'killersudoku',
+        levelIndex: _currentLevel,
+        pool: ['cageSize', 'clueThinning', 'timer'],
+        minActive: 1,
+        maxActive: 2,
+        smallGrid: _gridSize == 6,
+      );
+      maxCageSize = _activeModifiers.contains('cageSize') ? (_gridSize == 9 ? 5 : 4) : 3;
+      numGivens = _activeModifiers.contains('clueThinning') ? 0 : 3;
+    } else if (!_playDailyMode && _currentLevel >= 10) {
+      _activeModifiers = {};
       if (_currentLevel >= 10 && _currentLevel < 25) {
         _gridSize = 4;
         maxCageSize = 3;
@@ -87,6 +109,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
         numGivens = 0;
       }
     } else {
+      _activeModifiers = {};
       _gridSize = (_currentLevel % 2 == 0) ? 4 : 6;
     }
 
@@ -96,6 +119,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
 
     List<int> solved = List.filled(totalCells, 0);
     _solveSudokuBoard(solved, 0, _gridSize, rng);
+    _solution = List.from(solved);
 
     _cages = List.filled(totalCells, -1);
     _cageSums = [];
@@ -136,7 +160,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
       cageId++;
     }
 
-    // Apply givens: prefill numGivens cells from the solved board
+    // Apply initial givens from setup config
     if (numGivens > 0) {
       final List<int> indices = List.generate(totalCells, (index) => index)..shuffle(rng);
       for (int i = 0; i < min(numGivens, totalCells); i++) {
@@ -145,6 +169,85 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
         _givenCells.add(idx);
       }
     }
+
+    // Progressively add more givens if the board does not have a unique solution
+    if (!_hasUniqueKillerSolution(solved, _cages, _cageSums)) {
+      final List<int> indices = List.generate(totalCells, (index) => index)..shuffle(rng);
+      for (int idx in indices) {
+        if (!_givenCells.contains(idx)) {
+          _grid[idx] = solved[idx];
+          _givenCells.add(idx);
+          if (_hasUniqueKillerSolution(solved, _cages, _cageSums)) {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  bool _hasUniqueKillerSolution(List<int> solved, List<int> cages, List<int> cageSums) {
+    int solutions = 0;
+    List<int> testBoard = List.filled(_gridSize * _gridSize, 0);
+    for (int cell in _givenCells) {
+      testBoard[cell] = _grid[cell];
+    }
+    
+    int statesChecked = 0;
+    const int maxStates = 4000;
+    
+    void solve(int idx) {
+      if (solutions > 1 || statesChecked > maxStates) return;
+      statesChecked++;
+      if (idx == _gridSize * _gridSize) {
+        solutions++;
+        return;
+      }
+      if (testBoard[idx] != 0) {
+        solve(idx + 1);
+        return;
+      }
+      
+      int r = idx ~/ _gridSize;
+      int c = idx % _gridSize;
+      
+      for (int d = 1; d <= _gridSize; d++) {
+        if (_isValidSudokuPlace(testBoard, _gridSize, r, c, d)) {
+          testBoard[idx] = d;
+          
+          int cageId = cages[idx];
+          bool cageOk = true;
+          int currentSum = 0;
+          int filledCount = 0;
+          int totalCageCells = 0;
+          
+          for (int j = 0; j < cages.length; j++) {
+            if (cages[j] == cageId) {
+              totalCageCells++;
+              if (testBoard[j] != 0) {
+                currentSum += testBoard[j];
+                filledCount++;
+              }
+            }
+          }
+          
+          int targetSum = cageSums[cageId];
+          if (currentSum > targetSum) {
+            cageOk = false;
+          } else if (filledCount == totalCageCells && currentSum != targetSum) {
+            cageOk = false;
+          }
+          
+          if (cageOk) {
+            solve(idx + 1);
+          }
+          testBoard[idx] = 0;
+        }
+      }
+    }
+    
+    solve(0);
+    if (statesChecked > maxStates) return false;
+    return solutions == 1;
   }
 
   bool _solveSudokuBoard(List<int> board, int idx, int size, Random rng) {
@@ -183,6 +286,10 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   }
 
   void _loadLevel() {
+    HintManager.getHints('killersudoku').then((v) {
+      if (mounted) setState(() => _hintCount = v);
+    });
+
     setState(() {
       _isSuccess = false;
       _selectedIdx = -1;
@@ -192,7 +299,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
 
       if (_isEndgame) {
         _generateProceduralLevel();
-        if (!_playDailyMode && _currentLevel >= 30) {
+        if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
           _timeLeft = _gridSize == 4 ? 90 : (_gridSize == 6 ? 180 : 300);
           _timeBonusEarned = true;
           _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -210,6 +317,20 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
           });
         }
       } else {
+        final solutions = [
+          [2, 4, 3, 1, 1, 3, 2, 4, 4, 2, 1, 3, 3, 1, 4, 2],
+          [1, 3, 4, 2, 2, 4, 3, 1, 3, 2, 1, 4, 4, 1, 2, 3],
+          [2, 3, 1, 4, 1, 4, 3, 2, 4, 1, 2, 3, 3, 2, 4, 1],
+          [1, 2, 4, 3, 4, 3, 2, 1, 3, 4, 1, 2, 2, 1, 3, 4],
+          [1, 4, 2, 3, 3, 2, 1, 4, 2, 3, 4, 1, 4, 1, 3, 2],
+          [2, 4, 3, 1, 1, 3, 2, 4, 4, 2, 1, 3, 3, 1, 4, 2],
+          [1, 3, 4, 2, 2, 4, 3, 1, 3, 2, 1, 4, 4, 1, 2, 3],
+          [2, 3, 1, 4, 1, 4, 3, 2, 4, 1, 2, 3, 3, 2, 4, 1],
+          [1, 2, 4, 3, 4, 3, 2, 1, 3, 4, 1, 2, 2, 1, 3, 4],
+          [1, 4, 2, 3, 3, 2, 1, 4, 2, 3, 4, 1, 4, 1, 3, 2],
+        ];
+        _solution = solutions[_currentLevel % solutions.length];
+
         _gridSize = 4;
         _grid = List.filled(16, 0);
         _givenCells.clear();
@@ -292,7 +413,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
       var col = List.generate(_gridSize, (r) => _grid[r * _gridSize + i]);
       if (row.toSet().length != _gridSize || col.toSet().length != _gridSize) isValid = false;
     }
-    int boxRows = 2;
+    int boxRows = _gridSize == 9 ? 3 : 2;
     int boxCols = _gridSize == 4 ? 2 : 3;
     for (int r = 0; r < _gridSize; r += boxRows) {
       for (int c = 0; c < _gridSize; c += boxCols) {
@@ -399,31 +520,39 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     );
   }
 
-  void _showHint() {
-    final solutions = [
-      [2, 4, 3, 1, 1, 3, 2, 4, 4, 2, 1, 3, 3, 1, 4, 2],
-      [1, 3, 4, 2, 2, 4, 3, 1, 3, 2, 1, 4, 4, 1, 2, 3],
-      [2, 3, 1, 4, 1, 4, 3, 2, 4, 1, 2, 3, 3, 2, 4, 1],
-      [1, 2, 4, 3, 4, 3, 2, 1, 3, 4, 1, 2, 2, 1, 3, 4],
-      [1, 4, 2, 3, 3, 2, 1, 4, 2, 3, 4, 1, 4, 1, 3, 2],
-      [2, 4, 3, 1, 1, 3, 2, 4, 4, 2, 1, 3, 3, 1, 4, 2],
-      [1, 3, 4, 2, 2, 4, 3, 1, 3, 2, 1, 4, 4, 1, 2, 3],
-      [2, 3, 1, 4, 1, 4, 3, 2, 4, 1, 2, 3, 3, 2, 4, 1],
-      [1, 2, 4, 3, 4, 3, 2, 1, 3, 4, 1, 2, 2, 1, 3, 4],
-      [1, 4, 2, 3, 3, 2, 1, 4, 2, 3, 4, 1, 4, 1, 3, 2],
-    ];
-    final sol = solutions[_currentLevel];
+  Future<void> _showHint() async {
+    if (_isSuccess) return;
+
+    if (_hintCount <= 0) {
+      BuyHintsDialog.show(
+        context,
+        initialGameId: 'killersudoku',
+        isFromGameScreen: true,
+        onPurchaseComplete: () {
+          HintManager.getHints('killersudoku').then((val) {
+            if (mounted) setState(() => _hintCount = val);
+          });
+        },
+      );
+      return;
+    }
+
+    if (_solution.isEmpty) return;
     int hintCell = -1;
-    for (int i = 0; i < 16; i++) {
-      if (_grid[i] != sol[i]) {
+    final totalCells = _gridSize * _gridSize;
+    for (int i = 0; i < totalCells; i++) {
+      if (_grid[i] != _solution[i]) {
         hintCell = i;
         break;
       }
     }
     
     if (hintCell != -1) {
+      await HintManager.useHint('killersudoku');
+      final newCount = await HintManager.getHints('killersudoku');
       setState(() {
-        _grid[hintCell] = sol[hintCell];
+        _hintCount = newCount;
+        _grid[hintCell] = _solution[hintCell];
       });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The board is already correctly solved!')));
@@ -468,7 +597,24 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             onPressed: _showInstructions,
           ),
           IconButton(
-            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: Colors.amber,
+                    child: Text(
+                      _hintCount == 0 ? '+' : '$_hintCount',
+                      style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
@@ -490,8 +636,9 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
+      body: SafeArea(
+        child: Stack(
+          children: [
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -672,6 +819,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
               ),
             ),
         ],
+      ),
       ),
     );
   }

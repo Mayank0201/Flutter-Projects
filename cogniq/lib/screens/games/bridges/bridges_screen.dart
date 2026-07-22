@@ -53,24 +53,23 @@ class _BridgesScreenState extends State<BridgesScreen> {
   int _dragStartIsland = -1;
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
 
-  bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
+  Set<String> _activeModifiers = {};
+
+  bool get _isEndgame {
+    if (_playDailyMode) return false;
+    if (_currentLevel >= 30) {
+      return _activeModifiers.contains('timer');
+    }
+    return false;
+  }
   bool get _isHiddenIslandsActive {
     if (_playDailyMode) return false;
-    if (_currentLevel >= 45) {
-      if (_currentLevel < 75) return true;
-      if (_currentLevel >= 90 && (_currentLevel - 90) % 3 == 1) return true;
+    if (_currentLevel >= 30) {
+      return _activeModifiers.contains('hiddenIslands');
     }
     return false;
   }
-  bool get _isFogActive {
-    if (_playDailyMode) return _dailyModifierType == 'fog';
-    if (_currentLevel >= 75) {
-      if (_currentLevel < 90) return true;
-      int combo = (_currentLevel - 90) % 3;
-      return combo == 2;
-    }
-    return false;
-  }
+  bool get _isFogActive => _playDailyMode && _dailyModifierType == 'fog';
   final Set<int> _hiddenIslands = {};
   Timer? _gameTimer;
   int _timeLeft = -1;
@@ -170,6 +169,20 @@ class _BridgesScreenState extends State<BridgesScreen> {
   void _setupLevel() {
     final level = kBridgesLevels[_currentLevel % kBridgesLevels.length];
     _gridSize = level.gridSize;
+
+    if (!_playDailyMode && _currentLevel >= 30) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'bridges',
+        levelIndex: _currentLevel,
+        pool: ['hiddenIslands', 'timer'],
+        minActive: 1,
+        maxActive: 2,
+        smallGrid: _gridSize <= 6,
+      );
+    } else {
+      _activeModifiers = {};
+    }
+
     _islands = List.from(level.islands);
     _bridgeCounts.clear();
     _isSuccess = false;
@@ -188,16 +201,9 @@ class _BridgesScreenState extends State<BridgesScreen> {
           islandIndices.add(i);
         }
       }
-      double hideRatio = 0.0;
-      if (_currentLevel >= 45 && _currentLevel < 60) {
-        hideRatio = 0.25;
-      } else if (_currentLevel >= 60 && _currentLevel < 75) {
-        hideRatio = 0.40;
-      } else if (_currentLevel >= 75 && _currentLevel < 90) {
-        hideRatio = 0.60;
-      } else if (_currentLevel >= 90) {
-        hideRatio = 0.80;
-      }
+      double hideRatio = 0.35 + (_currentLevel - 30) * 0.005;
+      if (hideRatio > 0.8) hideRatio = 0.8;
+
       final int countToHide = (islandIndices.length * hideRatio).round();
       if (countToHide > 0) {
         islandIndices.shuffle(rng);
@@ -373,8 +379,12 @@ class _BridgesScreenState extends State<BridgesScreen> {
       (b.dx - a.dx) * (c.dy - a.dy) - (b.dy - a.dy) * (c.dx - a.dx);
 
   int _getIslandAt(Offset localPos, double cellSpacing, double origin) {
+    return _getIslandAtWithTolerance(localPos, cellSpacing, origin, cellSpacing * 0.45);
+  }
+
+  int _getIslandAtWithTolerance(Offset localPos, double cellSpacing, double origin, double tolerance) {
     int best = -1;
-    double bestDist = cellSpacing * 0.45;
+    double bestDist = tolerance;
     for (int idx = 0; idx < _gridSize * _gridSize; idx++) {
       if (_islands[idx] == 0) continue;
       double dist = (localPos - _islandCenter(idx, cellSpacing, origin)).distance;
@@ -410,7 +420,15 @@ class _BridgesScreenState extends State<BridgesScreen> {
     _dragPositionNotifier.value = d.localPosition;
   }
 
-  void _onPanEnd(DragEndDetails d) {
+  void _onPanEnd(DragEndDetails d, double cellSpacing, double origin) {
+    if (!_isSuccess && _dragStartIsland != -1 && _dragPositionNotifier.value != null) {
+      int targetIdx = _getIslandAtWithTolerance(_dragPositionNotifier.value!, cellSpacing, origin, cellSpacing * 0.8);
+      if (targetIdx != -1 && targetIdx != _dragStartIsland && _islands[targetIdx] > 0) {
+        if (_isAdjacent(_dragStartIsland, targetIdx)) {
+          _toggleBridge(_dragStartIsland, targetIdx);
+        }
+      }
+    }
     _dragStartIsland = -1;
     _dragPositionNotifier.value = null;
   }
@@ -1033,7 +1051,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                                 child: GestureDetector(
                                   onPanStart: (d) => _onPanStart(d, cellSpacing, origin),
                                   onPanUpdate: (d) => _onPanUpdate(d, cellSpacing, origin),
-                                  onPanEnd: _onPanEnd,
+                                  onPanEnd: (d) => _onPanEnd(d, cellSpacing, origin),
                                   onTapUp: (d) => _onTapUp(d, cellSpacing, origin),
                                   child: CustomPaint(
                                     size: Size(boardSize, boardSize),

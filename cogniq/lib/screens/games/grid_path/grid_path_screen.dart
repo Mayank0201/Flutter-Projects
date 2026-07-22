@@ -50,6 +50,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   String _dailyModifierType = '';
   List<(int, int)>? _solution;
   bool _shuffleActive = false;
+  Set<String> _activeModifiers = {};
   bool get _isReversePath => _isDailyMode && _dailyModifierType == 'mirror';
   bool _hideGridPathElements = false;
   Timer? _blindStepsTimer;
@@ -258,52 +259,74 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       }
     });
   }
-
   ZipLevel _getDynamicLevel(int levelIndex) {
     int gridSize;
-    int waypointCount;
+    Set<String> activeMods = {};
+    bool isSmallGrid = false;
 
     if (!_isDailyMode && levelIndex >= 30) {
-      if (levelIndex >= 80) {
-        gridSize = 4 + ((levelIndex - 80) % 3); // Rotates 4x4, 5x5, 6x6
+      if (levelIndex >= 75) {
+        gridSize = 8 + ((levelIndex - 75) % 2);
+      } else if (levelIndex >= 50) {
+        gridSize = 7;
       } else {
         gridSize = 6;
       }
+      isSmallGrid = (gridSize <= 5);
+      activeMods = RotationEngine.getActiveModifiers(
+        gameId: 'zip',
+        levelIndex: levelIndex,
+        pool: ['waypointSparsity', 'nonRectShape', 'timer'],
+        minActive: 2,
+        maxActive: 3,
+        smallGrid: isSmallGrid,
+      );
+      _activeModifiers = activeMods;
     } else if (levelIndex < 5) {
       gridSize = 3;
+      _activeModifiers = {};
     } else if (levelIndex < 15) {
       gridSize = 4;
+      _activeModifiers = {};
     } else if (levelIndex < 30) {
       gridSize = 5;
+      _activeModifiers = {};
     } else {
       gridSize = 6;
+      _activeModifiers = {};
     }
 
     final int rows = gridSize;
     final int cols = gridSize;
     final rand = RotationEngine.getDeterminism('zip', levelIndex);
 
+    int waypointCount;
+    int minWaypoints = gridSize + 2;
+
     if (!_isDailyMode && levelIndex >= 30) {
-      if (levelIndex >= 30 && levelIndex < 45) {
-        waypointCount = 10 - ((levelIndex - 30) ~/ 4);
-      } else if (levelIndex >= 45 && levelIndex < 60) {
-        waypointCount = max(2, 6 - ((levelIndex - 45) ~/ 5)); // down to 2-3
-      } else if (levelIndex >= 60 && levelIndex < 80) {
-        waypointCount = 4;
+      if (levelIndex >= 75) {
+        waypointCount = 6 + (levelIndex % 4);
+      } else if (levelIndex >= 50) {
+        waypointCount = 5 + (levelIndex % 3);
       } else {
-        waypointCount = 3 + rand.nextInt(3);
+        waypointCount = 4 + (levelIndex % 2);
       }
+      if (activeMods.contains('waypointSparsity')) {
+        waypointCount = minWaypoints;
+      }
+    } else if (levelIndex < 5) {
+      waypointCount = 2 + (levelIndex ~/ 2);
+    } else if (levelIndex < 15) {
+      waypointCount = 3 + ((levelIndex - 5) ~/ 3);
+    } else if (levelIndex < 30) {
+      waypointCount = 5 + ((levelIndex - 15) ~/ 4);
     } else {
-      if (levelIndex < 5) {
-        waypointCount = 2 + ((levelIndex + 1) ~/ 2);
-      } else if (levelIndex < 15) {
-        waypointCount = 3 + ((levelIndex - 5 + 1) ~/ 3);
-      } else if (levelIndex < 30) {
-        waypointCount = 5 + ((levelIndex - 15 + 1) ~/ 4);
-      } else if (levelIndex < 50) {
-        waypointCount = 8 + ((levelIndex - 30 + 1) ~/ 5);
-      } else {
-        waypointCount = 12 + ((levelIndex - 50) ~/ 6);
+      waypointCount = 6 + ((levelIndex - 30) ~/ 5);
+    }
+
+    if (levelIndex >= 5) {
+      if (waypointCount < minWaypoints) {
+        waypointCount = minWaypoints;
       }
     }
     waypointCount = waypointCount.clamp(2, (gridSize * gridSize) - 2);
@@ -311,217 +334,96 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     List<(int, int)> path = [];
     final successfulWalls = <String>{};
 
-    // Check that all non-wall cells are still connected via BFS
-    bool isConnected(Set<String> walls, int rows, int cols) {
-      // Find the first non-wall cell
-      (int, int)? start;
-      for (int r = 0; r < rows && start == null; r++) {
-        for (int c = 0; c < cols && start == null; c++) {
-          if (!walls.contains('$r,$c')) start = (r, c);
-        }
-      }
-      if (start == null) return false;
-      final visited = <String>{};
-      final queue = <(int, int)>[start];
-      visited.add('${start.$1},${start.$2}');
-      while (queue.isNotEmpty) {
-        final cell = queue.removeAt(0);
-        for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
-          final nr = cell.$1 + d.$1;
-          final nc = cell.$2 + d.$2;
-          final key = '$nr,$nc';
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !walls.contains(key) && !visited.contains(key)) {
-            visited.add(key);
-            queue.add((nr, nc));
-          }
-        }
-      }
-      return visited.length == rows * cols - walls.length;
-    }
-
-    int countUnvisitedNeighbors(int r, int c, Set<String> visited) {
-      int count = 0;
-      for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
-        final nr = r + d.$1;
-        final nc = c + d.$2;
-        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited.contains('$nr,$nc')) {
-          count++;
-        }
-      }
-      return count;
-    }
-
-    // Try up to 20 attempts with higher step budget to find a Hamiltonian path
-    for (int attempt = 0; attempt < 20; attempt++) {
-      final startR = rand.nextInt(rows);
-      final startC = rand.nextInt(cols);
-
-      // Generate walls for levels 30+, validating connectivity
-      final walls = <String>{};
-      if (levelIndex >= 140 && (levelIndex % 2 == 0) && gridSize >= 4) {
-        final corners = [
-          (0, 0),
-          (0, cols - 1),
-          (rows - 1, 0),
-          (rows - 1, cols - 1)
-        ];
-        for (final cell in corners) {
-          if (cell != (startR, startC)) {
-            walls.add('${cell.$1},${cell.$2}');
-          }
-        }
+    for (int attempt = 0; attempt < 100; attempt++) {
+      final localVisited = <String>{};
+      if (!_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape')) {
+        // Disable 4 corners
+        localVisited.add('0,0');
+        localVisited.add('0,${cols - 1}');
+        localVisited.add('${rows - 1},0');
+        localVisited.add('${rows - 1},${cols - 1}');
       }
 
-      int numWalls = 0;
-      if (!_isDailyMode && levelIndex >= 30) {
-        if (levelIndex >= 30 && levelIndex < 45) {
-          numWalls = 2 + (levelIndex - 30) ~/ 3;
-        } else if (levelIndex >= 45 && levelIndex < 60) {
-          numWalls = 6;
-        } else if (levelIndex >= 60 && levelIndex < 80) {
-          numWalls = 6 + (levelIndex - 60) ~/ 4;
-        } else {
-          int combo = (levelIndex - 80) % 3;
-          if (combo == 0) {
-            numWalls = 3 + rand.nextInt(3);
-          } else if (combo == 1) {
-            numWalls = 5 + rand.nextInt(4);
-          } else {
-            numWalls = 1 + rand.nextInt(3);
-          }
-        }
-      } else if (levelIndex >= 30) {
-        numWalls = 2 + (levelIndex % 4);
+      int startR = rand.nextInt(rows);
+      int startC = rand.nextInt(cols);
+      while (localVisited.contains('$startR,$startC')) {
+        startR = rand.nextInt(rows);
+        startC = rand.nextInt(cols);
       }
 
-      if (numWalls > 0) {
-        final candidates = <(int, int)>[];
-        for (int r = 0; r < rows; r++) {
-          for (int c = 0; c < cols; c++) {
-            if (r != startR || c != startC) {
-              final key = '$r,$c';
-              if (!walls.contains(key)) candidates.add((r, c));
-            }
-          }
-        }
-        candidates.shuffle(rand);
-        for (final cell in candidates) {
-          if (walls.length >= numWalls + (levelIndex >= 140 && (levelIndex % 2 == 0) && gridSize >= 4 ? 4 : 0)) break;
-          final key = '${cell.$1},${cell.$2}';
-          walls.add(key);
-          // Check connectivity — if adding this wall breaks it, remove it
-          if (!isConnected(walls, rows, cols)) {
-            walls.remove(key);
-          }
-        }
-      }
-
-      final int targetPathLength = rows * cols - walls.length;
       final currentPath = <(int, int)>[(startR, startC)];
-      final visited = <String>{'$startR,$startC', ...walls};
-      int totalSteps = 0;
+      localVisited.add('$startR,$startC');
 
-      bool dfs(int r, int c) {
-        totalSteps++;
-        if (totalSteps > 5000) return false;
-        if (currentPath.length == targetPathLength) return true;
-
-        final dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]..shuffle(rand);
-        // Warnsdorff heuristic: prefer neighbors with fewer exits
-        dirs.sort((a, b) {
-          final nra = r + a.$1, nca = c + a.$2;
-          final nrb = r + b.$1, ncb = c + b.$2;
-          final countA = (nra >= 0 && nra < rows && nca >= 0 && nca < cols && !visited.contains('$nra,$nca'))
-              ? countUnvisitedNeighbors(nra, nca, visited) : 999;
-          final countB = (nrb >= 0 && nrb < rows && ncb >= 0 && ncb < cols && !visited.contains('$nrb,$ncb'))
-              ? countUnvisitedNeighbors(nrb, ncb, visited) : 999;
-          return countA.compareTo(countB);
-        });
-
-        for (final dir in dirs) {
-          final nr = r + dir.$1;
-          final nc = c + dir.$2;
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-            final key = '$nr,$nc';
-            if (!visited.contains(key)) {
-              visited.add(key);
-              currentPath.add((nr, nc));
-              if (dfs(nr, nc)) return true;
-              currentPath.removeLast();
-              visited.remove(key);
-              if (totalSteps > 5000) return false;
-            }
-          }
-        }
-        return false;
-      }
-
-      if (dfs(startR, startC)) {
-        path = currentPath;
-        successfulWalls.addAll(walls);
-        break;
-      }
-    }
-
-    // Randomized fallback — shuffle a zigzag to avoid boring straight lines
-    if (path.isEmpty) {
-      // Use a simple randomized walk: start from a random corner, 
-      // greedily visit unvisited neighbors in random order
-      final fallbackRand = Random(levelIndex * 7 + 13);
-      final visited = <String>{};
-      final fallbackPath = <(int, int)>[];
-      final startR = fallbackRand.nextInt(rows);
-      final startC = fallbackRand.nextInt(cols);
-      fallbackPath.add((startR, startC));
-      visited.add('$startR,$startC');
-
-      while (fallbackPath.length < rows * cols) {
-        final cur = fallbackPath.last;
+      while (true) {
+        final cur = currentPath.last;
         final neighbors = <(int, int)>[];
         for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
           final nr = cur.$1 + d.$1;
           final nc = cur.$2 + d.$2;
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited.contains('$nr,$nc')) {
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !localVisited.contains('$nr,$nc')) {
             neighbors.add((nr, nc));
           }
         }
-        if (neighbors.isEmpty) {
-          // Dead end — restart with basic zigzag
-          fallbackPath.clear();
-          visited.clear();
-          for (int r = 0; r < rows; r++) {
-            if (r % 2 == 0) {
-              for (int c = 0; c < cols; c++) fallbackPath.add((r, c));
-            } else {
-              for (int c = cols - 1; c >= 0; c--) fallbackPath.add((r, c));
-            }
-          }
-          break;
-        }
-        neighbors.shuffle(fallbackRand);
-        // Pick neighbor with fewest unvisited neighbors (greedy Warnsdorff)
+        if (neighbors.isEmpty) break;
+
+        // Warnsdorff's heuristic: prefer cells with fewer unvisited neighbors
+        neighbors.shuffle(rand);
         neighbors.sort((a, b) {
           int countA = 0, countB = 0;
           for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
             final ar = a.$1 + d.$1, ac = a.$2 + d.$2;
-            if (ar >= 0 && ar < rows && ac >= 0 && ac < cols && !visited.contains('$ar,$ac')) countA++;
+            if (ar >= 0 && ar < rows && ac >= 0 && ac < cols && !localVisited.contains('$ar,$ac')) countA++;
             final br = b.$1 + d.$1, bc = b.$2 + d.$2;
-            if (br >= 0 && br < rows && bc >= 0 && bc < cols && !visited.contains('$br,$bc')) countB++;
+            if (br >= 0 && br < rows && bc >= 0 && bc < cols && !localVisited.contains('$br,$bc')) countB++;
           }
           return countA.compareTo(countB);
         });
+
         final next = neighbors.first;
-        fallbackPath.add(next);
-        visited.add('${next.$1},${next.$2}');
+        currentPath.add(next);
+        localVisited.add('${next.$1},${next.$2}');
       }
-      path = fallbackPath;
-      successfulWalls.clear(); // No walls on fallback
+
+      final targetCoverage = !_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape')
+          ? rows * cols - 4
+          : rows * cols;
+      if (currentPath.length >= targetCoverage) {
+        path = currentPath;
+        for (int r = 0; r < rows; r++) {
+          for (int c = 0; c < cols; c++) {
+            final key = '$r,$c';
+            if (!localVisited.contains(key)) {
+              successfulWalls.add(key);
+            }
+          }
+        }
+        if (!_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape')) {
+          successfulWalls.add('0,0');
+          successfulWalls.add('0,${cols - 1}');
+          successfulWalls.add('${rows - 1},0');
+          successfulWalls.add('${rows - 1},${cols - 1}');
+        }
+        break;
+      }
     }
 
-    // Set all cells initially to 0 (free tile)
-    final waypoints = List.generate(rows, (_) => List.filled(cols, 0));
+    if (path.isEmpty) {
+      // Snake fallback (100% coverage, no walls)
+      for (int r = 0; r < rows; r++) {
+        if (r % 2 == 0) {
+          for (int c = 0; c < cols; c++) {
+            path.add((r, c));
+          }
+        } else {
+          for (int c = cols - 1; c >= 0; c--) {
+            path.add((r, c));
+          }
+        }
+      }
+      successfulWalls.clear();
+    }
 
-    // Fill walls
+    final waypoints = List.generate(rows, (_) => List.filled(cols, 0));
     for (final wallStr in successfulWalls) {
       final parts = wallStr.split(',');
       final r = int.parse(parts[0]);
@@ -529,7 +431,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       waypoints[r][c] = -1;
     }
 
-    // Fill waypoints evenly along the path
     final int pathLen = path.length;
     for (int i = 0; i < waypointCount; i++) {
       final int pathIndex = (i * (pathLen - 1) / (waypointCount - 1)).round();
@@ -598,7 +499,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       });
     }
 
-    if (!_isDailyMode && _levelIndex >= 30) {
+    if (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('timer')) {
       _timeLeft = 20 + (_level.rows * 12);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -911,10 +812,11 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
             onPressed: () => RulesHelper.showRulesBottomSheet(context, 'zip', 'Grid Path'),
           ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
-          GestureDetector(
+          InkWell(
             onTap: (_isTutorialMode || _isDailyMode) ? null : _showJumpToLevelDialog,
+            borderRadius: BorderRadius.circular(8),
             child: Padding(
-              padding: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -928,7 +830,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             ),
                   if (!_isTutorialMode && !_isDailyMode) ...[
                     const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 12, color: AppTheme.zipPink),
+                    const Icon(Icons.edit, size: 14, color: AppTheme.zipPink),
                   ],
                 ],
               ),
@@ -1229,17 +1131,6 @@ class _ZipPainter extends CustomPainter {
           
           final wallBorder = Paint()..color = gridColor.withAlpha(isRetro ? 10 : 45)..style = PaintingStyle.stroke..strokeWidth = 1.0;
           canvas.drawRRect(rr, wallBorder);
-          
-          final Color xColor = isDarkMode ? Colors.white : Colors.black;
-          final crossPaint = Paint()
-            ..color = xColor.withAlpha(isRetro ? 120 : 200)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.0;
-          final cx = rect.center.dx;
-          final cy = rect.center.dy;
-          final size = cellW * 0.15;
-          canvas.drawLine(Offset(cx - size, cy - size), Offset(cx + size, cy + size), crossPaint);
-          canvas.drawLine(Offset(cx + size, cy - size), Offset(cx - size, cy + size), crossPaint);
         } else {
           if (isRetro) {
             Color baseColor = cellBgColor;
@@ -1329,6 +1220,7 @@ class _ZipPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ZipPainter old) =>
+      old.level != level ||
       old.path.length != path.length ||
       old.won != won ||
       old.gridColor != gridColor ||
@@ -1336,5 +1228,6 @@ class _ZipPainter extends CustomPainter {
       old.cellBgColor != cellBgColor ||
       old.pathColor != pathColor ||
       old.visitedWpColor != visitedWpColor ||
-      old.modifierType != modifierType;
+      old.modifierType != modifierType ||
+      old.hideWaypoints != hideWaypoints;
 }

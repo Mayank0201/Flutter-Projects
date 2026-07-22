@@ -55,6 +55,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
   bool _seedFromCenter = false;
+  Set<String> _activeModifiers = {};
   int get _seedCell => _seedFromCenter ? (_gridSize ~/ 2) * _gridSize + (_gridSize ~/ 2) : 0;
 
   @override
@@ -140,74 +141,73 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
       bool hasObstacles = false;
 
       if (!_playDailyMode && _currentLevel >= 30) {
+        // First determine grid size and colour count
         if (_currentLevel >= 30 && _currentLevel < 45) {
           _gridSize = 9;
           _numColors = 6;
-          minOptimal = 18;
-          maxOptimal = minOptimal + 2; // Tighter buffer
-          buffer = 0;
         } else if (_currentLevel >= 45 && _currentLevel < 60) {
           _gridSize = 9;
           _numColors = 6 + min(2, (_currentLevel - 45) ~/ 7); // 7-8 colors
-          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
-          maxOptimal = minOptimal + 2;
-          buffer = 0;
         } else if (_currentLevel >= 60 && _currentLevel < 75) {
           _gridSize = 9;
           _numColors = 7;
-          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
-          maxOptimal = minOptimal + 2;
-          buffer = 0;
-          _seedFromCenter = true; // Center seed
         } else if (_currentLevel >= 75 && _currentLevel < 90) {
           _gridSize = 9;
           _numColors = 7;
-          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
-          maxOptimal = minOptimal + 2;
-          buffer = 0;
-          hasObstacles = true; // Obstacles
         } else {
           // Rotation (L90+)
           _gridSize = 5 + ((_currentLevel - 90) % 5); // Rotates 5, 6, 7, 8, 9
           _numColors = 4 + ((_currentLevel - 90) % 5); // Rotates 4, 5, 6, 7, 8
-          minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
-          maxOptimal = minOptimal + 2;
-          buffer = 0;
-          
-          int combo = (_currentLevel - 90) % 6;
-          _seedFromCenter = (combo == 0 || combo == 2 || combo == 4);
-          hasObstacles = (combo == 1 || combo == 2 || combo == 3 || combo == 4);
         }
-      } else if (_currentLevel < 5) {
-        _gridSize = 5;
-        _numColors = 4;
-        minOptimal = 6;
-        maxOptimal = 9;
-        buffer = 2;
-      } else if (_currentLevel < 10) {
-        _gridSize = 6;
-        _numColors = 4;
-        minOptimal = 9;
-        maxOptimal = 12;
-        buffer = 1;
-      } else if (_currentLevel < 20) {
-        _gridSize = 7;
-        _numColors = 5;
-        minOptimal = 12;
-        maxOptimal = 15;
-        buffer = 0;
-      } else if (_currentLevel < 35) {
-        _gridSize = 8;
-        _numColors = 5;
-        minOptimal = 15;
-        maxOptimal = 18;
-        buffer = 0;
+
+        _activeModifiers = RotationEngine.getActiveModifiers(
+          gameId: 'colorflood',
+          levelIndex: _currentLevel,
+          pool: ['buffer', 'colourCount', 'centerSeed', 'obstacles', 'timer'],
+          minActive: 2,
+          maxActive: 3,
+          smallGrid: (_gridSize <= 6),
+        );
+
+        minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
+        maxOptimal = minOptimal + 2;
+
+        buffer = _activeModifiers.contains('buffer') ? 2 : 0;
+        _seedFromCenter = _activeModifiers.contains('centerSeed');
+        hasObstacles = _activeModifiers.contains('obstacles');
       } else {
-        _gridSize = 9;
-        _numColors = 6;
-        minOptimal = 18;
-        maxOptimal = 21;
-        buffer = 0;
+        _activeModifiers = {};
+        if (_currentLevel < 5) {
+          _gridSize = 5;
+          _numColors = 4;
+          minOptimal = 6;
+          maxOptimal = 9;
+          buffer = 2;
+        } else if (_currentLevel < 10) {
+          _gridSize = 6;
+          _numColors = 4;
+          minOptimal = 9;
+          maxOptimal = 12;
+          buffer = 1;
+        } else if (_currentLevel < 20) {
+          _gridSize = 7;
+          _numColors = 5;
+          minOptimal = 12;
+          maxOptimal = 15;
+          buffer = 0;
+        } else if (_currentLevel < 35) {
+          _gridSize = 8;
+          _numColors = 5;
+          minOptimal = 15;
+          maxOptimal = 18;
+          buffer = 0;
+        } else {
+          _gridSize = 9;
+          _numColors = 6;
+          minOptimal = 18;
+          maxOptimal = 21;
+          buffer = (_currentLevel < 45) ? 3 : ((_currentLevel < 60) ? 1 : 0);
+        }
       }
 
       final rng = _playDailyMode
@@ -217,10 +217,11 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
       bool found = false;
       int attempts = 0;
       List<int> bestGrid = [];
-      int bestMoves = 999;
+      int targetOptimal = (minOptimal + maxOptimal) ~/ 2;
+      int bestDiff = 999;
       int bestOpt = -1;
 
-      while (attempts < 20) {
+      while (attempts < 50) {
         attempts++;
         List<int> testGrid;
         
@@ -252,8 +253,9 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             found = true;
             break;
           }
-          if (opt < bestMoves) {
-            bestMoves = opt;
+          int diff = (opt - targetOptimal).abs();
+          if (diff < bestDiff) {
+            bestDiff = diff;
             bestGrid = testGrid;
             bestOpt = opt;
           }
@@ -264,34 +266,29 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         _grid = bestGrid;
         _movesLeft = bestOpt + buffer;
       } else if (!found) {
-          _grid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
-          if (_gridSize == 5) {
-            _movesLeft = 11;
-          } else if (_gridSize == 6) {
-            _movesLeft = 13;
-          } else if (_gridSize == 7) {
-            _movesLeft = 14;
-          } else if (_gridSize == 8) {
-            _movesLeft = 16;
-          } else {
-            _movesLeft = 18;
-          }
-        }
+        RotationEngine.logFallback('colorflood', _currentLevel);
+        _grid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+        int fallbackOpt = _solveColorFlood(_grid, _gridSize, _numColors);
+        _movesLeft = (fallbackOpt < 99 ? fallbackOpt : 15) + buffer;
+      }
 
-      if (!_playDailyMode && _currentLevel >= 30) {
+      if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
         _timeLeft = 20 + (_gridSize * 8);
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
           if (mounted) {
-            setState(() {
-              if (_timeLeft > 0) {
+            if (_timeLeft > 0) {
+              setState(() {
                 _timeLeft--;
-              } else {
-                _timeLeft = 0;
-                _timeBonusEarned = false;
-                _gameTimer?.cancel();
-              }
-            });
+              });
+            } else {
+              _gameTimer?.cancel();
+              AudioManager.playFail();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Time is up! Restarting level...'), duration: Duration(seconds: 1)),
+              );
+              _loadLevel();
+            }
           }
         });
       }

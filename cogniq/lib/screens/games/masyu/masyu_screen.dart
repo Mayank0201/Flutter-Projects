@@ -168,31 +168,9 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _solutionEdges = {};
     _solveAttempted = false;
 
-    if (!_playDailyMode && _currentLevel >= 30) {
-      _generateEndgameLevel(_currentLevel);
-    } else {
-      final level = _kLevels[_playDailyMode ? (_currentLevel % _kLevels.length) : _currentLevel];
-      _gridSize = level.gridSize;
-      _grid = List.from(level.pearls);
-    }
-
-    if (!_playDailyMode && _currentLevel >= 30) {
-      _timeLeft = 30 + (_gridSize * 15);
-      _timeBonusEarned = true;
-      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (mounted) {
-          setState(() {
-            if (_timeLeft > 0) {
-              _timeLeft--;
-            } else {
-              _timeLeft = 0;
-              _timeBonusEarned = false;
-              _gameTimer?.cancel();
-            }
-          });
-        }
-      });
-    }
+    final level = _kLevels[_currentLevel % _kLevels.length];
+    _gridSize = level.gridSize;
+    _grid = List.from(level.pearls);
   }
 
   void _generateEndgameLevel(int levelIndex) {
@@ -409,8 +387,11 @@ class _MasyuScreenState extends State<MasyuScreen> {
 
     int solutionsCount = 0;
     final visited = List.filled(totalCells, false);
+    int steps = 0;
 
     bool dfs(int curr, List<int> path) {
+      steps++;
+      if (steps > 10000) return false;
       if (path.length >= 4) {
         final startNeighbors = getNeighbors(startCell);
         if (startNeighbors.contains(curr)) {
@@ -536,8 +517,11 @@ class _MasyuScreenState extends State<MasyuScreen> {
 
     List<int>? solutionLoop;
     final visited = List.filled(totalCells, false);
+    int steps = 0;
 
     bool dfs(int curr, List<int> path) {
+      steps++;
+      if (steps > 10000) return false;
       if (path.length >= 4) {
         final startNeighbors = getNeighbors(startCell);
         if (startNeighbors.contains(curr)) {

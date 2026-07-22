@@ -17,6 +17,8 @@ import '../../../utils/hint_manager.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 
+import 'sum_strike_levels.dart';
+
 class SumStrikeScreen extends StatefulWidget {
   const SumStrikeScreen({super.key});
 
@@ -46,6 +48,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
+  Set<String> _activeModifiers = {};
 
   @override
   void initState() {
@@ -145,144 +148,167 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
-
-    final rand = _playDailyMode
-        ? Random()
-        : RotationEngine.getDeterminism('sumstrike', _currentLevel);
-
-    bool allowNegatives = false;
-    double negativeChance = 0.0;
-    int maxNum = 9;
-    double maskThreshold = 0.45;
+    _wrongTaps.clear();
 
     if (!_playDailyMode && _currentLevel >= 30) {
-      if (_currentLevel >= 30 && _currentLevel < 45) {
-        _gridSize = 5;
-        maxNum = 9 + ((_currentLevel - 30) ~/ 3);
-        if (maxNum > 15) maxNum = 15;
-      } else if (_currentLevel >= 45 && _currentLevel < 60) {
-        _gridSize = 5;
-        maxNum = 14;
-        allowNegatives = true;
-        negativeChance = 0.10 + min(0.20, (_currentLevel - 45) * 0.01);
-      } else if (_currentLevel >= 60 && _currentLevel < 80) {
-        _gridSize = 5;
-        maxNum = 15;
-        allowNegatives = true;
-        negativeChance = 0.25;
-        maskThreshold = 0.50; // Dense strike
+      int tempGridSize = 5;
+      if (_currentLevel < kSumStrikeLevels.length) {
+        tempGridSize = kSumStrikeLevels[_currentLevel].gridSize;
       } else {
-        // Rotation (L80+)
-        _gridSize = 3 + ((_currentLevel - 80) % 4); // Rotates 3x3, 4x4, 5x5, 6x6
-        maxNum = 9 + ((_currentLevel - 80) ~/ 10);
-        if (maxNum > 18) maxNum = 18;
-        allowNegatives = true;
-        negativeChance = 0.10 + min(0.25, (_currentLevel - 80) * 0.005);
-        int combo = (_currentLevel - 80) % 3;
-        if (combo == 0) {
-          maskThreshold = 0.50; // Dense strike combo
-        }
+        if (_currentLevel < 45) tempGridSize = 5;
+        else if (_currentLevel < 60) tempGridSize = 5;
+        else if (_currentLevel < 80) tempGridSize = 5;
+        else tempGridSize = 3 + ((_currentLevel - 80) % 4);
       }
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'sumstrike',
+        levelIndex: _currentLevel,
+        pool: ['negatives', 'denseStrike', 'timer'],
+        minActive: 1,
+        maxActive: 2,
+        smallGrid: tempGridSize <= 4,
+      );
     } else {
-      if (_currentLevel < 5) {
-        _gridSize = 3;
-      } else if (_currentLevel < 10) {
-        _gridSize = 4;
+      _activeModifiers = {};
+    }
+
+    bool isCurated = !_playDailyMode && _currentLevel < kSumStrikeLevels.length;
+
+    if (isCurated) {
+      final lvl = kSumStrikeLevels[_currentLevel];
+      _gridSize = lvl.gridSize;
+      _grid = List<int>.from(lvl.grid);
+      _rowTargets = List<int>.from(lvl.rowTargets);
+      _colTargets = List<int>.from(lvl.colTargets);
+      _solutionMask = lvl.solution.map((x) => x == 1).toList();
+    } else {
+      final rand = _playDailyMode
+          ? Random()
+          : RotationEngine.getDeterminism('sumstrike', _currentLevel);
+
+      bool allowNegatives = _activeModifiers.contains('negatives');
+      double negativeChance = allowNegatives ? 0.20 : 0.0;
+      int maxNum = 9;
+      double maskThreshold = _activeModifiers.contains('denseStrike') ? 0.50 : 0.45;
+
+      if (!_playDailyMode && _currentLevel >= 30) {
+        if (_currentLevel >= 30 && _currentLevel < 45) {
+          _gridSize = 5;
+          maxNum = 9 + ((_currentLevel - 30) ~/ 3);
+          if (maxNum > 15) maxNum = 15;
+        } else if (_currentLevel >= 45 && _currentLevel < 60) {
+          _gridSize = 5;
+          maxNum = 14;
+        } else if (_currentLevel >= 60 && _currentLevel < 80) {
+          _gridSize = 5;
+          maxNum = 15;
+        } else {
+          // Rotation (L80+)
+          _gridSize = 3 + ((_currentLevel - 80) % 4); // Rotates 3x3, 4x4, 5x5, 6x6
+          maxNum = 9 + ((_currentLevel - 80) ~/ 10);
+          if (maxNum > 18) maxNum = 18;
+        }
       } else {
-        _gridSize = 5;
-      }
-    }
-
-    final total = _gridSize * _gridSize;
-    _rowTargets = List.filled(_gridSize, 0);
-    _colTargets = List.filled(_gridSize, 0);
-
-    bool generated = false;
-
-    for (int attempt = 0; attempt < 50; attempt++) {
-      _grid = List.generate(total, (_) {
-        int val = rand.nextInt(maxNum) + 1;
-        if (allowNegatives && rand.nextDouble() < negativeChance) {
-          val = -val;
+        if (_currentLevel < 5) {
+          _gridSize = 3;
+        } else if (_currentLevel < 10) {
+          _gridSize = 4;
+        } else {
+          _gridSize = 5;
         }
-        return val;
-      });
-      
-      List<bool> solution = [];
-      int retries = 0;
-      do {
-        solution = List.generate(total, (_) => rand.nextDouble() > maskThreshold);
-        retries++;
-      } while (!_isNonTrivialMask(solution) && retries < 40);
+      }
 
-      for (int r = 0; r < _gridSize; r++) {
-        int rSum = 0;
-        for (int c = 0; c < _gridSize; c++) {
-          if (solution[r * _gridSize + c]) {
-            rSum += _grid[r * _gridSize + c];
+      final total = _gridSize * _gridSize;
+      _rowTargets = List.filled(_gridSize, 0);
+      _colTargets = List.filled(_gridSize, 0);
+
+      bool generated = false;
+
+      for (int attempt = 0; attempt < 50; attempt++) {
+        _grid = List.generate(total, (_) {
+          int val = rand.nextInt(maxNum) + 1;
+          if (allowNegatives && rand.nextDouble() < negativeChance) {
+            val = -val;
           }
-        }
-        _rowTargets[r] = rSum;
-      }
+          return val;
+        });
+        
+        List<bool> solution = [];
+        int retries = 0;
+        do {
+          solution = List.generate(total, (_) => rand.nextDouble() > maskThreshold);
+          retries++;
+        } while (!_isNonTrivialMask(solution) && retries < 40);
 
-      for (int c = 0; c < _gridSize; c++) {
-        int cSum = 0;
         for (int r = 0; r < _gridSize; r++) {
-          if (solution[r * _gridSize + c]) {
-            cSum += _grid[r * _gridSize + c];
+          int rSum = 0;
+          for (int c = 0; c < _gridSize; c++) {
+            if (solution[r * _gridSize + c]) {
+              rSum += _grid[r * _gridSize + c];
+            }
           }
+          _rowTargets[r] = rSum;
         }
-        _colTargets[c] = cSum;
+
+        for (int c = 0; c < _gridSize; c++) {
+          int cSum = 0;
+          for (int r = 0; r < _gridSize; r++) {
+            if (solution[r * _gridSize + c]) {
+              cSum += _grid[r * _gridSize + c];
+            }
+          }
+          _colTargets[c] = cSum;
+        }
+
+        final tempKeep = List.filled(total, false);
+        final solutions = _countSumStrikeSolutions(0, tempKeep, 2);
+        if (solutions == 1) {
+          _solutionMask = solution;
+          generated = true;
+          break;
+        }
       }
 
-      final tempKeep = List.filled(total, false);
-      final solutions = _countSumStrikeSolutions(0, tempKeep, 2);
-      if (solutions == 1) {
+      if (!generated) {
+        _grid = List.generate(total, (_) {
+          int val = rand.nextInt(maxNum) + 1;
+          if (allowNegatives && rand.nextDouble() < negativeChance) {
+            val = -val;
+          }
+          return val;
+        });
+        List<bool> solution = [];
+        int retries = 0;
+        do {
+          solution = List.generate(total, (_) => rand.nextDouble() > maskThreshold);
+          retries++;
+        } while (!_isNonTrivialMask(solution) && retries < 40);
+
+        for (int r = 0; r < _gridSize; r++) {
+          int rSum = 0;
+          for (int c = 0; c < _gridSize; c++) {
+            if (solution[r * _gridSize + c]) rSum += _grid[r * _gridSize + c];
+          }
+          _rowTargets[r] = rSum;
+        }
+        for (int c = 0; c < _gridSize; c++) {
+          int cSum = 0;
+          for (int r = 0; r < _gridSize; r++) {
+            if (solution[r * _gridSize + c]) cSum += _grid[r * _gridSize + c];
+          }
+          _colTargets[c] = cSum;
+        }
         _solutionMask = solution;
-        generated = true;
-        break;
       }
     }
 
-    if (!generated) {
-      _grid = List.generate(total, (_) {
-        int val = rand.nextInt(maxNum) + 1;
-        if (allowNegatives && rand.nextDouble() < negativeChance) {
-          val = -val;
-        }
-        return val;
-      });
-      List<bool> solution = [];
-      int retries = 0;
-      do {
-        solution = List.generate(total, (_) => rand.nextDouble() > maskThreshold);
-        retries++;
-      } while (!_isNonTrivialMask(solution) && retries < 40);
-
-      for (int r = 0; r < _gridSize; r++) {
-        int rSum = 0;
-        for (int c = 0; c < _gridSize; c++) {
-          if (solution[r * _gridSize + c]) rSum += _grid[r * _gridSize + c];
-        }
-        _rowTargets[r] = rSum;
-      }
-      for (int c = 0; c < _gridSize; c++) {
-        int cSum = 0;
-        for (int r = 0; r < _gridSize; r++) {
-          if (solution[r * _gridSize + c]) cSum += _grid[r * _gridSize + c];
-        }
-        _colTargets[c] = cSum;
-      }
-      _solutionMask = solution;
-    }
-
-    _keep = List.filled(total, true);
+    _keep = List.filled(_gridSize * _gridSize, true);
     _isSuccess = false;
     _hintIdx = -1;
     _isHintShowing = false;
     _wrongTaps.clear();
 
-    if (!_playDailyMode && _currentLevel >= 30) {
+    if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
       _timeLeft = 30 + (_gridSize * 10);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -567,7 +593,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     final int viewGridSize = _gridSize + 1;
     final double cellW = boardSize / viewGridSize;
 
-    final bool allLevelsCompleted = !_playDailyMode && _currentLevel >= 50;
+    final bool allLevelsCompleted = !_playDailyMode && _currentLevel >= 500;
 
     if (allLevelsCompleted) {
       return Scaffold(
@@ -810,13 +836,13 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
 
                                     return Container(
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF1E2127),
+                                        color: isMatch ? Colors.amber.withOpacity(0.1) : Colors.amber.withOpacity(0.2),
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: isMatch
-                                              ? AppTheme.dustyMauve.withAlpha(120)
-                                              : Colors.transparent,
-                                          width: 1,
+                                              ? Colors.amber.withOpacity(0.3)
+                                              : Colors.amber.withOpacity(0.6),
+                                          width: 1.5,
                                         ),
                                       ),
                                       child: Center(
@@ -825,9 +851,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 14,
                                             fontWeight: FontWeight.bold,
-                                            color: isMatch ? Colors.white38 : Colors.white,
+                                            color: isMatch ? Colors.amber.withOpacity(0.4) : Colors.amber,
                                             decoration: isMatch ? TextDecoration.lineThrough : null,
-                                            decorationColor: AppTheme.dustyMauve,
+                                            decorationColor: Colors.amber,
                                             decorationThickness: 2,
                                           ),
                                           textAlign: TextAlign.center,
@@ -844,13 +870,13 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
 
                                     return Container(
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF1E2127),
+                                        color: isMatch ? Colors.amber.withOpacity(0.1) : Colors.amber.withOpacity(0.2),
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: isMatch
-                                              ? AppTheme.dustyMauve.withAlpha(120)
-                                              : Colors.transparent,
-                                          width: 1,
+                                              ? Colors.amber.withOpacity(0.3)
+                                              : Colors.amber.withOpacity(0.6),
+                                          width: 1.5,
                                         ),
                                       ),
                                       child: Center(
@@ -859,9 +885,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 14,
                                             fontWeight: FontWeight.bold,
-                                            color: isMatch ? Colors.white38 : Colors.white,
+                                            color: isMatch ? Colors.amber.withOpacity(0.4) : Colors.amber,
                                             decoration: isMatch ? TextDecoration.lineThrough : null,
-                                            decorationColor: AppTheme.dustyMauve,
+                                            decorationColor: Colors.amber,
                                             decorationThickness: 2,
                                           ),
                                           textAlign: TextAlign.center,

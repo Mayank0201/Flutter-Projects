@@ -51,6 +51,8 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
   bool _isInitializing = true;
   double _prismHueOffset = 0.0;
   Timer? _prismTimer;
+  Set<String> _activeModifiers = {};
+  int _resetCount = 0;
 
   late int _rows;
   late int _cols;
@@ -234,11 +236,28 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     _movesLeft = -1;
 
     _setupGridDimensions();
+    if (!_isDailyMode && _levelIndex >= 30) {
+      bool isSmallGrid = (_rows * _cols <= 16);
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'spectrum',
+        levelIndex: _levelIndex,
+        pool: ['monochrome', 'prism', 'timer', 'moveLimit', 'gradientComplexity', 'distractors'],
+        minActive: 2,
+        maxActive: 3,
+        smallGrid: isSmallGrid,
+      );
+    } else {
+      _activeModifiers = {};
+    }
+
     final rand = (_isDailyMode || _levelIndex < 30)
         ? Random()
-        : RotationEngine.getDeterminism('spectrum', _levelIndex);
+        : RotationEngine.getDeterminism('spectrum', _levelIndex + _resetCount);
 
-    if (_isDailyMode && _dailyModifierType == 'monochrome') {
+    bool isMonochrome = (_isDailyMode && _dailyModifierType == 'monochrome') ||
+        (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('monochrome'));
+
+    if (isMonochrome) {
       _cTL = const Color(0xFFFFFFFF);
       _cTR = const Color(0xFFB0B0B0);
       _cBL = const Color(0xFF505050);
@@ -255,26 +274,17 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       _cBL = HSLColor.fromAHSL(1.0, h3, 0.80, 0.55).toColor();
       _cBR = HSLColor.fromAHSL(1.0, h4, 0.80, 0.55).toColor();
 
-      // Stage 3: Three-color mixing (L45-59)
-      if (!_isDailyMode && _levelIndex >= 45 && _levelIndex < 60) {
+      bool isThreeColor = (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('gradientComplexity'));
+      if (isThreeColor) {
         _cBR = Color.lerp(_cBL, _cTR, 0.5)!;
-      } else if (!_isDailyMode && _levelIndex >= 80) {
-        int combo = (_levelIndex - 80) % 4;
-        if (combo == 2 || combo == 3) {
-          _cBR = Color.lerp(_cBL, _cTR, 0.5)!;
-        }
       }
     }
 
     int distractorCount = 0;
     if (!_isDailyMode && _levelIndex >= 30) {
-      if (_levelIndex >= 30 && _levelIndex < 45) {
-        distractorCount = 2 + (_levelIndex - 30) ~/ 4;
-      } else if (_levelIndex >= 60 && _levelIndex < 80) {
-        distractorCount = 3 + (_levelIndex - 60) ~/ 5;
-      } else if (_levelIndex >= 80) {
-        int combo = (_levelIndex - 80) % 4;
-        if (combo == 1 || combo == 3) distractorCount = 3;
+      if (_activeModifiers.contains('distractors')) {
+        distractorCount = 2 + (_levelIndex - 30) ~/ 10;
+        if (distractorCount > 5) distractorCount = 5;
       }
     }
 
@@ -382,22 +392,29 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     _won = false;
 
     if (!_isDailyMode && _levelIndex >= 30) {
-      _movesLeft = 15 + (_rows * _cols ~/ 3);
-      _timeLeft = 40 + (_rows * _cols ~/ 2);
-      _timeBonusEarned = true;
-      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (mounted) {
-          setState(() {
+      if (_activeModifiers.contains('moveLimit')) {
+        _movesLeft = 15 + (_rows * _cols ~/ 3);
+      }
+      if (_activeModifiers.contains('timer')) {
+        _timeLeft = 5 * _rows * _cols;
+        _timeBonusEarned = true;
+        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (mounted) {
             if (_timeLeft > 0) {
-              _timeLeft--;
+              setState(() {
+                _timeLeft--;
+              });
             } else {
-              _timeLeft = 0;
-              _timeBonusEarned = false;
               _gameTimer?.cancel();
+              AudioManager.playFail();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Time is up! Restarting level...'), duration: Duration(seconds: 1)),
+              );
+              _generateSpectrum();
             }
-          });
-        }
-      });
+          }
+        });
+      }
     }
 
     if (!_isInitializing) {
@@ -445,6 +462,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                 Navigator.pop(context);
                 setState(() {
                   _levelIndex = val - 1;
+                  _resetCount = 0;
                   _generateSpectrum();
                 });
               }
@@ -490,7 +508,9 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
 
   void _startPrismTimer() {
     _prismTimer?.cancel();
-    if (_isDailyMode && _dailyModifierType == 'prism') {
+    bool isPrism = (_isDailyMode && _dailyModifierType == 'prism') ||
+        (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('prism'));
+    if (isPrism) {
       _prismHueOffset = 0.0;
       _prismTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
         if (!mounted || _won) {
@@ -641,6 +661,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
               backgroundColor: Colors.redAccent,
             ),
           );
+          _resetCount++;
           _generateSpectrum();
         }
       }
@@ -653,8 +674,11 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       for (int c = 0; c < _cols; c++) {
         final t = _grid[r][c];
         if (t.correctRow != r || t.correctCol != c) {
-          correct = false;
-          break;
+          final targetTile = _grid[t.correctRow][t.correctCol];
+          if (t.color.value != targetTile.color.value) {
+            correct = false;
+            break;
+          }
         }
       }
       if (!correct) break;
@@ -752,6 +776,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
  
     setState(() {
       _levelIndex++;
+      _resetCount = 0;
       _generateSpectrum();
       _clearMidLevelState();
     });

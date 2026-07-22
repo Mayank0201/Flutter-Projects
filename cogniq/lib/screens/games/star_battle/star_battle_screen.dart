@@ -16,6 +16,7 @@ import '../../../utils/audio_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../widgets/animated_level_indicator.dart';
 import '../../../utils/shuffle_manager.dart';
+import '../../../theme/settings_manager.dart';
 class QueensLevel {
   final int n;
   final List<List<int>> regions;
@@ -357,7 +358,15 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   String _dailyModifierName = '';
   String _dailyModifierDesc = '';
   
-  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  Set<String> _activeModifiers = {};
+  
+  bool get _isEndgame {
+    if (_playDailyMode) return false;
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('timer');
+    }
+    return false;
+  }
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
@@ -388,10 +397,8 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
   bool get _useTwoStars {
     if (_playDailyMode) return false;
-    if (_levelIndex >= 60 && _levelIndex < 90) return true;
-    if (_levelIndex >= 90) {
-      int combo = (_levelIndex - 90) % 4;
-      return (combo == 1 || combo == 3);
+    if (_levelIndex >= 30) {
+      return _activeModifiers.contains('twoStarMode');
     }
     return false;
   }
@@ -426,13 +433,11 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   QueensLevel generateProceduralLevel(int n, Random rand) {
     double minScore = 0.0;
     if (!_playDailyMode && _levelIndex >= 30) {
-      if (_levelIndex < 90) {
-        minScore = 1.8 + (_levelIndex - 30) * 0.01;
+      if (_activeModifiers.contains('regionContortion')) {
+        minScore = 2.2;
       } else {
-        int combo = (_levelIndex - 90) % 4;
-        if (combo == 0 || combo == 2) minScore = 2.2;
+        minScore = 1.5;
       }
-      if (minScore > 2.4) minScore = 2.4;
     }
 
     int outerAttempts = 0;
@@ -513,10 +518,13 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
     // Fallback if score criteria is not met after 50 attempts
     if (_useTwoStars) {
-      List<(int, int)> starCoords = [];
-      for (int i = 0; i < n; i++) {
-        starCoords.add((i, i));
-        starCoords.add((i, (i + 2) % n));
+      List<(int, int)>? starCoords = placeTwoStars(n, Random(42));
+      if (starCoords == null) {
+        starCoords = [];
+        for (int i = 0; i < n; i++) {
+          starCoords.add((i, (2 * i) % n));
+          starCoords.add((i, (2 * i + 3) % n));
+        }
       }
       final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
       for (int i = 0; i < n; i++) {
@@ -529,11 +537,21 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       }
       return _growCellularRegions(n, rand, grid, borderCells);
     } else {
+      List<(int, int)>? starCoords = placeStars(n, Random(42));
+      if (starCoords == null) {
+        starCoords = [];
+        for (int i = 0; i < n; i++) {
+          starCoords.add((i, (2 * i) % n));
+        }
+      }
       final grid = List.generate(n, (_) => List.generate(n, (_) => -1));
+      for (int i = 0; i < n; i++) {
+        final (r, c) = starCoords[i];
+        grid[r][c] = i;
+      }
       final borderCells = <int, List<(int, int)>>{};
       for (int i = 0; i < n; i++) {
-        grid[i][i] = i;
-        borderCells[i] = [(i, i)];
+        borderCells[i] = [starCoords[i]];
       }
       return _growCellularRegions(n, rand, grid, borderCells);
     }
@@ -635,9 +653,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       bool checkAdjacencyAndKnight(int r, int c) {
         for (final (sr, sc) in stars) {
           if ((sr - r).abs() <= 1 && (sc - c).abs() <= 1) return false;
-          int dr = (sr - r).abs();
-          int dc = (sc - c).abs();
-          if ((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) return false;
         }
         return true;
       }
@@ -836,7 +851,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     final n = level.n;
     final List<(int, int)> queens = [];
 
-    if (_isEndgame) {
+    if (_useTwoStars) {
       final colCounts = List.filled(n, 0);
       final regCounts = List.filled(n, 0);
 
@@ -847,9 +862,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
         for (final q in queens) {
           if ((q.$1 - r).abs() <= 1 && (q.$2 - c).abs() <= 1) return false;
-          int dr = (q.$1 - r).abs();
-          int dc = (q.$2 - c).abs();
-          if ((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) return false;
         }
         return true;
       }
@@ -935,44 +947,69 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     }
 
     final solution = _solveQueens(_level);
-    if (solution == null) return;
-
-    // Find the first star from solution not placed yet
-    (int, int)? targetCell;
-    for (final cell in solution) {
-      if (_cells[cell.$1][cell.$2] != 2) {
-        targetCell = cell;
-        break;
-      }
+    if (solution == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cannot find solution for this layout.', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+      return;
     }
 
-    if (targetCell == null) return;
+    // 1. Look for incorrect stars placed by the player.
+    (int, int)? incorrectCell;
+    final Set<(int, int)> solSet = Set.from(solution);
+    for (int r = 0; r < _level.n; r++) {
+      for (int c = 0; c < _level.n; c++) {
+        if (_cells[r][c] == 2 && !solSet.contains((r, c))) {
+          incorrectCell = (r, c);
+          break;
+        }
+      }
+      if (incorrectCell != null) break;
+    }
 
     await HintManager.useHint('queens');
     final newCount = await HintManager.getHints('queens');
     AudioManager.playClick();
+    settingsNotifier.hapticTap();
 
     setState(() {
       _hintCount = newCount;
+      if (incorrectCell != null) {
+        // Erase incorrect star
+        _cells[incorrectCell!.$1][incorrectCell!.$2] = 0;
+        _error = '';
+      } else {
+        // Place next correct star
+        (int, int)? targetCell;
+        for (final cell in solution) {
+          if (_cells[cell.$1][cell.$2] != 2) {
+            targetCell = cell;
+            break;
+          }
+        }
+        if (targetCell != null) {
+          _cells[targetCell.$1][targetCell.$2] = 2;
+          _error = '';
+        }
+      }
     });
-
-    final int targetRow = targetCell.$1;
-    final int targetCol = targetCell.$2;
-    final int half = (_level.n / 2).ceil();
-    final String colRange = targetCol < half ? "1 to $half" : "${half + 1} to ${_level.n}";
-    final String message = "Hint: A star belongs in Row ${targetRow + 1}, columns $colRange.";
 
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          message,
+          incorrectCell != null ? 'Hint: Removed an incorrect star!' : 'Hint: Placed a correct star!',
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
         ),
-        duration: const Duration(seconds: 4),
+        duration: const Duration(seconds: 2),
         backgroundColor: AppTheme.accentFor('queens'),
       ),
     );
+
+    _tryAutoCheck();
   }
 
   void _loadLevel() {
@@ -980,6 +1017,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _timeLeft = -1;
     _timeBonusEarned = false;
 
+    _activeModifiers = {};
     int n = 5;
     if (!_playDailyMode && _levelIndex >= 30) {
       if (_levelIndex >= 30 && _levelIndex < 60) {
@@ -990,6 +1028,18 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         // Rotation (L90+)
         n = 6 + ((_levelIndex - 90) % 5); // Rotates 6, 7, 8, 9, 10
       }
+      final pool = ['gridSize', 'regionContortion', 'timer'];
+      if (n > 7) {
+        pool.add('twoStarMode');
+      }
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'queens',
+        levelIndex: _levelIndex,
+        pool: pool,
+        minActive: 2,
+        maxActive: 3,
+        smallGrid: (n <= 6),
+      );
     } else if (_levelIndex < 5) {
       n = 5;
     } else if (_levelIndex < 15) {
@@ -1180,15 +1230,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
           AudioManager.playFail();
           setState(() => _error = 'Stars cannot touch, even diagonally!');
           return;
-        }
-        if (_useTwoStars) {
-          int dr = (qr - r).abs();
-          int dc = (qc - c).abs();
-          if ((dr == 1 && dc == 2) || (dr == 2 && dc == 1)) {
-            AudioManager.playFail();
-            setState(() => _error = 'Anti-Knight Rule: Stars cannot be a knight\'s move apart!');
-            return;
-          }
         }
       }
     }
@@ -1468,7 +1509,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                       const SizedBox(height: 8),
                       Text(
                         _isEndgame
-                            ? 'Tap: empty → X → Star → empty. Drag to place/erase X marks.\n★★ Two Stars per row, column & color. Stars cannot touch.\nAnti-Knight: Stars cannot be a knight\'s move apart.'
+                            ? 'Tap: empty → X → Star → empty. Drag to place/erase X marks.\n★★ Two Stars per row, column & color. Stars cannot touch.'
                             : 'Tap: empty → X → Star → empty. Drag to place/erase X marks.\nOne Star per row, column & color.',
                         style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(11)),
                         textAlign: TextAlign.center,
