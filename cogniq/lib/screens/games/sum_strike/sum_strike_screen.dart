@@ -842,12 +842,12 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
 
                                     return Container(
                                       decoration: BoxDecoration(
-                                        color: isMatch ? Colors.amber.withOpacity(0.1) : Colors.amber.withOpacity(0.2),
+                                        color: isMatch ? Colors.amber.withOpacity(0.08) : Colors.amber.withOpacity(0.25),
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: isMatch
                                               ? Colors.amber.withOpacity(0.3)
-                                              : Colors.amber.withOpacity(0.6),
+                                              : Colors.amber.withOpacity(0.85),
                                           width: 1.5,
                                         ),
                                       ),
@@ -855,11 +855,11 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                         child: Text(
                                           '$target',
                                           style: GoogleFonts.spaceGrotesk(
-                                            fontSize: 14,
+                                            fontSize: 15,
                                             fontWeight: FontWeight.bold,
-                                            color: isMatch ? Colors.amber.withOpacity(0.4) : Colors.amber,
+                                            color: isMatch ? Colors.amber.withOpacity(0.6) : Colors.amberAccent.shade100,
                                             decoration: isMatch ? TextDecoration.lineThrough : null,
-                                            decorationColor: Colors.amber,
+                                            decorationColor: Colors.amberAccent,
                                             decorationThickness: 2,
                                           ),
                                           textAlign: TextAlign.center,
@@ -876,12 +876,12 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
 
                                     return Container(
                                       decoration: BoxDecoration(
-                                        color: isMatch ? Colors.amber.withOpacity(0.1) : Colors.amber.withOpacity(0.2),
+                                        color: isMatch ? Colors.amber.withOpacity(0.08) : Colors.amber.withOpacity(0.25),
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: isMatch
                                               ? Colors.amber.withOpacity(0.3)
-                                              : Colors.amber.withOpacity(0.6),
+                                              : Colors.amber.withOpacity(0.85),
                                           width: 1.5,
                                         ),
                                       ),
@@ -889,11 +889,11 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                         child: Text(
                                           '$target',
                                           style: GoogleFonts.spaceGrotesk(
-                                            fontSize: 14,
+                                            fontSize: 15,
                                             fontWeight: FontWeight.bold,
-                                            color: isMatch ? Colors.amber.withOpacity(0.4) : Colors.amber,
+                                            color: isMatch ? Colors.amber.withOpacity(0.6) : Colors.amberAccent.shade100,
                                             decoration: isMatch ? TextDecoration.lineThrough : null,
-                                            decorationColor: Colors.amber,
+                                            decorationColor: Colors.amberAccent,
                                             decorationThickness: 2,
                                           ),
                                           textAlign: TextAlign.center,

@@ -296,22 +296,40 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   }
 
   int _solveColorFlood(List<int> initialGrid, int size, int numColors) {
-    String serialize(List<int> g) => String.fromCharCodes(g);
+    List<int> grid = List<int>.from(initialGrid);
+    int seedIdx = _seedFromCenter ? (size ~/ 2) * size + (size ~/ 2) : 0;
+    int moves = 0;
     
-    final startKey = serialize(initialGrid);
-    final Set<String> visited = {startKey};
-    final List<(List<int>, int)> queue = [(List<int>.from(initialGrid), 0)];
-    
-    int limit = 800; // Fast cap
-    int head = 0;
-    
-    while (head < queue.length && head < limit) {
-      final (currentGrid, moves) = queue[head++];
-      int seedIdx = _seedFromCenter ? (size ~/ 2) * size + (size ~/ 2) : 0;
-      int firstColor = currentGrid[seedIdx];
+    while (moves < 100) {
+      int firstColor = grid[seedIdx];
+      
+      List<int> component = [seedIdx];
+      List<bool> visited = List.filled(size * size, false);
+      visited[seedIdx] = true;
+      int compHead = 0;
+      
+      while (compHead < component.length) {
+        int curr = component[compHead++];
+        int r = curr ~/ size;
+        int c = curr % size;
+        
+        final neighbors = <int>[];
+        if (r > 0) neighbors.add(curr - size);
+        if (r < size - 1) neighbors.add(curr + size);
+        if (c > 0) neighbors.add(curr - 1);
+        if (c < size - 1) neighbors.add(curr + 1);
+        
+        for (int n in neighbors) {
+          if (!visited[n] && grid[n] == firstColor) {
+            visited[n] = true;
+            component.add(n);
+          }
+        }
+      }
+      
       bool allMatched = true;
-      for (int i = 0; i < currentGrid.length; i++) {
-        if (currentGrid[i] != numColors && currentGrid[i] != firstColor) {
+      for (int i = 0; i < grid.length; i++) {
+        if (grid[i] != numColors && grid[i] != firstColor) {
           allMatched = false;
           break;
         }
@@ -320,62 +338,75 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         return moves;
       }
       
+      int bestColor = -1;
+      int maxGained = -1;
+      
       for (int col = 0; col < numColors; col++) {
         if (col == firstColor) continue;
         
-        List<int> nextGrid = List<int>.from(currentGrid);
+        int gained = 0;
+        List<bool> adjacentVisited = List.filled(size * size, false);
         
-        List<int> component = [seedIdx];
-        List<bool> compVisited = List.filled(size * size, false);
-        compVisited[seedIdx] = true;
-        int compHead = 0;
-        while (compHead < component.length) {
-          int curr = component[compHead++];
+        for (int curr in component) {
           int r = curr ~/ size;
           int c = curr % size;
           
-          if (r > 0) {
-            int n = (r - 1) * size + c;
-            if (nextGrid[n] == firstColor && !compVisited[n]) {
-              compVisited[n] = true;
-              component.add(n);
-            }
-          }
-          if (r < size - 1) {
-            int n = (r + 1) * size + c;
-            if (nextGrid[n] == firstColor && !compVisited[n]) {
-              compVisited[n] = true;
-              component.add(n);
-            }
-          }
-          if (c > 0) {
-            int n = r * size + c - 1;
-            if (nextGrid[n] == firstColor && !compVisited[n]) {
-              compVisited[n] = true;
-              component.add(n);
-            }
-          }
-          if (c < size - 1) {
-            int n = r * size + c + 1;
-            if (nextGrid[n] == firstColor && !compVisited[n]) {
-              compVisited[n] = true;
-              component.add(n);
+          final neighbors = <int>[];
+          if (r > 0) neighbors.add(curr - size);
+          if (r < size - 1) neighbors.add(curr + size);
+          if (c > 0) neighbors.add(curr - 1);
+          if (c < size - 1) neighbors.add(curr + 1);
+          
+          for (int n in neighbors) {
+            if (!visited[n] && grid[n] == col && !adjacentVisited[n]) {
+              List<int> colQueue = [n];
+              adjacentVisited[n] = true;
+              int qHead = 0;
+              while (qHead < colQueue.length) {
+                int currColCell = colQueue[qHead++];
+                gained++;
+                
+                int cr = currColCell ~/ size;
+                int cc = currColCell % size;
+                final colNeighbors = <int>[];
+                if (cr > 0) colNeighbors.add(currColCell - size);
+                if (cr < size - 1) colNeighbors.add(currColCell + size);
+                if (cc > 0) colNeighbors.add(currColCell - 1);
+                if (cc < size - 1) colNeighbors.add(currColCell + 1);
+                
+                for (int cn in colNeighbors) {
+                  if (!visited[cn] && grid[cn] == col && !adjacentVisited[cn]) {
+                    adjacentVisited[cn] = true;
+                    colQueue.add(cn);
+                  }
+                }
+              }
             }
           }
         }
         
-        for (int idx in component) {
-          nextGrid[idx] = col;
-        }
-        
-        final nKey = serialize(nextGrid);
-        if (!visited.contains(nKey)) {
-          visited.add(nKey);
-          queue.add((nextGrid, moves + 1));
+        if (gained > maxGained) {
+          maxGained = gained;
+          bestColor = col;
         }
       }
+      
+      if (bestColor == -1 || maxGained == 0) {
+        for (int col = 0; col < numColors; col++) {
+          if (col != firstColor) {
+            bestColor = col;
+            break;
+          }
+        }
+      }
+      
+      for (int idx in component) {
+        grid[idx] = bestColor;
+      }
+      moves++;
     }
-    return 99; // Solver limit hit
+    
+    return moves;
   }
 
   Future<void> _onLevelCleared() async {

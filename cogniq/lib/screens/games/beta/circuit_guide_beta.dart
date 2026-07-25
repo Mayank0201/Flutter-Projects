@@ -267,13 +267,55 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         final Map<int, int> targetNeighbors = {};
         List<List<int>> connections = List.generate(W * W, (_) => <int>[]);
         
+        bool findPathDFS(int current, Set<int> treeNodes, List<int> path, Set<int> pathSet, List<List<int>> connections, Random r) {
+          if (treeNodes.contains(current)) {
+            if (connections[current].length < 3) {
+              path.add(current);
+              return true;
+            }
+            return false;
+          }
+          
+          int row = current ~/ W;
+          int col = current % W;
+          List<int> neighbors = [];
+          if (row > 0) neighbors.add(current - W);
+          if (row < W - 1) neighbors.add(current + W);
+          if (col > 0) neighbors.add(current - 1);
+          if (col < W - 1) neighbors.add(current + 1);
+          
+          neighbors.removeWhere((n) => n == srcIdx || tgts.contains(n));
+          neighbors.shuffle(r);
+          
+          for (int n in neighbors) {
+            if (pathSet.contains(n)) continue;
+            
+            if (treeNodes.contains(n)) {
+              if (connections[n].length < 3) {
+                path.add(n);
+                return true;
+              }
+              continue;
+            }
+            
+            pathSet.add(n);
+            path.add(n);
+            if (findPathDFS(n, treeNodes, path, pathSet, connections, r)) {
+              return true;
+            }
+            path.removeLast();
+            pathSet.remove(n);
+          }
+          return false;
+        }
+
         bool success = false;
         int generationRetries = 0;
-        while (!success && generationRetries < 10) {
+        while (!success && generationRetries < 50) {
           generationRetries++;
           int attempts = 0;
           final retryRng = Random(rng.nextInt(1000000) + generationRetries);
-          while (!success && attempts < 1000) {
+          while (!success && attempts < 200) {
             attempts++;
             for (int i = 0; i < W * W; i++) {
               connections[i] = [];
@@ -314,48 +356,13 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             Set<int> treeNodes = {srcIdx, srcNeighbor};
             success = true;
             
-            int walkBudget = 200;
-            if (!_playDailyMode && _currentLevel >= 30) {
-              bool hasTortuosity = _activeModifiers.contains('timer'); // wait, the modifier is tortuosity
-              if (_activeModifiers.contains('tortuosity')) walkBudget = 350;
-            }
-
             for (int tNeighbor in tNeighbors) {
               if (treeNodes.contains(tNeighbor)) continue;
               
               List<int> path = [tNeighbor];
               Set<int> pathSet = {tNeighbor};
-              int current = tNeighbor;
-              bool pathFound = false;
-              int walkAttempts = 0;
               
-              while (walkAttempts < walkBudget) {
-                walkAttempts++;
-                int r = current ~/ W;
-                int c = current % W;
-                List<int> neighbors = [];
-                if (r > 0) neighbors.add(current - W);
-                if (r < W - 1) neighbors.add(current + W);
-                if (c > 0) neighbors.add(current - 1);
-                if (c < W - 1) neighbors.add(current + 1);
-                
-                neighbors.removeWhere((n) => n == srcIdx || tgts.contains(n));
-                neighbors.removeWhere((n) => treeNodes.contains(n) && (connections[n].length >= 3));
-                
-                if (neighbors.isEmpty) break;
-                
-                int nextNode = neighbors[retryRng.nextInt(neighbors.length)];
-                if (treeNodes.contains(nextNode)) {
-                  path.add(nextNode);
-                  pathFound = true;
-                  break;
-                }
-                if (!pathSet.contains(nextNode)) {
-                  path.add(nextNode);
-                  pathSet.add(nextNode);
-                  current = nextNode;
-                }
-              }
+              bool pathFound = findPathDFS(tNeighbor, treeNodes, path, pathSet, connections, retryRng);
               
               if (pathFound) {
                 for (int i = 0; i < path.length - 1; i++) {
