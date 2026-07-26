@@ -4,7 +4,8 @@ import '../utils/achievement_manager.dart';
 import '../theme/app_theme.dart';
 
 class AchievementsScreen extends StatefulWidget {
-  const AchievementsScreen({super.key});
+  final String? highlightId;
+  const AchievementsScreen({super.key, this.highlightId});
 
   @override
   State<AchievementsScreen> createState() => _AchievementsScreenState();
@@ -16,6 +17,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
   List<String> _claimedIds = [];
   Map<String, double> _progressMap = {};
   bool _loading = true;
+  final ScrollController _scrollController = ScrollController();
 
   final List<String> _categories = [
     'All',
@@ -32,6 +34,12 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
     _loadStats();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadStats() async {
     await AchievementManager.checkAndUnlock('');
     final unlocked = await AchievementManager.getUnlockedIds();
@@ -41,6 +49,26 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
       progress[a.id] = await AchievementManager.getProgress(a);
     }
 
+    if (widget.highlightId != null) {
+      Achievement? a;
+      for (final ach in AchievementManager.allAchievements) {
+        if (ach.id == widget.highlightId) {
+          a = ach;
+          break;
+        }
+      }
+      if (a != null) {
+        String matchingCategory = 'All';
+        for (final c in _categories) {
+          if (c.toLowerCase() == a.category.toLowerCase()) {
+            matchingCategory = c;
+            break;
+          }
+        }
+        _selectedCategory = matchingCategory;
+      }
+    }
+
     if (mounted) {
       setState(() {
         _unlockedIds = unlocked;
@@ -48,6 +76,24 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
         _progressMap = progress;
         _loading = false;
       });
+
+      if (widget.highlightId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final filtered = AchievementManager.allAchievements.where((a) {
+            if (_selectedCategory == 'All') return true;
+            return a.category.toLowerCase() == _selectedCategory.toLowerCase();
+          }).toList();
+          final index = filtered.indexWhere((x) => x.id == widget.highlightId);
+          if (index != -1) {
+            double offset = index * 105.0; // approximate card heights
+            _scrollController.animateTo(
+              offset,
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeInOutCubic,
+            );
+          }
+        });
+      }
     }
   }
 
@@ -148,25 +194,38 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                   height: 36,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
                     itemCount: _categories.length,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
                     itemBuilder: (context, index) {
                       final cat = _categories[index];
                       final isSelected = _selectedCategory == cat;
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        padding: const EdgeInsets.only(right: 8),
                         child: ChoiceChip(
                           label: Text(
                             cat,
                             style: GoogleFonts.outfit(
                               fontSize: 12,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                              color: isSelected
-                                  ? Colors.white
-                                  : context.textSecondary,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              color: isSelected ? Colors.white : context.textPrimary,
                             ),
                           ),
                           selected: isSelected,
+                          selectedColor: AppTheme.dustyMauve,
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          selectedShadowColor: Colors.transparent,
+                          elevation: 0,
+                          pressElevation: 0,
+                          checkmarkColor: Colors.transparent,
+                          showCheckmark: false,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            side: BorderSide(
+                              color: isSelected ? AppTheme.dustyMauve : context.textMuted.withAlpha(40),
+                              width: 0.8,
+                            ),
+                          ),
                           onSelected: (selected) {
                             if (selected) {
                               setState(() {
@@ -174,32 +233,16 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                               });
                             }
                           },
-                          selectedColor: AppTheme.dustyMauve,
-                          backgroundColor: Colors.transparent,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                            side: BorderSide(
-                              color: isSelected
-                                  ? Colors.transparent
-                                  : (isDark ? Colors.white12 : Colors.black12),
-                              width: 0.5,
-                            ),
-                          ),
-                          showCheckmark: false,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                         ),
                       );
                     },
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
                 // 3. Grid/List of achievements
                 Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: _buildAchievementsList(),
-                  ),
+                  child: _buildAchievementsList(),
                 ),
               ],
             ),
@@ -236,6 +279,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
     }
 
     return ListView.builder(
+      controller: _scrollController,
       key: ValueKey<String>(_selectedCategory),
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       itemCount: filtered.length,
@@ -252,10 +296,18 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isClaimed = _claimedIds.contains(a.id);
     final canClaim = isUnlocked && !isClaimed;
+    final isHighlight = widget.highlightId == a.id;
 
     Widget cardContent = Container(
       padding: const EdgeInsets.all(16),
-      decoration: AppTheme.zenCard(context),
+      decoration: AppTheme.zenCard(context).copyWith(
+        border: Border.all(
+          color: isHighlight
+              ? Colors.amber
+              : context.textMuted.withAlpha(30),
+          width: isHighlight ? 2.0 : 0.5,
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -364,7 +416,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                     ],
                   ),
                 ] else ...[
-                  // Unlocked but unclaimed state: show Claim button + reward hint
+                  // Unlocked but unclaimed state
                   if (a.rewardPoints > 0) ...[
                     Text(
                       '+${a.rewardPoints} IQ',
@@ -391,6 +443,10 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                             ),
                           );
                           _loadStats();
+                          if (a.rewardTitle != null) {
+                            AchievementManager.titleClaimedNotifier.value = a.rewardTitle;
+                            Navigator.of(context).pop();
+                          }
                         }
                       }
                     },
@@ -415,7 +471,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                   ),
                 ],
               ] else ...[
-                // Locked State: show prospective rewards
+                // Locked State
                 if (a.rewardPoints > 0)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -444,7 +500,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                       ],
                     ),
                   ),
-                if (a.rewardTitle != null || a.rewardTrailStyle != null) ...[
+                if (a.rewardTitle != null) ...[
                   if (a.rewardPoints > 0) const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -454,7 +510,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                       border: Border.all(color: AppTheme.dustyMauve.withAlpha(50), width: 0.5),
                     ),
                     child: Text(
-                      a.rewardTitle ?? 'Cosmetic',
+                      a.rewardTitle!,
                       style: GoogleFonts.outfit(
                         fontSize: 9,
                         fontWeight: FontWeight.bold,
@@ -487,6 +543,10 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                 ),
               );
               _loadStats();
+              if (a.rewardTitle != null) {
+                AchievementManager.titleClaimedNotifier.value = a.rewardTitle;
+                Navigator.of(context).pop();
+              }
             }
           }
         },

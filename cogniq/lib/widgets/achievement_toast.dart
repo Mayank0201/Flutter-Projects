@@ -1,8 +1,10 @@
 import 'dart:ui';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/achievement_manager.dart';
 import '../theme/app_theme.dart';
+import '../screens/achievements_screen.dart';
 
 class AchievementToast {
   static final List<Achievement> _queue = [];
@@ -63,6 +65,7 @@ class _AchievementToastWidgetState extends State<_AchievementToastWidget>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<Offset> _offsetAnimation;
+  Timer? _dismissTimer;
 
   @override
   void initState() {
@@ -82,8 +85,8 @@ class _AchievementToastWidgetState extends State<_AchievementToastWidget>
 
     _controller.forward();
 
-    // Auto dismiss after 2.7 seconds (500ms slide-in + 1700ms stay + 500ms slide-out)
-    Future.delayed(const Duration(milliseconds: 2200), () {
+    // Auto dismiss after 2.7 seconds
+    _dismissTimer = Timer(const Duration(milliseconds: 2200), () {
       if (mounted) {
         _controller.reverse().then((_) {
           widget.onDismiss();
@@ -94,6 +97,7 @@ class _AchievementToastWidgetState extends State<_AchievementToastWidget>
 
   @override
   void dispose() {
+    _dismissTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -110,72 +114,101 @@ class _AchievementToastWidgetState extends State<_AchievementToastWidget>
         position: _offsetAnimation,
         child: Align(
           alignment: Alignment.topCenter,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                constraints: const BoxConstraints(maxWidth: 400),
-                decoration: BoxDecoration(
-                  color: (isDark ? const Color(0xFF252320) : Colors.white).withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isDark ? Colors.white10 : Colors.black12,
-                    width: 0.5,
-                  ),
+          child: GestureDetector(
+            onTap: () {
+              _dismissTimer?.cancel();
+              widget.onDismiss();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AchievementsScreen(highlightId: widget.achievement.id),
                 ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.dustyMauve.withAlpha(30),
-                          shape: BoxShape.circle,
+              );
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  constraints: const BoxConstraints(maxWidth: 400),
+                  decoration: BoxDecoration(
+                    color: (isDark ? const Color(0xFF252320) : Colors.white).withOpacity(0.85),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isDark ? Colors.white10 : Colors.black12,
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.dustyMauve.withAlpha(30),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            widget.achievement.icon,
+                            style: const TextStyle(fontSize: 22),
+                          ),
                         ),
-                        child: Text(
-                          widget.achievement.icon,
-                          style: const TextStyle(fontSize: 22),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Achievement Unlocked!',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.dustyMauve,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.achievement.name,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                widget.achievement.description,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 12,
+                                  color: context.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Tap to claim ',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.dustyMauve,
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 10,
+                                    color: AppTheme.dustyMauve,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Achievement Unlocked!',
-                              style: GoogleFonts.outfit(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.dustyMauve,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              widget.achievement.name,
-                              style: GoogleFonts.outfit(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                            const SizedBox(height: 1),
-                            Text(
-                              widget.achievement.description,
-                              style: GoogleFonts.outfit(
-                                fontSize: 12,
-                                color: context.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

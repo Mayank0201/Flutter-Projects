@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../utils/achievement_manager.dart';
 
 class LossOverlay extends StatefulWidget {
   final VoidCallback onTryAgain;
@@ -30,6 +31,7 @@ class _LossOverlayState extends State<LossOverlay> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
+    AchievementManager.resetClearStreak();
     _flashController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 350),

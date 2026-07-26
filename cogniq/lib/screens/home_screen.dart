@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,10 +19,11 @@ import 'trails_screen.dart';
 import '../widgets/buy_hints_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
 import '../utils/prefs_keys.dart';
-// import 'daily_challenge_test_screen.dart';
+import 'daily_challenge_test_screen.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/notification_manager.dart';
 import '../utils/shuffle_manager.dart';
+import '../utils/achievement_manager.dart';
 import '../main.dart';
 
 const Map<String, IconData> _gameIcons = {
@@ -80,6 +82,203 @@ const Map<String, List<String>> _categories = {
   ],
 };
 
+class AnimatedRainbowText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  final String title;
+  const AnimatedRainbowText({super.key, required this.text, required this.style, required this.title});
+
+  @override
+  State<AnimatedRainbowText> createState() => _AnimatedRainbowTextState();
+}
+
+class _AnimatedRainbowTextState extends State<AnimatedRainbowText>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    List<Color> gradientColors;
+    switch (widget.title) {
+      case 'Apprentice':
+        // Copper-rose metallic gradient
+        gradientColors = const [
+          Color(0xFFB87333), // copper
+          Color(0xFFFF8C69), // salmon
+          Color(0xFFCD7F32), // bronze
+          Color(0xFFB87333), // loop
+        ];
+        break;
+      case 'Expert':
+        // Cool cyan-teal gradient
+        gradientColors = const [
+          Color(0xFF008080), // teal
+          Color(0xFF00FFFF), // cyan
+          Color(0xFF66CDAA), // medium aquamarine
+          Color(0xFF008080), // loop
+        ];
+        break;
+      case 'Master':
+        // Deep violet-indigo gradient
+        gradientColors = const [
+          Color(0xFF4B0082), // indigo
+          Color(0xFFBA55D3), // medium orchid
+          Color(0xFF9400D3), // dark violet
+          Color(0xFF4B0082), // loop
+        ];
+        break;
+      case 'Obsessed':
+        // Cyberpunk neon-pink gradient
+        gradientColors = const [
+          Color(0xFFFF1493), // deep pink
+          Color(0xFFFF00FF), // magenta
+          Color(0xFFFF69B4), // hot pink
+          Color(0xFFFF1493), // loop
+        ];
+        break;
+      case 'Weekly Warrior':
+        // Forest emerald-gold gradient
+        gradientColors = const [
+          Color(0xFF006400), // dark green
+          Color(0xFFFFD700), // gold
+          Color(0xFF2E8B57), // sea green
+          Color(0xFF006400), // loop
+        ];
+        break;
+      case 'Zen Master':
+        // Flowing pastel-rainbow gradient
+        gradientColors = const [
+          Color(0xFFE6E6FA), // lavender
+          Color(0xFFFFB6C1), // light pink
+          Color(0xFF98FB98), // pale green
+          Color(0xFFFFFACD), // lemon chiffon
+          Color(0xFFADD8E6), // light blue
+          Color(0xFFE6E6FA), // loop
+        ];
+        break;
+      case 'Shuffle Master':
+        // Glitch neon-purple gradient
+        gradientColors = const [
+          Color(0xFF8A2BE2), // blue violet
+          Color(0xFF00FFFF), // cyan
+          Color(0xFFFF00FF), // magenta
+          Color(0xFF8A2BE2), // loop
+        ];
+        break;
+      case 'Completionist':
+        // Solar flare orange-red gradient
+        gradientColors = const [
+          Color(0xFFFF4500), // orange red
+          Color(0xFFFF8C00), // dark orange
+          Color(0xFFFFD700), // gold
+          Color(0xFFFF4500), // loop
+        ];
+        break;
+      case 'Grandmaster':
+        // Regal gold gradient
+        gradientColors = const [
+          Color(0xFFFFD700), // gold
+          Color(0xFFDAA520), // goldenrod
+          Color(0xFFE5E4E2), // platinum
+          Color(0xFFFFD700), // loop
+        ];
+        break;
+      case 'Legend':
+        // Royal crown gradient
+        gradientColors = const [
+          Color(0xFFDC143C), // crimson
+          Color(0xFF800080), // purple
+          Color(0xFFFFD700), // gold
+          Color(0xFFDC143C), // loop
+        ];
+        break;
+      case 'Ascendant':
+        // Cosmic stardust gradient
+        gradientColors = const [
+          Color(0xFF191970), // midnight blue
+          Color(0xFF8A2BE2), // blue violet
+          Color(0xFFC0C0C0), // silver
+          Color(0xFF191970), // loop
+        ];
+        break;
+      case 'Deep Diver':
+        // Ocean abyss gradient
+        gradientColors = const [
+          Color(0xFF000080), // navy
+          Color(0xFF1E90FF), // dodger blue
+          Color(0xFF7FFFD4), // aquamarine
+          Color(0xFF000080), // loop
+        ];
+        break;
+      case 'Purist':
+        // Pure pearl white-silver gradient
+        gradientColors = const [
+          Color(0xFFE5E4E2), // platinum
+          Color(0xFFFFFFFF), // white
+          Color(0xFFDCDCDC), // gainsboro
+          Color(0xFFE5E4E2), // loop
+        ];
+        break;
+      case 'Stylist':
+        // Aurora borealis gradient
+        gradientColors = const [
+          Color(0xFF00FF00), // green
+          Color(0xFF7F00FF), // violet
+          Color(0xFFFF007F), // bright pink
+          Color(0xFF00FF00), // loop
+        ];
+        break;
+      case 'Unbroken':
+        // Molten lava gradient
+        gradientColors = const [
+          Color(0xFF3A3B3C), // charcoal
+          Color(0xFFFF3E96), // neon pink
+          Color(0xFFFF8C00), // dark orange
+          Color(0xFF3A3B3C), // loop
+        ];
+        break;
+      default:
+        gradientColors = const [Colors.white, Colors.white];
+    }
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ShaderMask(
+          shaderCallback: (bounds) {
+            double value = _controller.value;
+            return LinearGradient(
+              colors: gradientColors,
+              begin: Alignment(-2.0 + value * 4.0, -1.0),
+              end: Alignment(0.0 + value * 4.0, 1.0),
+              tileMode: TileMode.clamp,
+            ).createShader(bounds);
+          },
+          child: Text(
+            widget.text,
+            style: widget.style.copyWith(color: Colors.white),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -101,8 +300,59 @@ class _HomeScreenState extends State<HomeScreen>
   List<GameInfo> _recentlyPlayedGames = [];
   bool _shuffleActive = false;
   int _pointBalance = 0;
+  String _activeTitle = 'Seeker';
 
 
+
+  Future<void> _showTitleSelector() async {
+    final prefs = await SharedPreferences.getInstance();
+    final unlocked = prefs.getStringList(PrefsKeys.unlockedTitles) ?? ['Seeker'];
+    if (!unlocked.contains('Seeker')) {
+      unlocked.insert(0, 'Seeker');
+    }
+    final active = prefs.getString(PrefsKeys.activeTitle) ?? 'Seeker';
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: context.bgCard,
+          title: Text(
+            'Select Active Title',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: unlocked.length,
+              itemBuilder: (context, index) {
+                final title = unlocked[index];
+                final isSelected = title == active;
+                return ListTile(
+                  title: Text(
+                    title,
+                    style: GoogleFonts.outfit(
+                      color: isSelected ? AppTheme.dustyMauve : context.textPrimary,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  trailing: isSelected ? const Icon(Icons.check, color: AppTheme.dustyMauve) : null,
+                  onTap: () async {
+                    await prefs.setString(PrefsKeys.activeTitle, title);
+                    Navigator.pop(context);
+                    _loadDailyChallengeInfo(); // Reload home screen state
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _loadShuffleState() async {
     final active = await ShuffleManager.isActive();
@@ -410,6 +660,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadDailyChallengeInfo();
     _loadShuffleState();
     settingsNotifier.addListener(_onSettingsChanged);
+    AchievementManager.titleClaimedNotifier.addListener(_onTitleClaimed);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ChallengeReminderHelper.checkAndShowReminder(context);
       NotificationManager.requestPermissions();
@@ -543,6 +794,7 @@ class _HomeScreenState extends State<HomeScreen>
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     settingsNotifier.removeListener(_onSettingsChanged);
+    AchievementManager.titleClaimedNotifier.removeListener(_onTitleClaimed);
     _ctrl.dispose();
     super.dispose();
   }
@@ -551,8 +803,20 @@ class _HomeScreenState extends State<HomeScreen>
     _loadDailyChallengeInfo();
   }
 
+  void _onTitleClaimed() {
+    final title = AchievementManager.titleClaimedNotifier.value;
+    if (title != null) {
+      AchievementManager.titleClaimedNotifier.value = null; // Reset
+      setState(() {
+        _currentTab = 3; // Switch to settings/profile tab
+      });
+      _showTitleSelector(); // Open title selector!
+    }
+  }
+
   Future<void> _loadDailyChallengeInfo() async {
     final prefs = await SharedPreferences.getInstance();
+
     final now = DateTime.now().toUtc();
     final seed = now.year * 10000 + now.month * 100 + now.day;
     final dateStr =
@@ -625,6 +889,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     _pointBalance = prefs.getInt(PrefsKeys.points) ?? 0;
     _shuffleActive = prefs.getBool(PrefsKeys.shuffleMode) ?? false;
+    _activeTitle = prefs.getString(PrefsKeys.activeTitle) ?? 'Seeker';
 
     if (mounted) setState(() {});
   }
@@ -661,7 +926,7 @@ class _HomeScreenState extends State<HomeScreen>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final totalWidth = constraints.maxWidth;
-          final tabWidth = totalWidth / 4;
+          final tabWidth = totalWidth / 5;
 
           return SizedBox(
             height: 52,
@@ -707,6 +972,13 @@ class _HomeScreenState extends State<HomeScreen>
                       Icons.person_outlined,
                       Icons.person,
                       'Profile',
+                      tabWidth,
+                    ),
+                    _buildNavItem(
+                      4,
+                      Icons.bug_report_outlined,
+                      Icons.bug_report,
+                      'Debug',
                       tabWidth,
                     ),
                   ],
@@ -789,7 +1061,12 @@ class _HomeScreenState extends State<HomeScreen>
       case 2:
         return _StatsTab(key: ValueKey(_completedCount));
       case 3:
-        return const _ProfileTab();
+        return _ProfileTab(
+          activeTitle: _activeTitle,
+          onSelectTitle: _showTitleSelector,
+        );
+      case 4:
+        return const DailyChallengeTestScreen();
       default:
         return _buildHomeTab();
     }
@@ -818,14 +1095,38 @@ class _HomeScreenState extends State<HomeScreen>
               final headerContent = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'How are you feeling today?',
-                    style: GoogleFonts.outfit(
-                      fontSize: isSmall ? 18 : context.scale(22),
-                      fontWeight: FontWeight.w600,
-                      color: context.textPrimary,
-                      letterSpacing: -0.5,
-                    ),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        'Welcome, ',
+                        style: GoogleFonts.outfit(
+                          fontSize: isSmall ? 18 : context.scale(22),
+                          fontWeight: FontWeight.w600,
+                          color: context.textPrimary,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      _activeTitle.isEmpty || _activeTitle == 'Seeker' || _activeTitle == 'Novice'
+                          ? Text(
+                              _activeTitle.isEmpty ? 'Seeker' : _activeTitle,
+                              style: GoogleFonts.outfit(
+                                fontSize: isSmall ? 18 : context.scale(22),
+                                fontWeight: FontWeight.w600,
+                                color: context.textPrimary,
+                                letterSpacing: -0.5,
+                              ),
+                            )
+                          : AnimatedRainbowText(
+                              text: _activeTitle,
+                              title: _activeTitle,
+                              style: GoogleFonts.outfit(
+                                fontSize: isSmall ? 18 : context.scale(22),
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -1837,7 +2138,13 @@ class _StatsTabState extends State<_StatsTab> {
 
 // Profile Tab content (integrated Settings)
 class _ProfileTab extends StatelessWidget {
-  const _ProfileTab();
+  final String activeTitle;
+  final VoidCallback onSelectTitle;
+
+  const _ProfileTab({
+    required this.activeTitle,
+    required this.onSelectTitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1871,6 +2178,18 @@ class _ProfileTab extends StatelessWidget {
               ),
               child: Column(
                 children: [
+                  _ProfileTile(
+                    icon: Icons.badge_outlined,
+                    title: 'Active Title',
+                    subtitle: activeTitle,
+                    trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12),
+                    onTap: onSelectTitle,
+                  ),
+                  Divider(
+                    color: context.textMuted.withAlpha(40),
+                    height: 1,
+                    thickness: 0.8,
+                  ),
                   ListenableBuilder(
                     listenable: themeNotifier,
                     builder: (ctx, _) {

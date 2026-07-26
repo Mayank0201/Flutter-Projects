@@ -9,7 +9,19 @@ import '../main.dart';
 import 'prefs_keys.dart';
 
 class HintManager {
+  static final Map<String, bool> _hintUsedThisLevel = {};
+  static bool _lastClearWasSuccessful = false;
+
   static Future<int> getHints(String gameId) async {
+    // 1. Reset hint-used flag for the current level
+    _hintUsedThisLevel[gameId] = false;
+
+    // 2. Check if we failed/restarted without clearing the last level
+    if (!_lastClearWasSuccessful) {
+      await AchievementManager.resetClearStreak();
+    }
+    _lastClearWasSuccessful = false; // Reset clear check for the new level
+
     final prefs = await SharedPreferences.getInstance();
     final key = PrefsKeys.gameHints(gameId);
     if (!prefs.containsKey(key)) {
@@ -20,6 +32,8 @@ class HintManager {
   }
 
   static Future<void> useHint(String gameId) async {
+    _hintUsedThisLevel[gameId] = true;
+
     final prefs = await SharedPreferences.getInstance();
     final current = await getHints(gameId);
     if (current > 0) {
@@ -33,9 +47,27 @@ class HintManager {
     await prefs.setInt(PrefsKeys.gameHints(gameId), current + amount);
   }
 
-  static Future<bool> onLevelCleared(String gameId) async {
+  static Future<bool> onLevelCleared(
+    String gameId, {
+    bool isBigBoard = false,
+    bool isSpeedDemon = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
-    
+
+    final hintUsed = _hintUsedThisLevel[gameId] ?? false;
+    _lastClearWasSuccessful = true; // Committed success!
+
+    // Save achievement flags
+    if (isBigBoard) {
+      await prefs.setBool(PrefsKeys.bigBoardCleared, true);
+    }
+    if (isSpeedDemon) {
+      await prefs.setBool(PrefsKeys.speedDemonEarned, true);
+    }
+
+    // Register stats in AchievementManager
+    await AchievementManager.registerClear(gameId, hintUsed);
+
     // Increment shuffle clears if shuffle is active
     if (await ShuffleManager.isActive()) {
       final sc = (prefs.getInt(PrefsKeys.shuffleClears) ?? 0) + 1;
@@ -47,30 +79,39 @@ class HintManager {
     final count = (prefs.getInt(key) ?? 0) + 1;
     await prefs.setInt(key, count);
 
-    // Increment global clear count (retained for reference/statistics)
+    // Increment global clear count
     final globalKey = PrefsKeys.globalLevelClearedCount;
     final globalCount = (prefs.getInt(globalKey) ?? 0) + 1;
     await prefs.setInt(globalKey, globalCount);
 
-    // Show interstitial ad strictly every 20 levels cleared in the active game mode
+    // Show interstitial ad strictly every 20 levels cleared
     if (count > 0 && count % 20 == 0) {
       AdManager.showInterstitialAd();
     }
 
-    // Check and trigger swipe trail unlock slide-down toast notifications
-    if (globalCount == 30 || globalCount == 60 || globalCount == 120 || globalCount == 200 || globalCount == 250 || globalCount == 300) {
+    // Check and trigger swipe trail unlock toasts (milestones ladder: 30, 100, 250)
+    if (globalCount == 30 || globalCount == 100 || globalCount == 250) {
       String name = "";
       String emoji = "";
-      if (globalCount == 30) { name = "Game Accent"; emoji = "🎯"; }
-      else if (globalCount == 60) { name = "Pastel Glow"; emoji = "🌸"; }
-      else if (globalCount == 120) { name = "Sparkle Stars"; emoji = "✨"; }
-      else if (globalCount == 200) { name = "Neon Glow"; emoji = "⚡"; }
-      else if (globalCount == 250) { name = "Rainbow Neon"; emoji = "🌈"; }
-      else if (globalCount == 300) { name = "Fire Trail"; emoji = "🔥"; }
+      String styleId = "";
+      
+      if (globalCount == 30) {
+        name = "Game Accent";
+        emoji = "🎯";
+        styleId = "accent";
+      } else if (globalCount == 100) {
+        name = "Sparkle Stars";
+        emoji = "✨";
+        styleId = "sparkle";
+      } else if (globalCount == 250) {
+        name = "Pastel Glow";
+        emoji = "🌸";
+        styleId = "pastel";
+      }
 
       final context = navigatorKey.currentContext;
       if (context != null && context.mounted) {
-        TrailUnlockToast.show(context, name, emoji);
+        TrailUnlockToast.show(context, name, emoji, styleId);
       }
     }
 
@@ -88,15 +129,6 @@ class HintManager {
       }
     }
 
-    // Award 1 hint every 5 levels - disabled: no one should award hints
-    /*
-    if (count > 0 && count % 5 == 0) {
-      final current = await getHints(gameId);
-      await prefs.setInt(PrefsKeys.gameHints(gameId), current + 1);
-      return true; // Earned a hint!
-    }
-    */
-
-    return false; // Earned points but no hint
+    return false;
   }
 }

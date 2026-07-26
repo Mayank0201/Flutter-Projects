@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/swipe_trail_overlay.dart';
 import '../utils/prefs_keys.dart';
+import '../utils/point_manager.dart';
 
 class TrailStyle {
   final String id;
@@ -37,18 +38,18 @@ const List<TrailStyle> kAllTrails = [
     previewColors: [Color(0xFFA68B8A), Color(0xFFA68B8A), Color(0xFFA68B8A)],
   ),
   TrailStyle(
-    id: 'pastel',
-    name: 'Pastel Glow',
-    description: 'Soft pink, blue, and sky blend. Gentle and calming.',
-    emoji: '🌸',
-    previewColors: [Color(0xFFF3C6D3), Color(0xFFC6DEF1), Color(0xFFD6E2E9)],
-  ),
-  TrailStyle(
     id: 'sparkle',
     name: 'Sparkle Stars',
     description: 'Golden star particles that drift, shrink, and fade with gravity.',
     emoji: '✨',
     previewColors: [Color(0xFFFFD54F), Color(0xFFFFCA28), Color(0xFFFFC107)],
+  ),
+  TrailStyle(
+    id: 'pastel',
+    name: 'Pastel Glow',
+    description: 'Soft pink, blue, and sky blend. Gentle and calming.',
+    emoji: '🌸',
+    previewColors: [Color(0xFFF3C6D3), Color(0xFFC6DEF1), Color(0xFFD6E2E9)],
   ),
   TrailStyle(
     id: 'neon_glow',
@@ -81,7 +82,8 @@ const List<TrailStyle> kAllTrails = [
 ];
 
 class TrailsScreen extends StatefulWidget {
-  const TrailsScreen({super.key});
+  final String? highlightId;
+  const TrailsScreen({super.key, this.highlightId});
 
   @override
   State<TrailsScreen> createState() => _TrailsScreenState();
@@ -91,8 +93,10 @@ class _TrailsScreenState extends State<TrailsScreen> {
   String _activeStyle = 'none';
   bool _loading = true;
   int _globalClears = 0;
+  int _userPoints = 0;
   String? _customColorHex;
   List<String> _claimedStyles = ['none'];
+  final ScrollController _scrollController = ScrollController();
 
   final List<Color> _accentColors = const [
     Color(0xFFA68B8A), // Original Mauve (default)
@@ -110,24 +114,35 @@ class _TrailsScreenState extends State<TrailsScreen> {
     _loadState();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   int getRequiredClears(String styleId) {
     switch (styleId) {
-      case 'none':
-        return 0;
-      case 'accent':
-        return 30;
-      case 'pastel':
-        return 60;
-      case 'sparkle':
-        return 120;
-      case 'neon_glow':
-        return 200;
-      case 'rainbow':
-        return 250;
-      case 'fire':
-        return 300;
-      default:
-        return 9999;
+      case 'none':       return 0;
+      case 'accent':     return 30;
+      case 'sparkle':    return 100;
+      case 'pastel':     return 250;
+      case 'neon_glow':  return 999999; // Points only
+      case 'rainbow':    return 999999; // Points only
+      case 'fire':       return 999999; // Points only
+      default:           return 999999;
+    }
+  }
+
+  int trailPrice(String styleId) {
+    switch (styleId) {
+      case 'none':       return 0;
+      case 'accent':     return 300;
+      case 'sparkle':    return 1500;
+      case 'pastel':     return 4000;
+      case 'neon_glow':  return 9000;
+      case 'rainbow':    return 16000;
+      case 'fire':       return 25000;
+      default:           return 999999;
     }
   }
 
@@ -137,6 +152,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
     final style = prefs.getString(PrefsKeys.swipeTrailStyle) ?? 'none';
     final hex = prefs.getString(PrefsKeys.swipeTrailCustomColor);
     final claimed = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+    final points = await PointManager.getPoints();
  
     if (mounted) {
       setState(() {
@@ -144,13 +160,30 @@ class _TrailsScreenState extends State<TrailsScreen> {
         _activeStyle = style;
         _customColorHex = hex;
         _claimedStyles = claimed;
+        _userPoints = points;
         _loading = false;
       });
+
+      if (widget.highlightId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final index = kAllTrails.indexWhere((t) => t.id == widget.highlightId);
+          if (index != -1) {
+            double offset = 120.0 + index * 95.0; // approximate card heights
+            _scrollController.animateTo(
+              offset,
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeInOutCubic,
+            );
+          }
+        });
+      }
     }
   }
 
   Future<void> _selectStyle(String styleId) async {
-    if (_globalClears < getRequiredClears(styleId)) return;
+    final reqClears = getRequiredClears(styleId);
+    final isClaimed = _claimedStyles.contains(styleId);
+    if (_globalClears < reqClears && !isClaimed) return;
  
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(PrefsKeys.swipeTrailStyle, styleId);
@@ -186,6 +219,37 @@ class _TrailsScreenState extends State<TrailsScreen> {
         backgroundColor: AppTheme.softSage,
       ),
     );
+  }
+
+  Future<void> _buyStyle(String styleId) async {
+    final price = trailPrice(styleId);
+    if (_userPoints < price) return;
+
+    final success = await PointManager.consumePoints(price);
+    if (success) {
+      final prefs = await SharedPreferences.getInstance();
+      final claimed = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+      if (!claimed.contains(styleId)) {
+        claimed.add(styleId);
+        await prefs.setStringList(PrefsKeys.claimedTrailStyles, claimed);
+      }
+      final points = await PointManager.getPoints();
+      if (mounted) {
+        setState(() {
+          _claimedStyles = claimed;
+          _userPoints = points;
+        });
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Purchased trail style: ${kAllTrails.firstWhere((t) => t.id == styleId).name} for $price ✦!',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: AppTheme.softSage,
+        ),
+      );
+    }
   }
 
   Future<void> _selectCustomColor(Color color) async {
@@ -225,6 +289,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               children: [
                 // Progress summary card
@@ -251,7 +316,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Clear levels to unlock premium swipe trails.',
+                                  'Clear levels or use points to unlock trails.',
                                   style: GoogleFonts.outfit(
                                     fontSize: 12,
                                     color: context.textSecondary,
@@ -261,20 +326,41 @@ class _TrailsScreenState extends State<TrailsScreen> {
                             ),
                           ),
                           const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: AppTheme.softSage.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              '$_globalClears Cleared',
-                              style: GoogleFonts.spaceGrotesk(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.softSage,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.softSage.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '$_globalClears Cleared',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.softSage,
+                                  ),
+                                ),
                               ),
-                            ),
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.warmAmber.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '$_userPoints ✦',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.warmAmber,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -314,15 +400,14 @@ class _TrailsScreenState extends State<TrailsScreen> {
     final isUnlocked = _globalClears >= reqClears;
     final isClaimed = _claimedStyles.contains(trail.id);
     final isActive = isClaimed && _activeStyle == trail.id;
- 
+    final price = trailPrice(trail.id);
+    final canAfford = _userPoints >= price;
+    final isHighlight = widget.highlightId == trail.id;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GestureDetector(
-        onTap: isUnlocked
-            ? (isClaimed
-                ? () => _selectStyle(trail.id)
-                : () => _claimStyle(trail.id))
-            : null,
+        onTap: isClaimed ? () => _selectStyle(trail.id) : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
@@ -331,14 +416,16 @@ class _TrailsScreenState extends State<TrailsScreen> {
             color: context.bgCard,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isActive 
-                  ? AppTheme.softSage 
-                  : (isUnlocked ? context.textMuted.withAlpha(30) : context.textMuted.withAlpha(15)),
-              width: isActive ? 1.5 : 0.5,
+              color: isHighlight
+                  ? Colors.amber
+                  : (isActive 
+                      ? AppTheme.softSage 
+                      : (isUnlocked ? context.textMuted.withAlpha(30) : context.textMuted.withAlpha(15))),
+              width: (isHighlight || isActive) ? 2.0 : 0.5,
             ),
           ),
           child: Opacity(
-            opacity: isUnlocked ? 1.0 : 0.55,
+            opacity: (isUnlocked || isClaimed || (!isClaimed && canAfford)) ? 1.0 : 0.55,
             child: Row(
               children: [
                 // Preview swatch
@@ -346,8 +433,8 @@ class _TrailsScreenState extends State<TrailsScreen> {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: trail.id == 'sparkle'
+                     borderRadius: BorderRadius.circular(12),
+                     gradient: trail.id == 'sparkle'
                         ? null
                         : (trail.id == 'accent' && _customColorHex != null
                             ? null
@@ -356,7 +443,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               )),
-                    color: trail.id == 'sparkle'
+                     color: trail.id == 'sparkle'
                         ? const Color(0xFF2A2520)
                         : (trail.id == 'accent' && _customColorHex != null
                             ? Color(int.parse(_customColorHex!))
@@ -413,7 +500,9 @@ class _TrailsScreenState extends State<TrailsScreen> {
                       Text(
                         isUnlocked 
                             ? trail.description 
-                            : 'Locked: Requires $reqClears levels cleared (Current: $_globalClears)',
+                            : (reqClears >= 999999 
+                                ? 'Exclusive: Buy with points' 
+                                : 'Locked: Requires $reqClears levels cleared (Current: $_globalClears)'),
                         style: GoogleFonts.outfit(
                           fontSize: 11,
                           color: isUnlocked ? context.textSecondary : Colors.redAccent.withOpacity(0.8),
@@ -486,15 +575,15 @@ class _TrailsScreenState extends State<TrailsScreen> {
                   ),
                 ),
 
-                // Checkmark / Claim / Lock Icon
+                // Action controls
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
-                  child: isUnlocked
-                      ? (isClaimed
-                          ? (isActive 
-                              ? const Icon(Icons.check_circle_rounded, color: AppTheme.softSage, size: 20)
-                              : const SizedBox.shrink())
-                          : ElevatedButton(
+                  child: isClaimed
+                      ? (isActive 
+                          ? const Icon(Icons.check_circle_rounded, color: AppTheme.softSage, size: 20)
+                          : const SizedBox.shrink())
+                      : (isUnlocked
+                          ? ElevatedButton(
                               onPressed: () => _claimStyle(trail.id),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.dustyMauve,
@@ -514,8 +603,28 @@ class _TrailsScreenState extends State<TrailsScreen> {
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                            ))
-                      : Icon(Icons.lock_outline_rounded, color: context.textSecondary.withOpacity(0.5), size: 18),
+                            )
+                          : ElevatedButton(
+                              onPressed: canAfford ? () => _buyStyle(trail.id) : null,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: canAfford ? AppTheme.warmAmber : context.textMuted.withAlpha(20),
+                                foregroundColor: canAfford ? Colors.white : context.textMuted,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 0,
+                              ),
+                              child: Text(
+                                'Buy: $price ✦',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )),
                 ),
               ],
             ),

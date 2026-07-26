@@ -22,6 +22,14 @@ class PrefsKeys {
   static const String swipeTrailStyle = 'swipe_trail_style';
   static const String swipeTrailCustomColor = 'swipe_trail_custom_color';
 
+  // New Achievement Tracking Keys
+  static const String noHintClears = 'no_hint_clears';
+  static const String clearStreak = 'clear_streak';
+  static const String trailActiveClears = 'trail_active_clears';
+  static const String bigBoardCleared = 'big_board_cleared';
+  static const String speedDemonEarned = 'speed_demon_earned';
+  static const String lastPlayedDate = 'last_played_date';
+
   // Daily Challenge V2
   static const String dailyV2Migrated = 'daily_v2_migrated';
   static const String dailyUserProgressDay = 'daily_user_progress_day';
