@@ -360,9 +360,14 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   String _dailyModifierDesc = '';
   
   Set<String> _activeModifiers = {};
+  Timer? _glitchTimer;
+  bool _glitchTick = false;
+  bool _isPanMode = false;
   
   bool get _isEndgame {
-    if (_playDailyMode) return false;
+    if (_playDailyMode) {
+      return _dailyModifierType == 'timer';
+    }
     if (_levelIndex >= 30) {
       return _activeModifiers.contains('timer');
     }
@@ -385,6 +390,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   @override
   void dispose() {
     _gameTimer?.cancel();
+    _glitchTimer?.cancel();
     super.dispose();
   }
 
@@ -1021,14 +1027,20 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _gameOver = false;
 
     _activeModifiers = {};
+    _glitchTimer?.cancel();
+
     int n = 5;
-    if (!_playDailyMode && _levelIndex >= 30) {
+    if (_playDailyMode) {
+      n = (_levelIndex < 5) ? 6 : ((_levelIndex < 8) ? 8 : 9);
+      if (_dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
+    } else if (!_playDailyMode && _levelIndex >= 30) {
       if (_levelIndex >= 30 && _levelIndex < 60) {
         n = 8;
       } else if (_levelIndex >= 60 && _levelIndex < 90) {
         n = 9;
       } else {
-        // Rotation (L90+)
         n = 10;
       }
       final pool = ['regionContortion', 'timer'];
@@ -1043,18 +1055,30 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         maxActive: 3,
         smallGrid: (n <= 6),
       );
-    } else if (_levelIndex < 5) {
-      n = 5;
-    } else if (_levelIndex < 15) {
-      n = 6;
-    } else if (_levelIndex < 30) {
-      n = 7;
-    } else if (_levelIndex < 50) {
-      n = 8;
-    } else if (_levelIndex < 75) {
-      n = 9;
     } else {
-      n = 10;
+      if (_levelIndex < 5) {
+        n = 5;
+      } else if (_levelIndex < 15) {
+        n = 6;
+      } else if (_levelIndex < 30) {
+        n = 7;
+      } else if (_levelIndex < 50) {
+        n = 8;
+      } else if (_levelIndex < 75) {
+        n = 9;
+      } else {
+        n = 10;
+      }
+    }
+
+    if (_activeModifiers.contains('glitch')) {
+      _glitchTimer = Timer.periodic(const Duration(milliseconds: 500), (t) {
+        if (mounted) {
+          setState(() {
+            _glitchTick = !_glitchTick;
+          });
+        }
+      });
     }
 
     final rand = _playDailyMode
@@ -1428,7 +1452,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
             ),
           ],
           GestureDetector(
-            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Row(
@@ -1450,7 +1474,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         ),
                   if (!_isTutorialMode && !_playDailyMode) ...[
                     const SizedBox(width: 4),
-                    const Icon(null, size: 12, color: AppTheme.queensOrange),
+                    const Icon(Icons.edit, size: 12, color: AppTheme.queensOrange),
                   ],
                 ],
               ),
@@ -1519,189 +1543,235 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(11)),
                         textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 12),
-                      Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: RepaintBoundary(
-                            child: GestureDetector(
-                            onTapUp: (details) {
-                              final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
-                              if (box == null) return;
-                              final localPos = box.globalToLocal(details.globalPosition);
-                              final row = (localPos.dy / cellSize).floor();
-                              final col = (localPos.dx / cellSize).floor();
-                              if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
-                                _tap(row, col);
-                              }
-                            },
-                            onPanStart: (details) {
-                              final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
-                              if (box == null) return;
-                              final localPos = box.globalToLocal(details.globalPosition);
-                              final row = (localPos.dy / cellSize).floor();
-                              final col = (localPos.dx / cellSize).floor();
-                              if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
-                                _onDragStart(row, col);
-                              }
-                            },
-                            onPanUpdate: (details) {
-                              final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
-                              if (box == null) return;
-                              final localPos = box.globalToLocal(details.globalPosition);
-                              final row = (localPos.dy / cellSize).floor();
-                              final col = (localPos.dx / cellSize).floor();
-                              if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
-                                _onDragUpdate(row, col);
-                              }
-                            },
-                            onPanEnd: (_) => _onDragEnd(),
-                            onPanCancel: () => _onDragEnd(),
-                            child: Column(
-                              key: _gridKey,
-                              mainAxisSize: MainAxisSize.min,
-                              children: List.generate(_level.n, (r) =>
-                                Row(mainAxisSize: MainAxisSize.min,
-                                  children: List.generate(_level.n, (c) {
-                                    final regionId = _level.regions[r][c];
-                                    final state = _cells[r][c];
-
-                                    final borderColor = context.textPrimary;
-                                    final dividerColor = context.textSecondary.withAlpha(60);
-
-                                    BorderSide getTopBorder() {
-                                      if (r == 0 || _level.regions[r - 1][c] != regionId) {
-                                        return BorderSide(color: borderColor, width: 2.5);
-                                      }
-                                      return BorderSide(color: dividerColor, width: 0.8);
-                                    }
-
-                                    BorderSide getLeftBorder() {
-                                      if (c == 0 || _level.regions[r][c - 1] != regionId) {
-                                        return BorderSide(color: borderColor, width: 2.5);
-                                      }
-                                      return BorderSide(color: dividerColor, width: 0.8);
-                                    }
-
-                                    BorderSide getRightBorder() {
-                                      if (c == _level.n - 1) {
-                                        return BorderSide(color: borderColor, width: 2.5);
-                                      }
-                                      return BorderSide(color: dividerColor, width: 0.8);
-                                    }
-
-                                    BorderSide getBottomBorder() {
-                                      if (r == _level.n - 1) {
-                                        return BorderSide(color: borderColor, width: 2.5);
-                                      }
-                                      return BorderSide(color: dividerColor, width: 0.8);
-                                    }
-
-                                    return Builder(
-                                      builder: (context) {
-                                        final regionColorsLight = const [
-                                          Color(0xFFFBCFE8), // Pink
-                                          Color(0xFFBFDBFE), // Blue
-                                          Color(0xFFA7F3D0), // Green
-                                          Color(0xFFFDE68A), // Yellow
-                                          Color(0xFFDDD6FE), // Purple
-                                          Color(0xFFFED7AA), // Orange
-                                          Color(0xFF99F6E4), // Teal
-                                          Color(0xFFC7D2FE), // Indigo
-                                          Color(0xFFFECDD3), // Rose
-                                          Color(0xFFE2E8F0), // Slate/Gray
-                                        ];
-                                        final regionColorsDark = const [
-                                          Color(0xFF6E284E), // Dark Muted Pink
-                                          Color(0xFF1E3A5F), // Dark Muted Blue
-                                          Color(0xFF154C34), // Dark Muted Green
-                                          Color(0xFF614E18), // Dark Muted Yellow
-                                          Color(0xFF3F3066), // Dark Muted Purple
-                                          Color(0xFF613B17), // Dark Muted Orange
-                                          Color(0xFF184A45), // Dark Muted Teal
-                                          Color(0xFF223161), // Dark Muted Indigo
-                                          Color(0xFF63242F), // Dark Muted Rose
-                                          Color(0xFF1E293B), // Dark Muted Slate
-                                        ];
-                                        final regionColor = context.isDarkMode 
-                                            ? regionColorsDark[regionId % regionColorsDark.length]
-                                            : regionColorsLight[regionId % regionColorsLight.length];
-
-                                        String cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}, Region ${regionId + 1}';
-                                        if (state == 1) {
-                                          cellLabel += ', X mark';
-                                        } else if (state == 2) {
-                                          cellLabel += ', Star';
-                                        } else {
-                                          cellLabel += ', empty';
-                                        }
-
-                                        return Semantics(
-                                          label: cellLabel,
-                                          child: Container(
-                                            width: cellSize, height: cellSize,
-                                            decoration: BoxDecoration(
-                                              color: regionColor,
-                                              border: Border(
-                                                top: getTopBorder(),
-                                                left: getLeftBorder(),
-                                                right: getRightBorder(),
-                                                bottom: getBottomBorder(),
-                                              ),
-                                            ),
-                                            child: Center(
-                                              child: AnimatedSwitcher(
-                                                duration: const Duration(milliseconds: 180),
-                                                transitionBuilder: (child, animation) {
-                                                  return ScaleTransition(
-                                                    scale: animation,
-                                                    child: child,
-                                                  );
-                                                },
-                                                child: state == 1
-                                                    ? Text(
-                                                        'X',
-                                                        key: const ValueKey('x_marker'),
-                                                        style: TextStyle(
-                                                          fontSize: cellSize * 0.38,
-                                                          color: context.isDarkMode ? Colors.white70 : Colors.black87,
-                                                          fontWeight: FontWeight.w900,
-                                                        ),
-                                                      )
-                                                    : state == 2
-                                                        ? Text(
-                                                            '★',
-                                                            key: const ValueKey('star_marker'),
-                                                            style: TextStyle(
-                                                              fontSize: cellSize * 0.52,
-                                                              color: AppTheme.warmAmber,
-                                                              shadows: const [
-                                                                Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))
-                                                              ],
-                                                            ),
-                                                          )
-                                                              .animate()
-                                                              .scale(
-                                                                begin: const Offset(0.3, 0.3),
-                                                                end: const Offset(1.0, 1.0),
-                                                                duration: 350.ms,
-                                                                curve: Curves.easeOutBack,
-                                                              )
-                                                              .shimmer(
-                                                                duration: 400.ms,
-                                                                color: Colors.white.withOpacity(0.4),
-                                                              )
-                                                        : const SizedBox(key: ValueKey('empty_marker')),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    );
-                                  }))),
-                              ),
+                      const SizedBox(height: 8),
+                      if (_activeModifiers.contains('zoom')) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ChoiceChip(
+                              label: Text('Draw Stars', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                              selected: !_isPanMode,
+                              onSelected: (val) => setState(() => _isPanMode = !val),
+                              selectedColor: AppTheme.queensOrange.withOpacity(0.2),
                             ),
-                          ),
+                            const SizedBox(width: 12),
+                            ChoiceChip(
+                              label: Text('Scroll Grid', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                              selected: _isPanMode,
+                              onSelected: (val) => setState(() => _isPanMode = val),
+                              selectedColor: AppTheme.queensOrange.withOpacity(0.2),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      Center(
+                        child: Builder(
+                          builder: (context) {
+                            Widget boardWidget = ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: RepaintBoundary(
+                                child: Transform.translate(
+                                  offset: (_activeModifiers.contains('glitch') && _glitchTick)
+                                      ? Offset((Random().nextDouble() - 0.5) * 8, (Random().nextDouble() - 0.5) * 8)
+                                      : Offset.zero,
+                                  child: GestureDetector(
+                                    onTapUp: _isPanMode ? null : (details) {
+                                      final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+                                      if (box == null) return;
+                                      final localPos = box.globalToLocal(details.globalPosition);
+                                      final row = (localPos.dy / cellSize).floor();
+                                      final col = (localPos.dx / cellSize).floor();
+                                      if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
+                                        _tap(row, col);
+                                      }
+                                    },
+                                    onPanStart: _isPanMode ? null : (details) {
+                                      final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+                                      if (box == null) return;
+                                      final localPos = box.globalToLocal(details.globalPosition);
+                                      final row = (localPos.dy / cellSize).floor();
+                                      final col = (localPos.dx / cellSize).floor();
+                                      if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
+                                        _onDragStart(row, col);
+                                      }
+                                    },
+                                    onPanUpdate: _isPanMode ? null : (details) {
+                                      final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+                                      if (box == null) return;
+                                      final localPos = box.globalToLocal(details.globalPosition);
+                                      final row = (localPos.dy / cellSize).floor();
+                                      final col = (localPos.dx / cellSize).floor();
+                                      if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
+                                        _onDragUpdate(row, col);
+                                      }
+                                    },
+                                    onPanEnd: _isPanMode ? null : (_) => _onDragEnd(),
+                                    onPanCancel: _isPanMode ? null : () => _onDragEnd(),
+                                    child: Column(
+                                      key: _gridKey,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: List.generate(_level.n, (r) =>
+                                        Row(mainAxisSize: MainAxisSize.min,
+                                          children: List.generate(_level.n, (c) {
+                                            final regionId = _level.regions[r][c];
+                                            final state = _cells[r][c];
+
+                                            final borderColor = context.textPrimary;
+                                            final dividerColor = context.textSecondary.withAlpha(60);
+
+                                            BorderSide getTopBorder() {
+                                              if (r == 0 || _level.regions[r - 1][c] != regionId) {
+                                                return BorderSide(color: borderColor, width: 2.5);
+                                              }
+                                              return BorderSide(color: dividerColor, width: 0.8);
+                                            }
+
+                                            BorderSide getLeftBorder() {
+                                              if (c == 0 || _level.regions[r][c - 1] != regionId) {
+                                                return BorderSide(color: borderColor, width: 2.5);
+                                              }
+                                              return BorderSide(color: dividerColor, width: 0.8);
+                                            }
+
+                                            BorderSide getRightBorder() {
+                                              if (c == _level.n - 1) {
+                                                return BorderSide(color: borderColor, width: 2.5);
+                                              }
+                                              return BorderSide(color: dividerColor, width: 0.8);
+                                            }
+
+                                            BorderSide getBottomBorder() {
+                                              if (r == _level.n - 1) {
+                                                return BorderSide(color: borderColor, width: 2.5);
+                                              }
+                                              return BorderSide(color: dividerColor, width: 0.8);
+                                            }
+
+                                            return Builder(
+                                              builder: (context) {
+                                                final regionColorsLight = const [
+                                                  Color(0xFFFBCFE8), // Pink
+                                                  Color(0xFFBFDBFE), // Blue
+                                                  Color(0xFFA7F3D0), // Green
+                                                  Color(0xFFFDE68A), // Yellow
+                                                  Color(0xFFDDD6FE), // Purple
+                                                  Color(0xFFFED7AA), // Orange
+                                                  Color(0xFF99F6E4), // Teal
+                                                  Color(0xFFC7D2FE), // Indigo
+                                                  Color(0xFFFECDD3), // Rose
+                                                  Color(0xFFE2E8F0), // Slate/Gray
+                                                ];
+                                                final regionColorsDark = const [
+                                                  Color(0xFF6E284E), // Dark Muted Pink
+                                                  Color(0xFF1E3A5F), // Dark Muted Blue
+                                                  Color(0xFF154C34), // Dark Muted Green
+                                                  Color(0xFF614E18), // Dark Muted Yellow
+                                                  Color(0xFF3F3066), // Dark Muted Purple
+                                                  Color(0xFF613B17), // Dark Muted Orange
+                                                  Color(0xFF184A45), // Dark Muted Teal
+                                                  Color(0xFF223161), // Dark Muted Indigo
+                                                  Color(0xFF63242F), // Dark Muted Rose
+                                                  Color(0xFF1E293B), // Dark Muted Slate
+                                                ];
+                                                final regionColor = context.isDarkMode 
+                                                    ? regionColorsDark[regionId % regionColorsDark.length]
+                                                    : regionColorsLight[regionId % regionColorsLight.length];
+
+                                                String cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}, Region ${regionId + 1}';
+                                                if (state == 1) {
+                                                  cellLabel += ', X mark';
+                                                } else if (state == 2) {
+                                                  cellLabel += ', Star';
+                                                } else {
+                                                  cellLabel += ', empty';
+                                                }
+
+                                                return Semantics(
+                                                  label: cellLabel,
+                                                  child: Container(
+                                                    width: cellSize, height: cellSize,
+                                                    decoration: BoxDecoration(
+                                                      color: regionColor,
+                                                      border: Border(
+                                                        top: getTopBorder(),
+                                                        left: getLeftBorder(),
+                                                        right: getRightBorder(),
+                                                        bottom: getBottomBorder(),
+                                                      ),
+                                                    ),
+                                                    child: Center(
+                                                      child: AnimatedSwitcher(
+                                                        duration: const Duration(milliseconds: 180),
+                                                        transitionBuilder: (child, animation) {
+                                                          return ScaleTransition(
+                                                            scale: animation,
+                                                            child: child,
+                                                          );
+                                                        },
+                                                        child: state == 1
+                                                            ? Text(
+                                                                'X',
+                                                                key: const ValueKey('x_marker'),
+                                                                style: TextStyle(
+                                                                  fontSize: cellSize * 0.38,
+                                                                  color: context.isDarkMode ? Colors.white70 : Colors.black87,
+                                                                  fontWeight: FontWeight.w900,
+                                                                ),
+                                                              )
+                                                            : state == 2
+                                                                ? Text(
+                                                                    '★',
+                                                                    key: const ValueKey('star_marker'),
+                                                                    style: TextStyle(
+                                                                      fontSize: cellSize * 0.52,
+                                                                      color: AppTheme.warmAmber,
+                                                                      shadows: const [
+                                                                        Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(1, 1))
+                                                                      ],
+                                                                    ),
+                                                                  )
+                                                                    .animate()
+                                                                    .scale(
+                                                                      begin: const Offset(0.3, 0.3),
+                                                                      end: const Offset(1.0, 1.0),
+                                                                      duration: 350.ms,
+                                                                      curve: Curves.easeOutBack,
+                                                                    )
+                                                                    .shimmer(
+                                                                      duration: 400.ms,
+                                                                      color: Colors.white.withOpacity(0.4),
+                                                                    )
+                                                                : const SizedBox(key: ValueKey('empty_marker')),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            );
+                                          }))),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+
+                            if (_activeModifiers.contains('zoom')) {
+                              boardWidget = SizedBox(
+                                width: maxDim,
+                                height: maxDim,
+                                child: InteractiveViewer(
+                                  panEnabled: _isPanMode,
+                                  scaleEnabled: false,
+                                  minScale: 1.4,
+                                  maxScale: 1.4,
+                                  transformationController: TransformationController(Matrix4.identity()..scale(1.4)),
+                                  child: boardWidget,
+                                ),
+                              );
+                            }
+                            return boardWidget;
+                          }
                         ),
                       ),
                       const SizedBox(height: 12),

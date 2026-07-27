@@ -57,9 +57,12 @@ class _BridgesScreenState extends State<BridgesScreen> {
 
   bool _gameOver = false;
   Set<String> _activeModifiers = {};
+  bool _isPanMode = false;
 
   bool get _isEndgame {
-    if (_playDailyMode) return false;
+    if (_playDailyMode) {
+      return _dailyModifierType == 'timer';
+    }
     if (_currentLevel >= 30) {
       return _activeModifiers.contains('timer');
     }
@@ -184,6 +187,9 @@ class _BridgesScreenState extends State<BridgesScreen> {
       );
     } else {
       _activeModifiers = {};
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
     }
 
     _islands = List.from(level.islands);
@@ -995,7 +1001,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'bridges', 'Bridges'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -1008,7 +1014,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1041,45 +1047,86 @@ class _BridgesScreenState extends State<BridgesScreen> {
                           ),
                         ),
                         const SizedBox(height: 24),
-                        RepaintBoundary(
-                          child: Container(
-                            width: boardSize,
-                            height: boardSize,
-                            decoration: BoxDecoration(
-                              color: context.bgCard,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: context.textMuted.withAlpha(30)),
-                            ),
-                            child: FogOverlay(
-                              enabled: _isFogActive,
-                              radius: cellSpacing * _dailyRadius,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: GestureDetector(
-                                  onPanStart: (d) => _onPanStart(d, cellSpacing, origin),
-                                  onPanUpdate: (d) => _onPanUpdate(d, cellSpacing, origin),
-                                  onPanEnd: (d) => _onPanEnd(d, cellSpacing, origin),
-                                  onTapUp: (d) => _onTapUp(d, cellSpacing, origin),
-                                  child: CustomPaint(
-                                    size: Size(boardSize, boardSize),
-                                    painter: _BridgesPainter(
-                                      gridSize: _gridSize,
-                                      islands: _islands,
-                                      bridgeCounts: _bridgeCounts,
-                                      cellSpacing: cellSpacing,
-                                      origin: origin,
-                                      selectedIsland: _selectedIsland,
-                                      dragPosition: _dragPositionNotifier,
-                                      dragStartIsland: _dragStartIsland,
-                                      hintIdx: _hintIdx,
-                                      onGetBridges: _getCurrentBridges,
-                                      hiddenIslands: _hiddenIslands,
+                        if (_activeModifiers.contains('zoom')) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              ChoiceChip(
+                                label: Text('Draw Bridges', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                                selected: !_isPanMode,
+                                onSelected: (val) => setState(() => _isPanMode = !val),
+                                selectedColor: AppTheme.dustyMauve.withOpacity(0.2),
+                              ),
+                              const SizedBox(width: 12),
+                              ChoiceChip(
+                                label: Text('Scroll Grid', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                                selected: _isPanMode,
+                                onSelected: (val) => setState(() => _isPanMode = val),
+                                selectedColor: AppTheme.dustyMauve.withOpacity(0.2),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        Builder(
+                          builder: (context) {
+                            Widget boardWidget = RepaintBoundary(
+                              child: Container(
+                                width: boardSize,
+                                height: boardSize,
+                                decoration: BoxDecoration(
+                                  color: context.bgCard,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: context.textMuted.withAlpha(30)),
+                                ),
+                                child: FogOverlay(
+                                  enabled: _isFogActive,
+                                  radius: cellSpacing * _dailyRadius,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: GestureDetector(
+                                      onPanStart: _isPanMode ? null : (d) => _onPanStart(d, cellSpacing, origin),
+                                      onPanUpdate: _isPanMode ? null : (d) => _onPanUpdate(d, cellSpacing, origin),
+                                      onPanEnd: _isPanMode ? null : (d) => _onPanEnd(d, cellSpacing, origin),
+                                      onTapUp: _isPanMode ? null : (d) => _onTapUp(d, cellSpacing, origin),
+                                      child: CustomPaint(
+                                        size: Size(boardSize, boardSize),
+                                        painter: _BridgesPainter(
+                                          gridSize: _gridSize,
+                                          islands: _islands,
+                                          bridgeCounts: _bridgeCounts,
+                                          cellSpacing: cellSpacing,
+                                          origin: origin,
+                                          selectedIsland: _selectedIsland,
+                                          dragPosition: _dragPositionNotifier,
+                                          dragStartIsland: _dragStartIsland,
+                                          hintIdx: _hintIdx,
+                                          onGetBridges: _getCurrentBridges,
+                                          hiddenIslands: _hiddenIslands,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
+                            );
+
+                            if (_activeModifiers.contains('zoom')) {
+                              boardWidget = SizedBox(
+                                width: boardSize,
+                                height: boardSize,
+                                child: InteractiveViewer(
+                                  panEnabled: _isPanMode,
+                                  scaleEnabled: false,
+                                  minScale: 1.4,
+                                  maxScale: 1.4,
+                                  transformationController: TransformationController(Matrix4.identity()..scale(1.4)),
+                                  child: boardWidget,
+                                ),
+                              );
+                            }
+                            return boardWidget;
+                          }
                         ),
                       ],
                     ),

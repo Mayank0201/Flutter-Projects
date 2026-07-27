@@ -110,7 +110,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
         ? Random()
         : RotationEngine.getDeterminism('oddcolorout', _levelIndex + _attempts);
     
-    if (_isDailyMode && _dailyModifierType == 'chaos') {
+    if (_isDailyMode && (_dailyModifierType == 'chaos' || _dailyModifierType == 'time_warp')) {
       if (_chaosIsFirstCall) {
         _chaosHasOdd = false;
         _chaosIsFirstCall = false;
@@ -343,8 +343,9 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
             _isShadowed = !_isShadowed;
           });
         });
-      } else if (_dailyModifierType == 'chaos') {
-        _chaosTimeLeft = 4;
+      } else if (_dailyModifierType == 'chaos' || _dailyModifierType == 'time_warp') {
+        final int interval = (_dailyModifierType == 'time_warp') ? 2 : 4;
+        _chaosTimeLeft = interval;
         _chaosTickId = 0;
         _chaosTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
           if (!mounted) {
@@ -372,7 +373,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
             }
             
             setState(() {
-              _chaosTimeLeft = 4;
+              _chaosTimeLeft = interval;
               _chaosTickId++;
               _generateLevelColors(keepPosition: true);
             });
@@ -475,7 +476,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   void _onCellTap(int r, int c) {
     if (_levelCleared || _gameOver) return;
 
-    if (_isDailyMode && _dailyModifierType == 'chaos') {
+    if (_isDailyMode && (_dailyModifierType == 'chaos' || _dailyModifierType == 'time_warp')) {
       if (_chaosHasOdd && r == _oddRow && c == _oddCol) {
         // Correct!
         AudioManager.playSuccess();
@@ -804,7 +805,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                             )
                           else if (!_isDailyMode)
                             GestureDetector(
-                              onTap: null,
+                              onTap: _showJumpToLevelDialog,
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [

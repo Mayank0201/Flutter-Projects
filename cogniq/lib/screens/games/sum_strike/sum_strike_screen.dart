@@ -174,6 +174,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       );
     } else {
       _activeModifiers = {};
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
     }
 
     bool isCurated = !_playDailyMode && _currentLevel < kSumStrikeLevels.length;
@@ -312,7 +315,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _isHintShowing = false;
     _wrongTaps.clear();
 
-    if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
+    if ((_playDailyMode || _currentLevel >= 30) && _activeModifiers.contains('timer')) {
       _timeLeft = 30 + (_gridSize * 10);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -758,7 +761,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'sumstrike', 'Sum Strike'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -771,7 +774,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -853,11 +856,11 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          '$target',
+                                          isMatch || !_activeModifiers.contains('whisper') ? '$target' : '?',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,
-                                            color: isMatch ? Colors.amber.withOpacity(0.6) : Colors.amberAccent.shade100,
+                                            color: isMatch ? Colors.amber.withOpacity(0.4) : const Color(0xFF1E1C1A),
                                             decoration: isMatch ? TextDecoration.lineThrough : null,
                                             decorationColor: Colors.amberAccent,
                                             decorationThickness: 2,
@@ -887,11 +890,11 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          '$target',
+                                          isMatch || !_activeModifiers.contains('whisper') ? '$target' : '?',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,
-                                            color: isMatch ? Colors.amber.withOpacity(0.6) : Colors.amberAccent.shade100,
+                                            color: isMatch ? Colors.amber.withOpacity(0.4) : const Color(0xFF1E1C1A),
                                             decoration: isMatch ? TextDecoration.lineThrough : null,
                                             decorationColor: Colors.amberAccent,
                                             decorationThickness: 2,

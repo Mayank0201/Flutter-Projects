@@ -666,8 +666,11 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
     setState(() {
       _hintCount = newCount;
-      final clue = _isWhisper ? '?' : targetWord!.substring(0, 1).toUpperCase();
-      _message = 'Hint: Try a word starting with "$clue" (${targetWord!.length} letters)';
+      final bool isMinimal = _activeModifiers.contains('minimal');
+      final clue = (_isWhisper || isMinimal) ? '?' : targetWord!.substring(0, 1).toUpperCase();
+      _message = isMinimal
+          ? 'Hint: Try a word with ${targetWord!.length} letters'
+          : 'Hint: Try a word starting with "$clue" (${targetWord!.length} letters)';
       AudioManager.playClick();
     });
   }
@@ -694,13 +697,16 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       );
     } else {
       _activeModifiers = {};
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
     }
 
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
 
-    if (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('timer')) {
+    if ((_playDailyMode || _levelIndex >= 30) && _activeModifiers.contains('timer')) {
       _timeLeft = 45 + (_targetCount * 15);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -941,7 +947,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
         title: GestureDetector(
-          onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+          onTap: _showJumpToLevelDialog,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

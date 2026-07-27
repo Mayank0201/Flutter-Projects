@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:async';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import '../../../utils/prefs_keys.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -29,6 +30,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
+  String _dailyModifierType = '';
 
   int _gridSize = 4;
   int _numColors = 2;
@@ -39,16 +41,30 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   int _dragColor = 0; // 0 = none, 1..C = active dragging color
   bool _shuffleActive = false;
 
-  final List<Color> _colors = [
-    Colors.red.shade500,       // Red
-    Colors.blue.shade500,      // Blue
-    Colors.green.shade500,     // Green
-    Colors.orange.shade500,    // Orange
-    Colors.purple.shade500,    // Purple
-    Colors.pink.shade400,      // Pink
-    Colors.teal.shade400,      // Teal
-    Colors.amber.shade700,     // Amber/Yellow
-  ];
+  List<Color> get _colors {
+    if (_playDailyMode && _dailyModifierType == 'monochrome') {
+      return const [
+        Color(0xFFE0E0E0), // Very light grey
+        Color(0xFF9E9E9E), // Medium grey
+        Color(0xFF616161), // Dark grey
+        Color(0xFFBDBDBD), // Silver grey
+        Color(0xFF757575), // Charcoal grey
+        Color(0xFFEEEEEE), // Off white
+        Color(0xFF424242), // Very dark grey
+        Color(0xFFCCCCCC), // Light silver
+      ];
+    }
+    return [
+      Colors.red.shade500,       // Red
+      Colors.blue.shade500,      // Blue
+      Colors.green.shade500,     // Green
+      Colors.orange.shade500,    // Orange
+      Colors.purple.shade500,    // Purple
+      Colors.pink.shade400,      // Pink
+      Colors.teal.shade400,      // Teal
+      Colors.amber.shade700,     // Amber/Yellow
+    ];
+  }
 
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
@@ -74,6 +90,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   Future<void> _initLevelState() async {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _dailyModifierType = _playDailyMode ? (prefs.getString(PrefsKeys.dailyModifierType) ?? '') : '';
     final savedLvl = prefs.getInt('level_colour_link') ?? 0;
     final hCount = await HintManager.getHints('colour_link');
     
@@ -734,7 +751,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -751,7 +768,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

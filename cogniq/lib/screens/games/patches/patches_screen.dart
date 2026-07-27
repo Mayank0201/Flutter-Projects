@@ -51,12 +51,16 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   bool _chaosShuffleDone = false;
   bool _exposureTimerFired = false;
   final Set<(int, int)> _decoyCells = {};
+  Timer? _glitchTimer;
+  bool _glitchTick = false;
 
   Set<String> _activeModifiers = {};
 
   int get _chimpCycle => (_levelIndex < _levels.length) ? 0 : ((_levelIndex - _levels.length) ~/ 11);
   bool get _hasTimedExposure {
-    if (_playDailyMode) return false;
+    if (_playDailyMode) {
+      return _dailyModifierType == 'time_warp';
+    }
     if (_levelIndex >= 30) {
       return _activeModifiers.contains('numbersHide') && _levelIndex >= 45;
     }
@@ -72,7 +76,9 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   bool get _hasDecoyTiles => !_playDailyMode && _chimpCycle >= 4;
 
   bool get _isEndgame {
-    if (_playDailyMode) return false;
+    if (_playDailyMode) {
+      return _dailyModifierType == 'timer';
+    }
     if (_levelIndex >= 30) {
       return _activeModifiers.contains('timer');
     }
@@ -91,6 +97,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   @override
   void dispose() {
     _gameTimer?.cancel();
+    _glitchTimer?.cancel();
     super.dispose();
   }
 
@@ -194,6 +201,20 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       );
     } else {
       _activeModifiers = {};
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
+    }
+
+    _glitchTimer?.cancel();
+    if (_activeModifiers.contains('glitch')) {
+      _glitchTimer = Timer.periodic(const Duration(milliseconds: 500), (t) {
+        if (mounted) {
+          setState(() {
+            _glitchTick = !_glitchTick;
+          });
+        }
+      });
     }
 
     _positions = _randomPositions();
@@ -204,7 +225,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     _glowingCells.clear();
 
     if (_hasTimedExposure) {
-      final double exposureSecs = max(2.0, 6.0 - _chimpCycle * 0.5);
+      final double exposureSecs = (_playDailyMode && _dailyModifierType == 'time_warp') ? 1.0 : max(2.0, 6.0 - _chimpCycle * 0.5);
       Timer(Duration(milliseconds: (exposureSecs * 1000).toInt()), () {
         if (mounted && !_started && !_failed && !_won) {
           setState(() {
@@ -565,7 +586,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'chimp', 'Chimp Test'),
           ),
           GestureDetector(
-            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
@@ -584,7 +605,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.patchesTeal),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.patchesTeal),
                     ],
                   ],
                 ),
@@ -722,7 +743,9 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                                         transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
                                         child: visible && !isTapped
                                             ? Text(
-                                                '$num',
+                                                (_activeModifiers.contains('glitch') && _glitchTick)
+                                                    ? const ['*', '?', '#', '@', '%', '&', '!'][num % 7]
+                                                    : '$num',
                                                 key: ValueKey('num_$num'),
                                                 style: GoogleFonts.outfit(
                                                   fontSize: cs * 0.36,

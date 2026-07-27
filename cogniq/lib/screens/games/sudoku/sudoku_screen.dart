@@ -2104,7 +2104,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
               ),
             ),
           GestureDetector(
-            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
@@ -2124,7 +2124,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      Icon(null, size: 12, color: accentColor),
+                      Icon(Icons.edit, size: 12, color: accentColor),
                     ],
                   ],
                 ),

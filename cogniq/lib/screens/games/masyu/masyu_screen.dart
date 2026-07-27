@@ -774,9 +774,13 @@ class _MasyuScreenState extends State<MasyuScreen> {
     }
 
     // 3. Pearl rule validation along the reconstructed loop
+    final bool isPrism = _playDailyMode && _dailyModifierType == 'prism';
     for (int i = 0; i < totalCells; i++) {
       int pearl = _grid[i];
       if (pearl == 0) continue;
+      if (isPrism) {
+        pearl = (pearl == 1) ? 2 : 1;
+      }
 
       int r = i ~/ _gridSize + 1, c = i % _gridSize + 1;
       if (!cellToLoopIndex.containsKey(i)) {
@@ -1145,7 +1149,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -1158,7 +1162,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1220,6 +1224,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                                       dragPath: _dragPath,
                                       dragPosition: _dragPositionNotifier,
                                       hintIdx: _hintIdx,
+                                      isPrism: _playDailyMode && _dailyModifierType == 'prism',
                                     ),
                                   ),
                                 ),
@@ -1288,6 +1293,7 @@ class _MasyuPainter extends CustomPainter {
   final List<int> dragPath;
   final ValueNotifier<Offset?> dragPosition;
   final int hintIdx;
+  final bool isPrism;
 
   _MasyuPainter({
     required this.gridSize,
@@ -1298,6 +1304,7 @@ class _MasyuPainter extends CustomPainter {
     required this.dragPath,
     required this.dragPosition,
     required this.hintIdx,
+    required this.isPrism,
   }) : super(repaint: dragPosition);
 
   @override
@@ -1398,10 +1405,15 @@ class _MasyuPainter extends CustomPainter {
           canvas.drawCircle(center, rad * 1.8, glowPaint);
         }
 
-        if (pearl == 1) {
+        int drawPearl = pearl;
+        if (isPrism) {
+          drawPearl = (pearl == 1) ? 2 : 1;
+        }
+
+        if (drawPearl == 1) {
           canvas.drawCircle(center, rad, whitePearlPaint);
           canvas.drawCircle(center, rad, whiteBorderPaint);
-        } else if (pearl == 2) {
+        } else if (drawPearl == 2) {
           canvas.drawCircle(center, rad, blackPearlPaint);
           canvas.drawCircle(center, rad, blackBorderPaint);
         }

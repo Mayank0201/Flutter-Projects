@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import '../../../utils/prefs_keys.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -28,6 +29,8 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
+  String _dailyModifierType = '';
+  int _movesPlayed = 0;
 
   int _gridSize = 5;
   int _numColors = 4;
@@ -73,6 +76,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   Future<void> _initLevelState() async {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _dailyModifierType = _playDailyMode ? (prefs.getString(PrefsKeys.dailyModifierType) ?? '') : '';
     final savedLvl = prefs.getInt('level_color_flood') ?? 0;
     final hCount = await HintManager.getHints('color_flood');
     
@@ -120,6 +124,11 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   void _loadLevel() {
     setState(() {
       _isSuccess = false;
+      _activeModifiers.clear();
+      _movesPlayed = 0;
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
 
       if (_isTutorialMode) {
         _gridSize = 3;
@@ -504,6 +513,21 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
 
     setState(() {
       _movesLeft--;
+      _movesPlayed++;
+      if (_activeModifiers.contains('chaos') && _movesPlayed > 0 && _movesPlayed % 4 == 0) {
+        final List<int> colorPool = List.generate(_numColors, (i) => i)..shuffle();
+        for (int i = 0; i < _grid.length; i++) {
+          if (_grid[i] < _numColors) {
+            _grid[i] = colorPool[_grid[i]];
+          }
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Chaos! Colors Shuffled!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          duration: const Duration(milliseconds: 800),
+          backgroundColor: AppTheme.dustyMauve,
+        ));
+      }
+
       bool isWin = true;
       for (int i = 0; i < _grid.length; i++) {
         if (_grid[i] != _numColors && _grid[i] != targetColor) {
@@ -758,7 +782,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -775,7 +799,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

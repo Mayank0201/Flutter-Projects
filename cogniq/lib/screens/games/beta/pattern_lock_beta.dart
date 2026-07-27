@@ -18,6 +18,7 @@ import '../../../utils/achievement_manager.dart';
 import '../../../widgets/achievement_toast.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import '../../../utils/prefs_keys.dart';
 
 class PatternLockBetaScreen extends StatefulWidget {
   const PatternLockBetaScreen({super.key});
@@ -29,6 +30,9 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
+  String _dailyModifierType = '';
+  bool _eclipseVisible = true;
+  Timer? _eclipseTimer;
   List<int> _targetPattern = [];
   List<int> _userPattern = [];
   bool _isMemorizing = true;
@@ -78,6 +82,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   Future<void> _initLevelState() async {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _dailyModifierType = _playDailyMode ? (prefs.getString(PrefsKeys.dailyModifierType) ?? '') : '';
     final savedLvl = prefs.getInt('level_pattern_lock') ?? 0;
     final active = await ShuffleManager.isActive();
     final hintCount = await HintManager.getHints('pattern_lock');
@@ -98,6 +103,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   void dispose() {
     _memorizeTimer?.cancel();
     _gameTimer?.cancel();
+    _eclipseTimer?.cancel();
     super.dispose();
   }
 
@@ -148,6 +154,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   void _loadLevel() {
     _memorizeTimer?.cancel();
     _gameTimer?.cancel();
+    _eclipseTimer?.cancel();
     _dragPositionNotifier.value = null;
     setState(() {
       _isSuccess = false;
@@ -155,6 +162,11 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       _isMemorizing = true;
       _timeLeft = -1;
       _timeBonusEarned = false;
+      
+      _activeModifiers.clear();
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
       
       final n = _gridN;
       final rng = _playDailyMode
@@ -179,8 +191,21 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
           _transformType = 1 + rng.nextInt(3); // CW, 180, or Mirror
         }
       } else {
-        _activeModifiers = {};
         targetLength = targetLength.clamp(3, n * n);
+        if (_activeModifiers.contains('mirror')) {
+          _transformType = 3; // Force Mirror H for daily challenge
+        }
+      }
+
+      if (_activeModifiers.contains('eclipse')) {
+        _eclipseVisible = true;
+        _eclipseTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+          if (mounted) {
+            setState(() {
+              _eclipseVisible = !_eclipseVisible;
+            });
+          }
+        });
       }
 
       bool checkComplexity = false;
@@ -663,7 +688,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -680,7 +705,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -755,18 +780,23 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                                 borderRadius: BorderRadius.circular(16), 
                                 border: Border.all(color: context.textMuted.withAlpha(40)),
                               ),
-                              child: Stack(
-                                children: [
-                                  CustomPaint(
-                                    size: Size(_boardSize, _boardSize),
-                                    painter: PatternPainter(
-                                      pattern: _isMemorizing ? _targetPattern : _userPattern,
-                                      lineColor: _isMemorizing ? Colors.amber.withOpacity(0.6) : AppTheme.dustyMauve,
-                                      dragPositionNotifier: _dragPositionNotifier,
-                                      gridN: _gridN,
-                                      spacing: _spacing,
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 400),
+                                opacity: _activeModifiers.contains('eclipse') && !_isSuccess
+                                    ? (_eclipseVisible ? 1.0 : 0.05)
+                                    : 1.0,
+                                child: Stack(
+                                  children: [
+                                    CustomPaint(
+                                      size: Size(_boardSize, _boardSize),
+                                      painter: PatternPainter(
+                                        pattern: _isMemorizing ? _targetPattern : _userPattern,
+                                        lineColor: _isMemorizing ? Colors.amber.withOpacity(0.6) : AppTheme.dustyMauve,
+                                        dragPositionNotifier: _dragPositionNotifier,
+                                        gridN: _gridN,
+                                        spacing: _spacing,
+                                      ),
                                     ),
-                                  ),
                                   for (int idx = 0; idx < _gridN * _gridN; idx++)
                                     Positioned(
                                       left: _dotCenter(idx).dx - 20.0,
@@ -802,7 +832,8 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                                         ),
                                       ),
                                     ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),

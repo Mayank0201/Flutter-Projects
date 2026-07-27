@@ -8,6 +8,7 @@ import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 
@@ -29,6 +30,8 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   int _hintCount = 0;
 
   bool _playDailyMode = false;
+  String _dailyModifierType = '';
+  int _spyCageId = -1;
   bool get _isEndgame => !_playDailyMode && _currentLevel >= 10;
   Set<String> _activeModifiers = {};
   Timer? _gameTimer;
@@ -38,7 +41,21 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   @override
   void initState() {
     super.initState();
-    _loadLevel();
+    _initLevelState();
+  }
+
+  Future<void> _initLevelState() async {
+    final prefs = await SharedPreferences.getInstance();
+    _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _dailyModifierType = _playDailyMode ? (prefs.getString(PrefsKeys.dailyModifierType) ?? '') : '';
+    final savedLvl = prefs.getInt('level_killersudoku') ?? 0;
+    
+    if (mounted) {
+      setState(() {
+        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        _loadLevel();
+      });
+    }
   }
 
   @override
@@ -297,9 +314,15 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
       _timeLeft = -1;
       _timeBonusEarned = false;
 
+      _activeModifiers.clear();
+      _spyCageId = -1;
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
+
       if (_isEndgame) {
         _generateProceduralLevel();
-        if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
+        if ((_playDailyMode || _currentLevel >= 30) && _activeModifiers.contains('timer')) {
           _timeLeft = _gridSize == 4 ? 90 : (_gridSize == 6 ? 180 : 300);
           _timeBonusEarned = true;
           _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -365,6 +388,12 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
           _cages = [0, 1, 2, 2, 0, 1, 3, 4, 5, 5, 3, 4, 6, 6, 6, 4];
           _cageSums = [4, 6, 5, 5, 7, 5, 8];
         }
+      }
+
+      if (_activeModifiers.contains('spy') && _cageSums.isNotEmpty) {
+        final rng = Random(_currentLevel * 71 + 9);
+        _spyCageId = rng.nextInt(_cageSums.length);
+        _cageSums[_spyCageId] = _cageSums[_spyCageId] + 3;
       }
     });
   }
@@ -435,8 +464,15 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     cageVals.forEach((cageId, vals) {
       if (cageId < _cageSums.length) {
         int sum = vals.reduce((a, b) => a + b);
-        if (sum != _cageSums[cageId] || vals.toSet().length != vals.length) {
-          isValid = false;
+        bool ignoreSumCheck = _activeModifiers.contains('spy') && cageId == _spyCageId;
+        if (ignoreSumCheck) {
+          if (vals.toSet().length != vals.length) {
+            isValid = false;
+          }
+        } else {
+          if (sum != _cageSums[cageId] || vals.toSet().length != vals.length) {
+            isValid = false;
+          }
         }
       }
     });
@@ -619,7 +655,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             onPressed: _showHint,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -628,7 +664,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                   children: [
                     Text('Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
                     const SizedBox(width: 4),
-                    const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                    const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                   ],
                 ),
               ),

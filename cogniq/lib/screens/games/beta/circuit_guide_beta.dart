@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:async';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import '../../../utils/prefs_keys.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,6 +29,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
+  String _dailyModifierType = '';
   int _gridSize = 3;
   List<int> _rotations = []; // 0 to 3
   List<String> _wireTypes = []; // "SRC", "TGT", "S", "E", "T"
@@ -54,6 +56,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   Future<void> _initLevelState() async {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool('play_daily_mode') ?? false;
+    _dailyModifierType = _playDailyMode ? (prefs.getString(PrefsKeys.dailyModifierType) ?? '') : '';
     int savedLvl = prefs.getInt('level_circuit_guide') ?? 0;
     final active = await ShuffleManager.isActive();
     final hintCount = await HintManager.getHints('circuit_guide');
@@ -75,6 +78,9 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       _isSuccess = false;
       _lockedWires.clear();
       _activeModifiers.clear();
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
       _gameTimer?.cancel();
       _timeLeft = -1;
       _timeBonusEarned = false;
@@ -292,19 +298,27 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             
             if (treeNodes.contains(n)) {
               if (connections[n].length < 3) {
-                path.add(n);
-                return true;
+                int reqSpaceForCurrent = (current == path[0]) ? 1 : 2;
+                if (connections[current].length + reqSpaceForCurrent <= 3) {
+                  path.add(n);
+                  return true;
+                }
               }
               continue;
             }
             
-            pathSet.add(n);
-            path.add(n);
-            if (findPathDFS(n, treeNodes, path, pathSet, connections, r)) {
-              return true;
+            if (connections[n].length + 2 <= 3) {
+              int reqSpaceForCurrent = (current == path[0]) ? 1 : 2;
+              if (connections[current].length + reqSpaceForCurrent <= 3) {
+                pathSet.add(n);
+                path.add(n);
+                if (findPathDFS(n, treeNodes, path, pathSet, connections, r)) {
+                  return true;
+                }
+                path.removeLast();
+                pathSet.remove(n);
+              }
             }
-            path.removeLast();
-            pathSet.remove(n);
           }
           return false;
         }
@@ -489,7 +503,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
       _solutionRotations = List.from(_rotations);
 
       // Stage 5: Decoy Wires (L75+)
-      if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('decoyWires')) {
+      if ((_playDailyMode || _currentLevel >= 30) && _activeModifiers.contains('decoyWires')) {
         int decoyCount = 1 + (_currentLevel - 30) ~/ 4;
         if (decoyCount > W) decoyCount = W;
 
@@ -514,7 +528,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           _rotations[i] = playRng.nextInt(4);
           // Stage 4: Scramble depth (L60+ ensures no pre-solved tiles)
           bool checkScramble = false;
-          if (_currentLevel >= 30) {
+          if (_playDailyMode || _currentLevel >= 30) {
             checkScramble = _activeModifiers.contains('scrambleDepth');
           }
           if (checkScramble && _rotations[i] == _solutionRotations[i]) {
@@ -525,7 +539,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
       _lockedWires.clear();
 
-      if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
+      if ((_playDailyMode || _currentLevel >= 30) && _activeModifiers.contains('timer')) {
         _timeLeft = 25 + (_gridSize * 10);
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -554,7 +568,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         if (_wireTypes[i] != "SRC" && _wireTypes[i] != "TGT" && _wireTypes[i] != "EMPTY") {
           _rotations[i] = playRng.nextInt(4);
           bool checkScramble = false;
-          if (_currentLevel >= 30) {
+          if (_playDailyMode || _currentLevel >= 30) {
             checkScramble = _activeModifiers.contains('scrambleDepth');
           }
           if (checkScramble && _rotations[i] == _solutionRotations[i]) {
@@ -960,7 +974,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -977,7 +991,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                     ),
                     if (!_isTutorialMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1028,16 +1042,18 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                                 itemCount: _gridSize * _gridSize,
                                 itemBuilder: (context, idx) {
                                   final isNodeConnected = connected[idx];
+                                  final isRetro = _activeModifiers.contains('retro');
                                   return AnimatedCircuitNode(
                                     type: _wireTypes[idx],
                                     index: idx,
                                     rotation: _rotations[idx],
                                     isConnected: isNodeConnected,
                                     onTap: () => _onRotate(idx),
-                                    activeColor: Colors.amber,
-                                    mutedColor: context.textMuted.withOpacity(0.25),
+                                    activeColor: isRetro ? const Color(0xFF39FF14) : Colors.amber,
+                                    mutedColor: isRetro ? const Color(0xFF0F380F) : context.textMuted.withOpacity(0.25),
                                     isLevel9: _currentLevel >= 9,
                                     isLocked: _lockedWires.contains(idx),
+                                    isRetro: isRetro,
                                   );
                                 },
                               ),
@@ -1112,6 +1128,7 @@ class AnimatedCircuitNode extends StatelessWidget {
   final Color mutedColor;
   final bool isLevel9;
   final bool isLocked;
+  final bool isRetro;
 
   const AnimatedCircuitNode({
     super.key,
@@ -1124,6 +1141,7 @@ class AnimatedCircuitNode extends StatelessWidget {
     required this.mutedColor,
     required this.isLevel9,
     required this.isLocked,
+    required this.isRetro,
   });
 
   @override
@@ -1145,6 +1163,7 @@ class AnimatedCircuitNode extends StatelessWidget {
                   activeColor: activeColor,
                   mutedColor: mutedColor,
                   isLevel9: isLevel9,
+                  isRetro: isRetro,
                 ),
               );
             },
@@ -1171,9 +1190,9 @@ class AnimatedCircuitNode extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: context.bgCard,
+          color: isRetro ? Colors.black : context.bgCard,
           border: Border.all(
-            color: context.textMuted.withOpacity(0.35),
+            color: isRetro ? const Color(0xFF0F380F) : context.textMuted.withOpacity(0.35),
             width: 1.0,
           ),
         ),
@@ -1191,6 +1210,7 @@ class WirePainter extends CustomPainter {
   final Color activeColor;
   final Color mutedColor;
   final bool isLevel9;
+  final bool isRetro;
 
   static const double _halfPi = 1.5707963267948966;
 
@@ -1202,6 +1222,7 @@ class WirePainter extends CustomPainter {
     required this.activeColor,
     required this.mutedColor,
     required this.isLevel9,
+    required this.isRetro,
   });
 
   @override
@@ -1209,8 +1230,8 @@ class WirePainter extends CustomPainter {
     final Color wireColor = isConnected ? activeColor : mutedColor;
     final paint = Paint()
       ..color = wireColor
-      ..strokeWidth = 8.0
-      ..strokeCap = StrokeCap.round
+      ..strokeWidth = isRetro ? 10.0 : 8.0
+      ..strokeCap = isRetro ? StrokeCap.square : StrokeCap.round
       ..style = PaintingStyle.stroke;
 
     final double w = size.width;
@@ -1242,7 +1263,7 @@ class WirePainter extends CustomPainter {
           style: TextStyle(
             fontSize: 22,
             fontFamily: 'MaterialIcons',
-            color: isConnected ? Colors.amber : mutedColor,
+            color: isConnected ? activeColor : mutedColor,
           ),
         ),
         textDirection: TextDirection.ltr,

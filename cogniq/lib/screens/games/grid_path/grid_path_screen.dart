@@ -818,7 +818,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
           ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
           InkWell(
-            onTap: (_isTutorialMode || _isDailyMode) ? null : _showJumpToLevelDialog,
+            onTap: _showJumpToLevelDialog,
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
