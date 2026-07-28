@@ -5,6 +5,7 @@ import '../theme/settings_manager.dart';
 import '../theme/theme_manager.dart';
 import '../utils/purchase_manager.dart';
 import '../widgets/buy_hints_dialog.dart';
+import '../widgets/points_store_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -109,6 +110,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               },
                             );
                           },
+                  ),
+                  _Divider(),
+                  _SettingsTile(
+                    icon: Icons.psychology_outlined,
+                    title: 'Points Store',
+                    subtitle: 'Purchase IQ Points for hints',
+                    onTap: () {
+                      PointsStoreDialog.show(context);
+                    },
                   ),
                   _Divider(),
                   _SettingsTile(

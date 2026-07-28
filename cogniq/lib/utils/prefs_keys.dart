@@ -50,6 +50,9 @@ class PrefsKeys {
   static const String perfectWeekHistory = 'daily_perfect_week_history'; // List<String> dates
   static const String weeklyResetV3Done = 'daily_v3_weekly_reset_completed'; // bool migration flag
 
+  // IAP
+  static const String bundleGranted = 'iap_starter_bundle_granted'; // bool
+  static const String processedPurchaseIds = 'iap_processed_purchase_ids'; // List<String>
 
   // Active Daily Challenge Modifiers
   static const String playDailyMode = 'play_daily_mode';

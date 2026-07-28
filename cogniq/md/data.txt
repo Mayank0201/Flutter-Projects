@@ -1,0 +1,167 @@
+========================================================================
+ COGNIQ — IN-APP PURCHASE PLAN
+========================================================================
+
+------------------------------------------------------------------------
+ LAUNCH PRODUCTS (create these)
+------------------------------------------------------------------------
+
+1. Remove Ads              [DONE / LIVE]
+   Product ID : remove_ads_premium
+   Location   : In-app products (one-time)
+   Type       : Non-consumable  (buyNonConsumable)
+   Price      : Rs 99   (~$1.19)
+   Grants     : Removes all interstitial ads, forever
+
+2. 500 Points
+   Product ID : points_500
+   Location   : In-app products (one-time)
+   Type       : Consumable  (buyConsumable)
+   Price      : Rs 29   (~$0.35)
+   Grants     : +500 IQ Points  (= 5 hints)
+
+3. 1,200 Points            [Best value]
+   Product ID : points_1200
+   Location   : In-app products (one-time)
+   Type       : Consumable  (buyConsumable)
+   Price      : Rs 59   (~$0.75)
+   Grants     : +1,200 IQ Points  (= 12 hints)
+
+4. 3,000 Points
+   Product ID : points_3000
+   Location   : In-app products (one-time)
+   Type       : Consumable  (buyConsumable)
+   Price      : Rs 149  (~$1.99)
+   Grants     : +3,000 IQ Points  (= 30 hints)
+
+5. 7,000 Points
+   Product ID : points_7000
+   Location   : In-app products (one-time)
+   Type       : Consumable  (buyConsumable)
+   Price      : Rs 299  (~$3.99)
+   Grants     : +7,000 IQ Points  (= 70 hints)
+
+6. Starter Bundle
+   Product ID : starter_bundle
+   Location   : In-app products (one-time)
+   Type       : Non-consumable  (buyNonConsumable)
+   Price      : Rs 149  (~$1.99)
+   Grants     : Remove Ads + 1,500 IQ Points  (one-time only)
+
+
+------------------------------------------------------------------------
+ OPTIONAL / LATER (skip for launch)
+------------------------------------------------------------------------
+
+7. Mega 20,000 Points
+   Product ID : points_20000
+   Type       : Consumable
+   Price      : Rs 799
+   Note       : "Whale" tier. Add only if sales data shows demand.
+
+8. CogniQ Plus
+   Product ID : cogniq_plus_monthly
+   Location   : Subscriptions (NOT in-app products)
+   Type       : Auto-renewing
+   Price      : Rs 149 / month
+   Note       : Ad-free + monthly point drip. Skip for launch — most
+                review/refund overhead, doesn't fit the one-time model yet.
+
+
+------------------------------------------------------------------------
+ STORE-LISTING COPY  (paste into each product's Name + Description)
+------------------------------------------------------------------------
+ Name  = max 55 characters   Description = max 200 characters
+ Icon  = file in  cogniq/iap_icons/   (1024x1024 PNG, meets Play specs)
+
+--- points_500 -------------------------------------------------
+ Name : 500 IQ Points
+ Desc : A pack of 500 IQ Points to spend on hints across every CogniQ
+        puzzle. Reveal a hint whenever you're stuck. Added to your
+        balance instantly.
+ Icon : iap_icons/points_500.png
+
+--- points_1200 ------------------------------------------------
+ Name : 1,200 IQ Points
+ Desc : 1,200 IQ Points for hints across all CogniQ games — great everyday value. Spend them to unlock hints on any puzzle. Added to your balance instantly.
+ Icon : iap_icons/points_1200.png
+
+--- points_3000 ------------------------------------------------
+ Name : 3,000 IQ Points
+ Desc : A large pack of 3,000 IQ Points for hints across every CogniQ
+        puzzle. Plenty of points to keep solving without slowing down.
+        Added instantly.
+ Icon : iap_icons/points_3000.png
+
+--- points_7000 ------------------------------------------------
+ Name : 7,000 IQ Points
+ Desc : Our biggest pack — 7,000 IQ Points for hints across all CogniQ
+        games. The most points per pack for dedicated solvers. Added
+        to your balance instantly.
+ Icon : iap_icons/points_7000.png
+
+--- starter_bundle ---------------------------------------------
+ Name : Starter Bundle
+ Desc : A one-time starter deal: permanently remove ads AND get 1,500
+        IQ Points for hints. Everything you need to jump in. One-time
+        purchase, not a subscription.
+ Icon : iap_icons/starter_bundle.png
+
+--- remove_ads_premium  (already live) -------------------------
+ Name : Remove Ads
+ Desc : Remove all ads from CogniQ with a single one-time purchase.
+        Enjoy every puzzle, daily challenge, and brain workout
+        completely uninterrupted. Yours forever.
+ Icon : remove_ads_icon.png
+
+ NOTE: The in-app currency is shown as "IQ" everywhere in the app,
+ so the products are named "IQ Points" for consistency. Rename to
+ "CogniQ Points" only if you also rename the currency in the app UI.
+
+
+------------------------------------------------------------------------
+ COLUMN / TERM MEANINGS
+------------------------------------------------------------------------
+ - Location    : Play Console > Monetise > Products. Everything except
+                 CogniQ Plus goes under "In-app products (one-time)".
+ - Consumable  : Decided by CODE, not the console.
+                 Consumable   = repurchasable (points get spent) -> must
+                                be CONSUMED in code after granting, or the
+                                user can never buy it again.
+                 Non-consumable = owned once (remove ads / bundle).
+ - Price       : Enter the Rs value in "Set prices"; Google auto-converts
+                 and rounds all other currencies.
+ - Value ladder: Points-per-rupee rises with each tier
+                 (17 -> 20 -> 20 -> 23 pts/Rs). Intentional — nudges
+                 buyers toward the bigger packs.
+
+
+------------------------------------------------------------------------
+ SETUP ORDER (important)
+------------------------------------------------------------------------
+ Step 1  Wire the code   (see iq_points_iap_impl.md)
+         PurchaseManager today only handles remove_ads_premium
+         (non-consumable). Point packs need a buyConsumable path +
+         credit PointManager + consume the token. WITHOUT THIS, products
+         created in the console cannot be bought.
+
+ Step 2  Create products #2-6 in the console
+         Match the product IDs above EXACTLY, set prices, set each Active.
+
+ Step 3  Test with a license tester
+         Verify points credit correctly and the same pack can be
+         re-bought (consume worked).
+
+
+------------------------------------------------------------------------
+ RECOMMENDATION
+------------------------------------------------------------------------
+ Launch with:  #1 (done) + #2, #3, #4 + #6 (Starter Bundle).
+ That's one impulse pack, one "best value", one bigger pack, plus a
+ bundle to convert first-time buyers.
+ Add #5 / #7 later based on sales. Hold #8 (subscription) entirely.
+
+ Related docs:
+   iq_points_iap_impl.md            - code plan (build now)
+   iap_server_verification_impl.md  - server verification (harden later)
+========================================================================

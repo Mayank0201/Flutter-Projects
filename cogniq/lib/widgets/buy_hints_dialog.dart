@@ -5,6 +5,7 @@ import '../models/game_info.dart';
 import '../utils/point_manager.dart';
 import '../utils/hint_manager.dart';
 import '../utils/ad_manager.dart';
+import 'points_store_dialog.dart';
 
 class BuyHintsDialog extends StatefulWidget {
   final String initialGameId;
@@ -210,27 +211,36 @@ class _BuyHintsDialogState extends State<BuyHintsDialog> {
                         color: context.textPrimary,
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.warmAmber.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.warmAmber.withOpacity(0.2), width: 0.5),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.psychology, color: AppTheme.warmAmber, size: 14),
-                          const SizedBox(width: 6),
-                          Text(
-                            '$_pointBalance IQ',
-                            style: GoogleFonts.outfit(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.warmAmber,
+                    GestureDetector(
+                      onTap: () {
+                        PointsStoreDialog.show(context, onPurchaseComplete: () {
+                          _loadBalance();
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warmAmber.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.warmAmber.withOpacity(0.2), width: 0.5),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.psychology, color: AppTheme.warmAmber, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              '$_pointBalance IQ',
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.warmAmber,
+                              ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            const Icon(Icons.add_circle_outline_rounded, color: AppTheme.warmAmber, size: 13),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -472,6 +482,27 @@ class _BuyHintsDialogState extends State<BuyHintsDialog> {
                     ),
                   ],
                 ),
+                if (!canAfford) ...[
+                  const SizedBox(height: 12),
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        PointsStoreDialog.show(context, onPurchaseComplete: () {
+                          _loadBalance();
+                        });
+                      },
+                      child: Text(
+                        'Get more IQ Points in the Store',
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.dustyMauve,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
     );

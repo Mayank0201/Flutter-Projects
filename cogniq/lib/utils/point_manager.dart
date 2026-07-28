@@ -22,4 +22,9 @@ class PointManager {
     await prefs.setInt(_key, current - amount);
     return true;
   }
+
+  static Future<void> setBalance(int balance) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_key, balance);
+  }
 }
