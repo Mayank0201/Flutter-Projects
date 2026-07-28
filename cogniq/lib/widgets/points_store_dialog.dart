@@ -45,6 +45,37 @@ class _PointsStoreDialogState extends State<PointsStoreDialog> {
   void initState() {
     super.initState();
     _loadBalance();
+    PurchaseManager.purchaseStateNotifier.addListener(_onPurchaseStateChanged);
+  }
+
+  @override
+  void dispose() {
+    PurchaseManager.purchaseStateNotifier.removeListener(_onPurchaseStateChanged);
+    super.dispose();
+  }
+
+  void _onPurchaseStateChanged() {
+    final state = PurchaseManager.purchaseStateNotifier.value;
+    if (!mounted) return;
+
+    setState(() {
+      _purchaseInFlight = (state == PurchaseState.pending);
+    });
+
+    if (state == PurchaseState.success) {
+      _showSnackBar('Purchase completed successfully!', AppTheme.wordleGreen);
+      _loadBalance();
+      if (widget.onPurchaseComplete != null) {
+        widget.onPurchaseComplete!();
+      }
+      PurchaseManager.purchaseStateNotifier.value = PurchaseState.idle;
+    } else if (state == PurchaseState.error) {
+      _showSnackBar('Purchase failed. Please try again.', Colors.redAccent);
+      PurchaseManager.purchaseStateNotifier.value = PurchaseState.idle;
+    } else if (state == PurchaseState.canceled) {
+      _showSnackBar('Purchase canceled.', Colors.amber[800]!);
+      PurchaseManager.purchaseStateNotifier.value = PurchaseState.idle;
+    }
   }
 
   Future<void> _loadBalance() async {
@@ -57,45 +88,22 @@ class _PointsStoreDialogState extends State<PointsStoreDialog> {
   }
 
   Future<void> _buyProduct(IapProduct product) async {
-    setState(() {
-      _purchaseInFlight = true;
-    });
+    if (_purchaseInFlight) return; // Prevent double trigger
 
     try {
       await PurchaseManager.buy(
         product,
         onStoreUnavailable: () {
           _showSnackBar('Store is currently unavailable.', Colors.redAccent);
-          if (mounted) {
-            setState(() {
-              _purchaseInFlight = false;
-            });
-          }
         },
         onProductNotFound: () {
           _showSnackBar('Product not found in the store.', Colors.redAccent);
-          if (mounted) {
-            setState(() {
-              _purchaseInFlight = false;
-            });
-          }
         },
       );
-      
-      // Wait briefly for native stream listener confirmation
-      await Future.delayed(const Duration(seconds: 2));
-      await _loadBalance();
-      if (widget.onPurchaseComplete != null) {
-        widget.onPurchaseComplete!();
-      }
     } catch (e) {
+      debugPrint('Error buying product: $e');
       _showSnackBar('An error occurred during checkout.', Colors.redAccent);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _purchaseInFlight = false;
-        });
-      }
+      PurchaseManager.purchaseStateNotifier.value = PurchaseState.error;
     }
   }
 
@@ -295,7 +303,7 @@ class _PointsStoreDialogState extends State<PointsStoreDialog> {
           ),
           const SizedBox(width: 12),
           ElevatedButton(
-            onPressed: () => _buyProduct(IapCatalog.bundle),
+            onPressed: _purchaseInFlight ? null : () => _buyProduct(IapCatalog.bundle),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: const Color(0xFF3F2B96),
@@ -377,7 +385,7 @@ class _PointsStoreDialogState extends State<PointsStoreDialog> {
             ),
           ),
           ElevatedButton(
-            onPressed: () => _buyProduct(product),
+            onPressed: _purchaseInFlight ? null : () => _buyProduct(product),
             style: ElevatedButton.styleFrom(
               backgroundColor: product.bestValue ? Colors.cyan : context.textMuted.withOpacity(0.15),
               foregroundColor: product.bestValue ? Colors.white : context.textPrimary,

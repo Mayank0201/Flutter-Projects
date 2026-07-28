@@ -9,12 +9,18 @@ import 'prefs_keys.dart';
 import 'iap_catalog.dart';
 import 'iap_backend.dart';
 
+enum PurchaseState { idle, pending, success, error, canceled }
+
 class PurchaseManager {
   static InAppPurchase get _iap => InAppPurchase.instance;
   static StreamSubscription<List<PurchaseDetails>>? _subscription;
 
   static List<ProductDetails> products = [];
   static bool isStoreAvailable = false;
+
+  /// Notifier to track active purchase lifecycle events dynamically
+  static final ValueNotifier<PurchaseState> purchaseStateNotifier =
+      ValueNotifier<PurchaseState>(PurchaseState.idle);
 
   /// Initialize and start listening to the purchase stream
   static Future<void> initialize() async {
@@ -34,6 +40,7 @@ class PurchaseManager {
       },
       onError: (error) {
         debugPrint('PurchaseManager Error: $error');
+        purchaseStateNotifier.value = PurchaseState.error;
       },
     );
 
@@ -74,6 +81,8 @@ class PurchaseManager {
     required VoidCallback onStoreUnavailable,
     required VoidCallback onProductNotFound,
   }) async {
+    // Dynamic connectivity check before launching billing checkout
+    isStoreAvailable = await _iap.isAvailable();
     if (!isStoreAvailable) {
       onStoreUnavailable();
       return;
@@ -91,11 +100,19 @@ class PurchaseManager {
       return;
     }
 
-    final PurchaseParam purchaseParam = PurchaseParam(productDetails: details);
-    if (product.consumable) {
-      await _iap.buyConsumable(purchaseParam: purchaseParam, autoConsume: true);
-    } else {
-      await _iap.buyNonConsumable(purchaseParam: purchaseParam);
+    // Set dynamic status to pending state
+    purchaseStateNotifier.value = PurchaseState.pending;
+
+    try {
+      final PurchaseParam purchaseParam = PurchaseParam(productDetails: details);
+      if (product.consumable) {
+        await _iap.buyConsumable(purchaseParam: purchaseParam, autoConsume: true);
+      } else {
+        await _iap.buyNonConsumable(purchaseParam: purchaseParam);
+      }
+    } catch (e) {
+      debugPrint('PurchaseManager: error launching buy flow: $e');
+      purchaseStateNotifier.value = PurchaseState.error;
     }
   }
 
@@ -115,17 +132,21 @@ class PurchaseManager {
   static Future<void> restorePurchases({
     required Function(bool success) onRestoreFinished,
   }) async {
+    isStoreAvailable = await _iap.isAvailable();
     if (!isStoreAvailable) {
       onRestoreFinished(false);
       return;
     }
     try {
+      purchaseStateNotifier.value = PurchaseState.pending;
       await _iap.restorePurchases();
       // Wait briefly for the stream listener to capture restored items
       await Future.delayed(const Duration(seconds: 1));
+      purchaseStateNotifier.value = PurchaseState.success;
       onRestoreFinished(true);
     } catch (e) {
       debugPrint('PurchaseManager Restore failed: $e');
+      purchaseStateNotifier.value = PurchaseState.error;
       onRestoreFinished(false);
     }
   }
@@ -135,8 +156,16 @@ class PurchaseManager {
     for (final purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.pending) {
         debugPrint('PurchaseManager: Purchase pending...');
+        purchaseStateNotifier.value = PurchaseState.pending;
       } else if (purchaseDetails.status == PurchaseStatus.error) {
         debugPrint('PurchaseManager error: ${purchaseDetails.error}');
+        purchaseStateNotifier.value = PurchaseState.error;
+        if (purchaseDetails.pendingCompletePurchase) {
+          _iap.completePurchase(purchaseDetails);
+        }
+      } else if (purchaseDetails.status == PurchaseStatus.canceled) {
+        debugPrint('PurchaseManager: Purchase canceled by user.');
+        purchaseStateNotifier.value = PurchaseState.canceled;
         if (purchaseDetails.pendingCompletePurchase) {
           _iap.completePurchase(purchaseDetails);
         }
@@ -156,17 +185,23 @@ class PurchaseManager {
       return;
     }
 
+    // Composite key generation to avoid null/empty deduplication bugs in production
+    final String purchaseId;
+    if (d.purchaseID == null || d.purchaseID!.isEmpty) {
+      purchaseId = d.productID + "_" + (d.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
+    } else {
+      purchaseId = d.purchaseID!;
+    }
+
     // 1. Consumable Points Packs
     if (product.consumable) {
-      final purchaseId = d.purchaseID ?? '';
-      if (purchaseId.isNotEmpty) {
-        if (await _alreadyProcessed(purchaseId)) {
-          await _consumeIfNeeded(d);
-          if (d.pendingCompletePurchase) {
-            await _iap.completePurchase(d);
-          }
-          return;
+      if (await _alreadyProcessed(purchaseId)) {
+        await _consumeIfNeeded(d);
+        if (d.pendingCompletePurchase) {
+          await _iap.completePurchase(d);
         }
+        purchaseStateNotifier.value = PurchaseState.success;
+        return;
       }
 
       final verifyRes = await IapBackend.verify(
@@ -178,12 +213,12 @@ class PurchaseManager {
 
       if (verifyRes.ok) {
         await PointManager.setBalance(verifyRes.pointsBalance);
-        if (purchaseId.isNotEmpty) {
-          await _markProcessed(purchaseId);
-        }
+        await _markProcessed(purchaseId);
         await _consumeIfNeeded(d);
+        purchaseStateNotifier.value = PurchaseState.success;
         debugPrint('PurchaseManager: Successfully credited ${product.points} points.');
       } else {
+        purchaseStateNotifier.value = PurchaseState.error;
         debugPrint('PurchaseManager Verification failed: ${verifyRes.reason}');
       }
     } else {
@@ -192,7 +227,7 @@ class PurchaseManager {
         userId: 'local_user',
         productId: d.productID,
         purchaseToken: d.verificationData.serverVerificationData,
-        orderId: d.purchaseID ?? '',
+        orderId: purchaseId,
       );
 
       if (verifyRes.ok) {
@@ -208,6 +243,9 @@ class PurchaseManager {
             await prefs.setBool(PrefsKeys.bundleGranted, true);
           }
         }
+        purchaseStateNotifier.value = PurchaseState.success;
+      } else {
+        purchaseStateNotifier.value = PurchaseState.error;
       }
     }
 
