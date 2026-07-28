@@ -158,7 +158,9 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       } else {
         delta = 0.10 - (_levelIndex / 29.0) * 0.06;
       }
-
+      if (_isDailyMode && _dailyModifierType == 'whisper') {
+        delta = 0.015;
+      }
       double oddLightness = lightness;
       double oddSaturation = saturation;
       double oddHue = baseHue;

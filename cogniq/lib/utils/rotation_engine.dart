@@ -1,9 +1,17 @@
 import 'dart:math';
 
 class RotationEngine {
+  static int _stableHash(String s) {
+    int h = 0x811c9dc5;
+    for (final c in s.codeUnits) {
+      h = (h ^ c) * 0x01000193 & 0x7fffffff;
+    }
+    return h;
+  }
+
   /// Generates a deterministic Random instance for a specific level of a game.
   static Random getDeterminism(String gameId, int levelIndex) {
-    final seed = Object.hash(gameId, levelIndex);
+    final seed = _stableHash(gameId) ^ (levelIndex * 2654435761 & 0x7fffffff);
     return Random(seed);
   }
 

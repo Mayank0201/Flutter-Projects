@@ -43,6 +43,14 @@ class PrefsKeys {
   static const String dailyStreak = 'daily_streak'; // Legacy V1
   static const String dailyLastCompletedDate = 'daily_last_completed_date'; // Legacy V1
 
+  // Weekly / Perfect Week Keys
+  static const String weeklyPerfectStreak = 'daily_v2_perfect_streak'; // int 0..7
+  static const String weeklyLastPerfectDate = 'daily_v2_last_perfect_date'; // String YYYY-MM-DD
+  static const String diamondStars = 'daily_diamond_stars'; // int
+  static const String perfectWeekHistory = 'daily_perfect_week_history'; // List<String> dates
+  static const String weeklyResetV3Done = 'daily_v3_weekly_reset_completed'; // bool migration flag
+
+
   // Active Daily Challenge Modifiers
   static const String playDailyMode = 'play_daily_mode';
   static const String dailyModifierType = 'daily_modifier_type';

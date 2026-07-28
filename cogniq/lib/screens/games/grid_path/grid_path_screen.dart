@@ -261,6 +261,74 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       }
     });
   }
+
+  void _reverseRange(List<(int, int)> a, int i, int j) {
+    while (i < j) {
+      final t = a[i];
+      a[i] = a[j];
+      a[j] = t;
+      i++;
+      j--;
+    }
+  }
+
+  List<(int, int)> _randomHamiltonian(int rows, int cols, Random rand, {int? moves}) {
+    final path = <(int, int)>[];
+    for (int r = 0; r < rows; r++) {
+      if (r.isEven) {
+        for (int c = 0; c < cols; c++) {
+          path.add((r, c));
+        }
+      } else {
+        for (int c = cols - 1; c >= 0; c--) {
+          path.add((r, c));
+        }
+      }
+    }
+    int key(int r, int c) => r * cols + c;
+    final pos = <int, int>{
+      for (int i = 0; i < path.length; i++) key(path[i].$1, path[i].$2): i
+    };
+
+    final n = path.length;
+    final total = moves ?? (8 * n);
+    for (int m = 0; m < total; m++) {
+      final atHead = rand.nextBool();
+      final end = atHead ? path.first : path.last;
+      final nbrs = <(int, int)>[];
+      for (final d in [const (-1, 0), const (1, 0), const (0, -1), const (0, 1)]) {
+        final nr = end.$1 + d.$1, nc = end.$2 + d.$2;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          nbrs.add((nr, nc));
+        }
+      }
+      final nb = nbrs[rand.nextInt(nbrs.length)];
+      final k = pos[key(nb.$1, nb.$2)]!;
+      if (atHead) {
+        if (k > 0) _reverseRange(path, 0, k - 1);
+      } else {
+        if (k < n - 1) _reverseRange(path, k + 1, n - 1);
+      }
+      for (int i = 0; i < n; i++) {
+        pos[key(path[i].$1, path[i].$2)] = i;
+      }
+    }
+    return path;
+  }
+
+  double _turnRatio(List<(int, int)> path) {
+    if (path.length < 3) return 0.0;
+    int turns = 0;
+    for (int i = 1; i < path.length - 1; i++) {
+      final dr1 = path[i].$1 - path[i - 1].$1;
+      final dc1 = path[i].$2 - path[i - 1].$2;
+      final dr2 = path[i + 1].$1 - path[i].$1;
+      final dc2 = path[i + 1].$2 - path[i].$2;
+      if (dr1 != dr2 || dc1 != dc2) turns++;
+    }
+    return turns / (path.length - 2);
+  }
+
   ZipLevel _getDynamicLevel(int levelIndex) {
     int gridSize;
     Set<String> activeMods = {};
@@ -336,93 +404,92 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     List<(int, int)> path = [];
     final successfulWalls = <String>{};
 
-    for (int attempt = 0; attempt < 100; attempt++) {
-      final localVisited = <String>{};
-      if (!_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape')) {
-        // Disable 4 corners
+    final bool isNonRect = !_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape');
+
+    if (!isNonRect) {
+      // Rectangular grid: generate twisty Hamiltonian path via backbite scramble
+      path = _randomHamiltonian(rows, cols, rand);
+      int guard = 0;
+      while (_turnRatio(path) < 0.35 && guard < 50) {
+        path = _randomHamiltonian(rows, cols, rand);
+        guard++;
+      }
+    } else {
+      // nonRectShape: try DFS with a higher budget (500 attempts)
+      for (int attempt = 0; attempt < 500; attempt++) {
+        final localVisited = <String>{};
         localVisited.add('0,0');
         localVisited.add('0,${cols - 1}');
         localVisited.add('${rows - 1},0');
         localVisited.add('${rows - 1},${cols - 1}');
-      }
 
-      int startR = rand.nextInt(rows);
-      int startC = rand.nextInt(cols);
-      while (localVisited.contains('$startR,$startC')) {
-        startR = rand.nextInt(rows);
-        startC = rand.nextInt(cols);
-      }
-
-      final currentPath = <(int, int)>[(startR, startC)];
-      localVisited.add('$startR,$startC');
-
-      while (true) {
-        final cur = currentPath.last;
-        final neighbors = <(int, int)>[];
-        for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
-          final nr = cur.$1 + d.$1;
-          final nc = cur.$2 + d.$2;
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !localVisited.contains('$nr,$nc')) {
-            neighbors.add((nr, nc));
-          }
+        int startR = rand.nextInt(rows);
+        int startC = rand.nextInt(cols);
+        while (localVisited.contains('$startR,$startC')) {
+          startR = rand.nextInt(rows);
+          startC = rand.nextInt(cols);
         }
-        if (neighbors.isEmpty) break;
 
-        // Warnsdorff's heuristic: prefer cells with fewer unvisited neighbors
-        neighbors.shuffle(rand);
-        neighbors.sort((a, b) {
-          int countA = 0, countB = 0;
-          for (final d in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
-            final ar = a.$1 + d.$1, ac = a.$2 + d.$2;
-            if (ar >= 0 && ar < rows && ac >= 0 && ac < cols && !localVisited.contains('$ar,$ac')) countA++;
-            final br = b.$1 + d.$1, bc = b.$2 + d.$2;
-            if (br >= 0 && br < rows && bc >= 0 && bc < cols && !localVisited.contains('$br,$bc')) countB++;
-          }
-          return countA.compareTo(countB);
-        });
+        final currentPath = <(int, int)>[(startR, startC)];
+        localVisited.add('$startR,$startC');
 
-        final next = neighbors.first;
-        currentPath.add(next);
-        localVisited.add('${next.$1},${next.$2}');
-      }
-
-      final targetCoverage = !_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape')
-          ? rows * cols - 4
-          : rows * cols;
-      if (currentPath.length >= targetCoverage) {
-        path = currentPath;
-        for (int r = 0; r < rows; r++) {
-          for (int c = 0; c < cols; c++) {
-            final key = '$r,$c';
-            if (!localVisited.contains(key)) {
-              successfulWalls.add(key);
+        while (true) {
+          final cur = currentPath.last;
+          final neighbors = <(int, int)>[];
+          for (final d in [const (-1, 0), const (1, 0), const (0, -1), const (0, 1)]) {
+            final nr = cur.$1 + d.$1;
+            final nc = cur.$2 + d.$2;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !localVisited.contains('$nr,$nc')) {
+              neighbors.add((nr, nc));
             }
           }
+          if (neighbors.isEmpty) break;
+
+          neighbors.shuffle(rand);
+          neighbors.sort((a, b) {
+            int countA = 0, countB = 0;
+            for (final d in [const (-1, 0), const (1, 0), const (0, -1), const (0, 1)]) {
+              final ar = a.$1 + d.$1, ac = a.$2 + d.$2;
+              if (ar >= 0 && ar < rows && ac >= 0 && ac < cols && !localVisited.contains('$ar,$ac')) countA++;
+              final br = b.$1 + d.$1, bc = b.$2 + d.$2;
+              if (br >= 0 && br < rows && bc >= 0 && bc < cols && !localVisited.contains('$br,$bc')) countB++;
+            }
+            return countA.compareTo(countB);
+          });
+
+          final next = neighbors.first;
+          currentPath.add(next);
+          localVisited.add('${next.$1},${next.$2}');
         }
-        if (!_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape')) {
+
+        final targetCoverage = rows * cols - 4;
+        if (currentPath.length >= targetCoverage) {
+          path = currentPath;
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              final key = '$r,$c';
+              if (!localVisited.contains(key)) {
+                successfulWalls.add(key);
+              }
+            }
+          }
           successfulWalls.add('0,0');
           successfulWalls.add('0,${cols - 1}');
           successfulWalls.add('${rows - 1},0');
           successfulWalls.add('${rows - 1},${cols - 1}');
+          break;
         }
-        break;
       }
-    }
 
-    if (path.isEmpty) {
-      // Snake fallback (100% coverage, no walls)
-      for (int r = 0; r < rows; r++) {
-        if (r % 2 == 0) {
-          for (int c = 0; c < cols; c++) {
-            path.add((r, c));
-          }
-        } else {
-          for (int c = cols - 1; c >= 0; c--) {
-            path.add((r, c));
-          }
+      // Gracious fallback if DFS fails to find nonRect path: use full rectangular path
+      if (path.isEmpty) {
+        path = _randomHamiltonian(rows, cols, rand);
+        int guard = 0;
+        while (_turnRatio(path) < 0.35 && guard < 50) {
+          path = _randomHamiltonian(rows, cols, rand);
+          guard++;
         }
       }
-      successfulWalls.clear();
     }
 
     final waypoints = List.generate(rows, (_) => List.filled(cols, 0));

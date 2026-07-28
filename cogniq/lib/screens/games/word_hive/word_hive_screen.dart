@@ -453,7 +453,13 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   bool _shuffleActive = false;
   Set<String> _activeModifiers = {};
 
-  bool get _isWhisper => !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('whisper');
+  bool get _isWhisper {
+    if (_playDailyMode) return _dailyModifierType == 'whisper';
+    return !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('whisper');
+  }
+  bool get _isSpy => _playDailyMode && _dailyModifierType == 'spy';
+  List<String> _spyOriginalWords = [];
+  List<String> _spyScrambledWords = [];
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
   Timer? _gameTimer;
   bool _gameOver = false;
@@ -653,10 +659,19 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     if (_won || _hintCount <= 0) return;
     String? targetWord;
     final minLength = _minWordLength;
-    for (final word in _level.validWords) {
-      if (word.length >= minLength && word.contains(_level.centerLetter) && !_foundWords.contains(word)) {
-        targetWord = word;
-        break;
+    if (_isSpy) {
+      for (final word in _spyOriginalWords) {
+        if (!_foundWords.contains(word)) {
+          targetWord = word;
+          break;
+        }
+      }
+    } else {
+      for (final word in _level.validWords) {
+        if (word.length >= minLength && word.contains(_level.centerLetter) && !_foundWords.contains(word)) {
+          targetWord = word;
+          break;
+        }
       }
     }
     if (targetWord == null) return;
@@ -705,6 +720,29 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
+
+    if (_isSpy) {
+      final rand = Random(_levelIndex + 2026);
+      final validList = _level.validWords
+          .where((w) => w.length >= _minWordLength && w.contains(_level.centerLetter))
+          .toList();
+      validList.shuffle(rand);
+      final count = _targetCount;
+      _spyOriginalWords = validList.take(count).toList();
+      _spyScrambledWords = _spyOriginalWords.map((word) {
+        final chars = word.split('');
+        int guard = 0;
+        while (guard < 10) {
+          chars.shuffle(rand);
+          if (chars.join() != word) break;
+          guard++;
+        }
+        return chars.join().toUpperCase();
+      }).toList();
+    } else {
+      _spyOriginalWords = [];
+      _spyScrambledWords = [];
+    }
 
     if ((_playDailyMode || _levelIndex >= 30) && _activeModifiers.contains('timer')) {
       _timeLeft = 45 + (_targetCount * 15);
@@ -893,6 +931,15 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       return;
     }
     if (_level.validWords.contains(word)) {
+      if (_isSpy && !_spyOriginalWords.contains(word)) {
+        setState(() {
+          _message = 'Valid word, but not one of the encrypted words!';
+          _currentGuess.clear();
+          _selectedIndices.clear();
+          AudioManager.playFail();
+        });
+        return;
+      }
       setState(() {
         _foundWords.add(word);
         _message ='Nice! +1 word';
@@ -1114,22 +1161,26 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                       children: List.generate(_targetCount, (index) {
                         final list = _foundWords.toList();
                         final hasWord = index < list.length;
+                        final bool isSolvedSpy = _isSpy && index < _spyOriginalWords.length && _foundWords.contains(_spyOriginalWords[index]);
+                        
                         return Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: hasWord ? accentColor.withOpacity(0.2) : context.bgCard,
+                            color: (_isSpy ? isSolvedSpy : hasWord) ? accentColor.withOpacity(0.2) : context.bgCard,
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: hasWord ? accentColor : context.textMuted.withAlpha(50),
+                              color: (_isSpy ? isSolvedSpy : hasWord) ? accentColor : context.textMuted.withAlpha(50),
                               width: 1.2,
                             ),
                           ),
                           child: Text(
-                            hasWord ? _maskWord(list[index]) : '• • •',
+                            _isSpy
+                                ? (isSolvedSpy ? _maskWord(_spyOriginalWords[index]) : _spyScrambledWords[index])
+                                : (hasWord ? _maskWord(list[index]) : '• • •'),
                             style: GoogleFonts.outfit(
                               fontSize: context.scale(13),
                               fontWeight: FontWeight.w700,
-                              color: hasWord ? context.textPrimary : context.textMuted,
+                              color: (_isSpy ? isSolvedSpy : hasWord) ? context.textPrimary : context.textMuted,
                               letterSpacing: 1.5,
                             ),
                           ),

@@ -47,6 +47,35 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   final Set<int> _lockedWires = {};
   Set<String> _activeModifiers = {};
 
+  bool _adjacent(int a, int b, int W) {
+    final ra = a ~/ W, ca = a % W, rb = b ~/ W, cb = b % W;
+    return (ra == rb && (ca - cb).abs() == 1) || (ca == cb && (ra - rb).abs() == 1);
+  }
+
+  bool _tooClose(int idx, int srcIdx, int srcNeighbor, Set<int> chosen, int W) {
+    if (idx == srcIdx || idx == srcNeighbor) return true;
+    if (_adjacent(idx, srcIdx, W)) return true;
+    for (final t in chosen) {
+      if (idx == t || _adjacent(idx, t, W)) return true;
+    }
+    return false;
+  }
+
+  int _maxSeparatedTargets(int W) {
+    final perimeter = (W <= 1) ? 1 : (4 * W - 4);
+    return (perimeter ~/ 2).clamp(1, 12);
+  }
+
+  bool _boardIsValid(int srcIdx, List<int> tgts, int W) {
+    for (final t in tgts) {
+      if (_adjacent(t, srcIdx, W)) return false;
+      for (final u in tgts) {
+        if (t != u && _adjacent(t, u, W)) return false;
+      }
+    }
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -149,8 +178,10 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
         final otherSides = [0, 1, 2, 3]..remove(side);
         final Set<int> chosenIndices = {};
-        final int targetCount = numTargets.clamp(1, W * 2);
-        while (chosenIndices.length < targetCount) {
+        final int targetCount = numTargets.clamp(1, _maxSeparatedTargets(W));
+        int guard = 0;
+        while (chosenIndices.length < targetCount && guard < 800) {
+          guard++;
           final targetSide = otherSides[rng.nextInt(otherSides.length)];
           final offset = rng.nextInt(W);
           int targetIdx;
@@ -163,7 +194,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
           } else {
             targetIdx = offset * W;
           }
-          if (targetIdx != srcIdx) {
+          if (!_tooClose(targetIdx, srcIdx, srcNeighbor, chosenIndices, W)) {
             chosenIndices.add(targetIdx);
           }
         }
@@ -247,8 +278,10 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
           final otherSides = [0, 1, 2, 3]..remove(side);
           final Set<int> chosenIndices = {};
-          final int targetCount = numTargets.clamp(1, W * 2);
-          while (chosenIndices.length < targetCount) {
+          final int targetCount = numTargets.clamp(1, _maxSeparatedTargets(W));
+          int guard = 0;
+          while (chosenIndices.length < targetCount && guard < 800) {
+            guard++;
             final targetSide = otherSides[rng.nextInt(otherSides.length)];
             final offset = rng.nextInt(W);
             int targetIdx;
@@ -261,7 +294,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             } else {
               targetIdx = offset * W;
             }
-            if (targetIdx != srcIdx) {
+            if (!_tooClose(targetIdx, srcIdx, srcNeighbor, chosenIndices, W)) {
               chosenIndices.add(targetIdx);
             }
           }
@@ -340,6 +373,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             
             targetNeighbors.clear();
             final List<int> tNeighbors = [];
+            bool skipDFS = false;
             for (int t in tgts) {
               int tNeighbor = -1;
               List<int> candidates = [];
@@ -355,16 +389,19 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
               if (candidates.isNotEmpty) {
                 tNeighbor = candidates[0];
               } else {
-                if (r == 0) tNeighbor = t + W;
-                else if (r == W - 1) tNeighbor = t - W;
-                else if (c == 0) tNeighbor = t + 1;
-                else tNeighbor = t - 1;
+                skipDFS = true;
+                break;
               }
               
               targetNeighbors[t] = tNeighbor;
               tNeighbors.add(tNeighbor);
               connections[t].add(tNeighbor);
               connections[tNeighbor].add(t);
+            }
+            
+            if (skipDFS) {
+              success = false;
+              continue;
             }
             
             Set<int> treeNodes = {srcIdx, srcNeighbor};
@@ -420,7 +457,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                 }
               }
 
-              if (!tortuosityOk || !junctionsOk) {
+              if (!tortuosityOk || !junctionsOk || !_boardIsValid(srcIdx, tgts, W)) {
                 success = false;
               }
             }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,8 @@ import '../utils/daily_challenge_manager.dart';
 import '../utils/recently_played_manager.dart';
 import '../utils/challenge_reminder_helper.dart';
 import '../utils/activity_tracker.dart';
+import '../utils/prefs_keys.dart';
+import '../widgets/confetti_overlay.dart';
 const Map<String, IconData> _gameIcons = {
   'wordle':      Icons.grid_4x4_outlined,
   'hangman':     Icons.person_outline,
@@ -60,6 +63,10 @@ class _DailyScreenState extends State<DailyScreen> {
   int _bronzeCount = 0;
   int _silverCount = 0;
   int _goldCount = 0;
+
+  int _weeklyPerfectStreak = 0;
+  int _diamondStars = 0;
+  List<String> _perfectWeekHistory = [];
 
   @override
   void initState() {
@@ -121,6 +128,9 @@ class _DailyScreenState extends State<DailyScreen> {
     _bronzeCount = prefs.getInt('daily_bronze_stars') ?? 0;
     _silverCount = prefs.getInt('daily_silver_stars') ?? 0;
     _goldCount = prefs.getInt('daily_gold_stars') ?? 0;
+    _weeklyPerfectStreak = prefs.getInt(PrefsKeys.weeklyPerfectStreak) ?? 0;
+    _diamondStars = prefs.getInt(PrefsKeys.diamondStars) ?? 0;
+    _perfectWeekHistory = prefs.getStringList(PrefsKeys.perfectWeekHistory) ?? [];
 
     final startTimeStr = prefs.getString('daily_challenge_start_time') ?? '';
     if (startTimeStr.isNotEmpty) {
@@ -214,11 +224,14 @@ class _DailyScreenState extends State<DailyScreen> {
 
     if (result == true) {
       settingsNotifier.hapticSuccess();
+      final oldDiamonds = _diamondStars;
       await DailyChallengeManager.completeChallenge(difficulty, _dateStr, gameId);
       
       await _loadDailyState();
       
-      if (_completedTodayCount == 3) {
+      if (_diamondStars > oldDiamonds) {
+        _showPerfectWeekDialog();
+      } else if (_completedTodayCount == 3) {
         _showPerfectDayDialog();
       } else {
         if (mounted) {
@@ -239,6 +252,118 @@ class _DailyScreenState extends State<DailyScreen> {
     await updatedPrefs.remove('daily_backup_$gameId');
     await updatedPrefs.remove('daily_backup_active_game');
     await DailyChallengeManager.clearDailyModifier();
+  }
+
+  void _showPerfectWeekDialog() {
+    AudioManager.playSuccess();
+    settingsNotifier.hapticSuccess();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return Stack(
+          children: [
+            const ConfettiOverlayWidget(accentColor: Colors.cyan),
+            AlertDialog(
+              backgroundColor: context.bgCard,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 16),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0.0, end: 1.0),
+                    duration: const Duration(milliseconds: 800),
+                    curve: Curves.elasticOut,
+                    builder: (context, val, child) {
+                      return Transform.scale(
+                        scale: val,
+                        child: Transform.rotate(
+                          angle: val * 2 * pi,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Container(
+                      width: 100,
+                      height: 100,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: Colors.cyan.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.cyan, width: 2),
+                      ),
+                      child: const Text('💎', style: TextStyle(fontSize: 48)),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'PERFECT WEEK ACCOMPLISHED!',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: context.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'You have cleared 7 perfect days in a row and earned a Diamond Star!',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      color: context.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () {
+                      settingsNotifier.hapticTap();
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.cyan,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    child: Text('AWESOME!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _debugShiftDay(int offset) async {
+    final prefs = await SharedPreferences.getInstance();
+    int currentDay = prefs.getInt(PrefsKeys.dailyUserProgressDay) ?? 1;
+    currentDay = ((currentDay - 1 + offset) % DailyChallengeManager.kTotalDays) + 1;
+    if (currentDay < 1) currentDay = DailyChallengeManager.kTotalDays;
+    await prefs.setInt(PrefsKeys.dailyUserProgressDay, currentDay);
+    await prefs.setString(PrefsKeys.dailyChallengeStartTime, DateTime.now().toUtc().toIso8601String());
+    await _loadDailyState();
+  }
+
+  List<Color> _themeGradient(String themeName) {
+    final lower = themeName.toLowerCase();
+    if (lower.contains('fog') || lower.contains('whisper') || lower.contains('chaos')) {
+      return const [Color(0xFF232526), Color(0xFF414345)]; // Charcoal slate
+    }
+    if (lower.contains('mirror') || lower.contains('hidden') || lower.contains('nightmare')) {
+      return const [Color(0xFF2C3E50), Color(0xFFFD746C)]; // Dark orange/red
+    }
+    if (lower.contains('monochrome') || lower.contains('zoom') || lower.contains('prism')) {
+      return const [Color(0xFF0F2027), Color(0xFF2C5364)]; // Midnight ocean
+    }
+    if (lower.contains('retro') || lower.contains('eclipse') || lower.contains('time')) {
+      return const [Color(0xFF114357), Color(0xFFF29492)]; // Retro sunrise
+    }
+    return const [Color(0xFF3A1C71), Color(0xFFD76D77)]; // Royal violet sunset
   }
 
   void _showPerfectDayDialog() {
@@ -589,58 +714,105 @@ class _DailyScreenState extends State<DailyScreen> {
         Text('★', style: const TextStyle(color: Color(0xFFFFD700), fontSize: 18)),
         const SizedBox(width: 2),
         Text('$_goldCount', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: context.textPrimary)),
+        const SizedBox(width: 14),
+        const Text('💎', style: TextStyle(fontSize: 16)),
+        const SizedBox(width: 2),
+        Text('$_diamondStars', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: context.textPrimary)),
       ],
     );
   }
 
-  Widget _buildBody(BuildContext context) {
-    if (_activeDay > 14) {
-      return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+  Widget _buildPerfectWeekTracker() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 40),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: context.bgCard,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: AppTheme.cardShadow,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    '🏆',
-                    style: TextStyle(fontSize: 64),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'PERFECT WEEK STREAK',
+                  style: GoogleFonts.outfit(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: context.textSecondary,
+                    letterSpacing: 1.0,
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Challenges Completed!',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: context.textPrimary,
-                    ),
+                ),
+                Text(
+                  '$_weeklyPerfectStreak / 7 Days',
+                  style: GoogleFonts.outfit(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.cyan,
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'You have completed all available daily challenges. We will add more challenges soon!\n\nKeep training your mind in the regular game modes.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(
-                      fontSize: 14,
-                      color: context.textSecondary,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(7, (index) {
+              final isCompleted = index < _weeklyPerfectStreak;
+              final isCurrent = index == _weeklyPerfectStreak;
+              
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: isCompleted ? Colors.cyan.withOpacity(0.15) : Colors.transparent,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isCompleted
+                            ? Colors.cyan
+                            : isCurrent
+                                ? Colors.cyan.withOpacity(0.8)
+                                : context.textMuted.withAlpha(50),
+                        width: isCurrent ? 2.0 : 1.2,
+                      ),
+                    ),
+                    child: isCompleted
+                        ? const Icon(Icons.check, color: Colors.cyan, size: 16)
+                        : Text(
+                            '${index + 1}',
+                            style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isCurrent ? Colors.cyan : context.textMuted,
+                            ),
+                          ),
+                  ),
+                ],
+              );
+            }),
+          ),
         ],
-      );
-    }
+      ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final week = DailyChallengeManager.weekOf(_activeDay);
+    final dayInWeek = DailyChallengeManager.dayInWeekOf(_activeDay);
+    final theme = DailyChallengeManager.themeOf(_activeDay);
+    
+    // Find active weekly modifier description
+    final activeDesc = _challenges.isNotEmpty 
+        ? _challenges.first.modifierDescription 
+        : 'Special rules apply to all game boards this week.';
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -661,8 +833,46 @@ class _DailyScreenState extends State<DailyScreen> {
           const SizedBox(height: 16),
         ],
 
+        // 1. Weekly Theme Banner Card
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: _themeGradient(theme),
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppTheme.cardShadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${theme.toUpperCase()} WEEK',
+                style: GoogleFonts.outfit(
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                activeDesc,
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  color: Colors.white.withOpacity(0.85),
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
         Text(
-          'Day $_activeDay of 30 • Keep your daily progress active.',
+          'Week $week of 14 • Day $dayInWeek of 7 • progress day $_activeDay',
           textAlign: TextAlign.center,
           style: GoogleFonts.outfit(fontSize: 13, color: context.textSecondary, fontWeight: FontWeight.bold),
         ),
@@ -671,7 +881,11 @@ class _DailyScreenState extends State<DailyScreen> {
         _buildSummaryCard(),
         const SizedBox(height: 20),
 
-        // Weekly Calendar Tracker Card
+        // 2. Perfect Week Streak checklist nodes
+        _buildPerfectWeekTracker(),
+        const SizedBox(height: 20),
+
+        // 3. Weekly Calendar Stars Tracker Card
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -685,7 +899,7 @@ class _DailyScreenState extends State<DailyScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Text(
-                  'WEEKLY STARS',
+                  'WEEKLY STARS (CALENDAR)',
                   style: GoogleFonts.outfit(
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
@@ -706,13 +920,15 @@ class _DailyScreenState extends State<DailyScreen> {
         ),
         const SizedBox(height: 20),
 
-        // 3 Challenge Cards
-        _buildChallengeCard(_challenges[0], _completedEasy),
-        _buildChallengeCard(_challenges[1], _completedMedium),
-        _buildChallengeCard(_challenges[2], _completedHard),
+        // 4. Three Challenge Cards
+        if (_challenges.length >= 3) ...[
+          _buildChallengeCard(_challenges[0], _completedEasy),
+          _buildChallengeCard(_challenges[1], _completedMedium),
+          _buildChallengeCard(_challenges[2], _completedHard),
+        ],
         const SizedBox(height: 10),
 
-        // Countdown timer card
+        // 5. Countdown timer card
         Container(
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
@@ -735,6 +951,65 @@ class _DailyScreenState extends State<DailyScreen> {
               Text(
                 _timeLeft,
                 style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: context.textPrimary),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // 6. Developer Debug Controls
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.amber.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.amber.withOpacity(0.2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'DEVELOPER DEBUG CONTROLS',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.amber,
+                  letterSpacing: 1.1,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _debugShiftDay(-1),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.amber,
+                      side: const BorderSide(color: Colors.amber, width: 1.2),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    child: Text('Day -1', style: GoogleFonts.outfit(fontSize: 12)),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _debugShiftDay(1),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.amber,
+                      side: const BorderSide(color: Colors.amber, width: 1.2),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    child: Text('Day +1', style: GoogleFonts.outfit(fontSize: 12)),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _debugShiftDay(7),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.amber,
+                      side: const BorderSide(color: Colors.amber, width: 1.2),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    child: Text('Week +1', style: GoogleFonts.outfit(fontSize: 12)),
+                  ),
+                ],
               ),
             ],
           ),
@@ -791,6 +1066,10 @@ class _DailyScreenState extends State<DailyScreen> {
                 Text('★', style: const TextStyle(color: Color(0xFFFFD700), fontSize: 16)),
                 const SizedBox(width: 2),
                 Text('$_goldCount', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13, color: context.textPrimary)),
+                const SizedBox(width: 8),
+                const Text('💎', style: TextStyle(fontSize: 14)),
+                const SizedBox(width: 2),
+                Text('$_diamondStars', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13, color: context.textPrimary)),
               ],
             ),
           ),

@@ -48,8 +48,10 @@ class DailyChallenge {
 
 class _ChallengeData {
   final String gameId;
-  final String difficulty;
-  final int levelIndex;
+  final String difficulty;          // Day-1 slot label (informational only)
+  final int levelIndex;             // now the game's EASY base level
+  final int step;                   // level added per difficulty rank (default 3)
+  final int? pinDifficulty;         // null = rotates; 0 = pinned to Easy (Chimp)
   final String modifierName;
   final String modifierDescription;
   final String? modifierType;
@@ -59,6 +61,8 @@ class _ChallengeData {
     required this.gameId,
     required this.difficulty,
     required this.levelIndex,
+    this.step = 3,
+    this.pinDifficulty,
     required this.modifierName,
     required this.modifierDescription,
     this.modifierType,
@@ -89,6 +93,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Foggy Focus',
         modifierDescription: 'A heavy fog obscures the screen. Only the cells immediately surrounding the selected cell/pointer are visible.',
         modifierType: 'fog',
@@ -97,7 +102,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'sudoku',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Sudoku in the Mist',
         modifierDescription: 'The Sudoku board is blacked out by fog. Selecting a cell illuminates a 3x3 region around it.',
         modifierType: 'fog',
@@ -106,7 +112,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'minesweeper',
         difficulty: 'Hard',
-        levelIndex: 15,
+        levelIndex: 5,
+        step: 5,
         modifierName: 'Dark Minefield',
         modifierDescription: 'Visibility is limited to a small spotlight around your cursor. Uncover safe cells without stepping on hidden mines.',
         modifierType: 'fog',
@@ -120,6 +127,7 @@ class DailyChallengeManager {
         gameId: 'zip',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Flipped Maze',
         modifierDescription: 'The board and directional drawing coordinates are horizontally mirrored. Trace the path in reverse-visual alignment.',
         modifierType: 'mirror',
@@ -127,7 +135,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'pattern_lock',
         difficulty: 'Medium',
-        levelIndex: 5,
+        levelIndex: 2,
+        step: 2,
         modifierName: 'Flipped Trace',
         modifierDescription: 'The pattern lock grid and the visual preview lines are horizontally mirrored.',
         modifierType: 'mirror',
@@ -135,7 +144,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'queens',
         difficulty: 'Hard',
-        levelIndex: 10,
+        levelIndex: 4,
+        step: 3,
         modifierName: 'Reflected Matrix',
         modifierDescription: 'The grid is visually flipped left-to-right. Place stars avoiding overlaps.',
         modifierType: 'mirror',
@@ -148,6 +158,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Grayscale Contrast',
         modifierDescription: 'The grid is rendered entirely in shades of gray. Locate the tile with the slightly different brightness level.',
         modifierType: 'monochrome',
@@ -155,7 +166,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'hue',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Monochrome Bands',
         modifierDescription: 'Sort color tiles of very close gray/silver intensities from black to white.',
         modifierType: 'monochrome',
@@ -163,7 +175,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'colour_link',
         difficulty: 'Hard',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Monochrome Links',
         modifierDescription: 'Colors are replaced with shades of gray/silver. Connect links by matching shades.',
         modifierType: 'monochrome',
@@ -176,6 +189,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Pixelated Shade',
         modifierDescription: 'The color tiles are rendered as blocky, pixelated textures. Find the odd shade.',
         modifierType: 'retro',
@@ -183,7 +197,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'circuit_guide',
         difficulty: 'Medium',
-        levelIndex: 6,
+        levelIndex: 2,
+        step: 2,
         modifierName: 'Pixel Grid',
         modifierDescription: 'The wires are rendered with high-contrast retro green pixel lines and blocky terminals.',
         modifierType: 'retro',
@@ -191,7 +206,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'zip',
         difficulty: 'Hard',
-        levelIndex: 22,
+        levelIndex: 10,
+        step: 6,
         modifierName: 'Pixel Grid',
         modifierDescription: 'Grid cells are hidden; you only see a low-res heat-map indicating path proximity (brighter = closer to path).',
         modifierType: 'retro',
@@ -203,7 +219,9 @@ class DailyChallengeManager {
       easy: _ChallengeData(
         gameId: 'chimp',
         difficulty: 'Easy',
-        levelIndex: 2,
+        levelIndex: 1,
+        step: 0,
+        pinDifficulty: 0,
         modifierName: 'Corrupted Sequence',
         modifierDescription: 'The numbers briefly glitch or show random symbols, requiring fast memorization.',
         modifierType: 'glitch',
@@ -211,7 +229,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'sudoku',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Shifting Numbers',
         modifierDescription: 'Once mid-game (after 5 entries), two rows swap their contents, forcing you to adapt your reasoning.',
         modifierType: 'glitch',
@@ -219,7 +238,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'queens',
         difficulty: 'Hard',
-        levelIndex: 8,
+        levelIndex: 2,
+        step: 3,
         modifierName: 'Glitch Matrix',
         modifierDescription: 'A visual interference/static effect briefly disrupts grid boundaries.',
         modifierType: 'glitch',
@@ -232,6 +252,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 3,
+        step: 3,
         modifierName: 'Silent Contrast',
         modifierDescription: 'The brightness differences between cells are extremely quiet (low delta), forcing concentration.',
         modifierType: 'whisper',
@@ -239,7 +260,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'spellingbee',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Hidden Center',
         modifierDescription: 'The central letter of the hive is hidden/blank. Deduce it and find the target number of words.',
         modifierType: 'whisper',
@@ -247,7 +269,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'sumstrike',
         difficulty: 'Hard',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Silent Columns',
         modifierDescription: 'The row/column target sums are hidden (blanked out), and you must deduce them from intersections.',
         modifierType: 'whisper',
@@ -260,6 +283,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Secret Anchor',
         modifierDescription: 'The odd color cell isn\'t a different shade; it\'s the tile whose color matches the background layout.',
         modifierType: 'hidden_rule',
@@ -267,7 +291,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'minesweeper',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Safe Corners',
         modifierDescription: 'The corners of the grid are guaranteed to contain mines, but clicking them reveals adjacent numbers without exploding.',
         modifierType: 'hidden_rule',
@@ -275,7 +300,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'queens',
         difficulty: 'Hard',
-        levelIndex: 15,
+        levelIndex: 5,
+        step: 5,
         modifierName: 'Diagonal Shield',
         modifierDescription: 'A secret rule applies: no two stars can be diagonally adjacent (normally allowed if not touching).',
         modifierType: 'hidden_rule',
@@ -287,7 +313,8 @@ class DailyChallengeManager {
       easy: _ChallengeData(
         gameId: 'queens',
         difficulty: 'Easy',
-        levelIndex: 8,
+        levelIndex: 2,
+        step: 3,
         modifierName: 'Macro Grid',
         modifierDescription: 'The board is zoomed in, requiring the player to drag and pan to locate safe zones.',
         modifierType: 'zoom',
@@ -295,7 +322,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'sudoku',
         difficulty: 'Medium',
-        levelIndex: 10,
+        levelIndex: 4,
+        step: 3,
         modifierName: 'Cropped Clues',
         modifierDescription: 'A small portion of the board is zoomed in. Solve the grid.',
         modifierType: 'zoom',
@@ -303,7 +331,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'bridges',
         difficulty: 'Hard',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Macro Bridges',
         modifierDescription: 'The map is zoomed in, requiring panning around the screen to build island bridges.',
         modifierType: 'zoom',
@@ -316,6 +345,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Shadow Grid',
         modifierDescription: 'The grid wanes in and out of shadows every 3 seconds. Tap the odd shade.',
         modifierType: 'eclipse',
@@ -323,7 +353,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'pattern_lock',
         difficulty: 'Medium',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Vanishing Lock',
         modifierDescription: 'The pattern dots go dark/eclipse every 4 seconds. Draw during lit windows.',
         modifierType: 'eclipse',
@@ -331,7 +362,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'sudoku',
         difficulty: 'Hard',
-        levelIndex: 22,
+        levelIndex: 10,
+        step: 6,
         modifierName: 'Blackout Board',
         modifierDescription: 'The board goes completely dark for 2 seconds every 40 seconds. Use the lit intervals to plan your moves.',
         modifierType: 'eclipse',
@@ -345,6 +377,7 @@ class DailyChallengeManager {
         gameId: 'spellingbee',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Encrypted Words',
         modifierDescription: 'Words in the list are scrambled. Scan and solve them inside the Hive.',
         modifierType: 'spy',
@@ -352,7 +385,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'queens',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Decoy Region',
         modifierDescription: 'One color region contains zero stars instead of one, and no two stars are in the same region. Deduce the anomaly.',
         modifierType: 'spy',
@@ -360,7 +394,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'killersudoku',
         difficulty: 'Hard',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Double Agent Cage',
         modifierDescription: 'One cage sum is a decoy/lie (mathematically incorrect). You must locate and bypass it.',
         modifierType: 'spy',
@@ -373,6 +408,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 1,
+        step: 3,
         modifierName: 'Pulse Shift',
         modifierDescription: 'Colors wane and morph into a new palette every 4 seconds. Tap the odd color before it changes.',
         modifierType: 'chaos',
@@ -380,7 +416,9 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'chimp',
         difficulty: 'Medium',
-        levelIndex: 3, // 7 numbers
+        levelIndex: 2,
+        step: 0,
+        pinDifficulty: 0,
         modifierName: 'Shifting Patches',
         modifierDescription: 'The numbers shuffle and swap grid slots after you tap the first 3 digits.',
         modifierType: 'chaos',
@@ -388,7 +426,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'color_flood',
         difficulty: 'Hard',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Collapsing Moves',
         modifierDescription: 'Colors randomly shuffle after every 4 moves, requiring rapid adaptation.',
         modifierType: 'chaos',
@@ -401,6 +440,7 @@ class DailyChallengeManager {
         gameId: 'spellingbee',
         difficulty: 'Easy',
         levelIndex: 2,
+        step: 3,
         modifierName: 'Bare Hive',
         modifierDescription: 'No starting letter helper cues are provided in the input bar.',
         modifierType: 'minimal',
@@ -408,7 +448,8 @@ class DailyChallengeManager {
       medium: _ChallengeData(
         gameId: 'sudoku',
         difficulty: 'Medium',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Bare Board',
         modifierDescription: 'Solve a 9x9 grid starting with only 12 clues (ordinary grids have 20+).',
         modifierType: 'minimal',
@@ -416,7 +457,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'zip',
         difficulty: 'Hard',
-        levelIndex: 23,
+        levelIndex: 9,
+        step: 7,
         modifierName: 'Blind Steps',
         modifierDescription: 'The waypoints vanish 1 second after the round starts. Connect them entirely from memory.',
         modifierType: 'minimal',
@@ -428,7 +470,8 @@ class DailyChallengeManager {
       easy: _ChallengeData(
         gameId: 'oddcolor',
         difficulty: 'Easy',
-        levelIndex: 12,
+        levelIndex: 6,
+        step: 3,
         modifierName: 'Split Prism',
         modifierDescription: 'The grid is divided diagonally into two distinct color ranges. Find the odd shade.',
         modifierType: 'prism',
@@ -437,6 +480,7 @@ class DailyChallengeManager {
         gameId: 'hue',
         difficulty: 'Medium',
         levelIndex: 1,
+        step: 2,
         modifierName: 'Rainbow Twist',
         modifierDescription: 'The four corner target colors rotate clockwise by 90 degrees every time you make a correct swap.',
         modifierType: 'prism',
@@ -444,7 +488,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'masyu',
         difficulty: 'Hard',
-        levelIndex: 5,
+        levelIndex: 1,
+        step: 2,
         modifierName: 'Inverted Pearls',
         modifierDescription: 'Black pearls act as white pearls and vice-versa, flipping loop rules.',
         modifierType: 'prism',
@@ -457,6 +502,7 @@ class DailyChallengeManager {
         gameId: 'oddcolor',
         difficulty: 'Easy',
         levelIndex: 3,
+        step: 3,
         modifierName: 'Rapid Warp',
         modifierDescription: 'Color grids morph palettes every 2 seconds. Tap the odd shade quickly.',
         modifierType: 'time_warp',
@@ -465,6 +511,8 @@ class DailyChallengeManager {
         gameId: 'chimp',
         difficulty: 'Medium',
         levelIndex: 2,
+        step: 0,
+        pinDifficulty: 0,
         modifierName: 'Vanish Board',
         modifierDescription: 'Numbers vanish after 1 second of visibility, forcing rapid recall.',
         modifierType: 'time_warp',
@@ -472,7 +520,8 @@ class DailyChallengeManager {
       hard: _ChallengeData(
         gameId: 'sudoku',
         difficulty: 'Hard',
-        levelIndex: 22,
+        levelIndex: 10,
+        step: 6,
         modifierName: 'Hourglass Board',
         modifierDescription: 'A ticking timer runs. Correct numbers add 5 seconds; incorrect guesses subtract 10.',
         modifierType: 'time_warp',
@@ -932,8 +981,28 @@ class DailyChallengeManager {
     ),
   ];
 
+  static const int kThemeCount = 14;
+  static const int kDaysPerWeek = 7;
+  static const int kTotalDays = kThemeCount * kDaysPerWeek; // 98
+
   static Future<int> getActiveDay() async {
     final prefs = await SharedPreferences.getInstance();
+
+    // Check one-time V3 Reset Migration for weekly challenge baseline
+    if (!prefs.containsKey(PrefsKeys.weeklyResetV3Done)) {
+      await prefs.setInt(PrefsKeys.dailyBronzeStars, 0);
+      await prefs.setInt(PrefsKeys.dailySilverStars, 0);
+      await prefs.setInt(PrefsKeys.dailyGoldStars, 0);
+      await prefs.setInt(PrefsKeys.dailyV2Streak, 0);
+      await prefs.setInt(PrefsKeys.dailyV2PerfectDays, 0);
+      await prefs.setInt(PrefsKeys.weeklyPerfectStreak, 0);
+      await prefs.remove(PrefsKeys.weeklyLastPerfectDate);
+      await prefs.setInt(PrefsKeys.diamondStars, 0);
+      await prefs.remove(PrefsKeys.perfectWeekHistory);
+      await prefs.setInt(PrefsKeys.dailyUserProgressDay, 1);
+      await prefs.remove(PrefsKeys.dailyChallengeStartTime);
+      await prefs.setBool(PrefsKeys.weeklyResetV3Done, true);
+    }
 
     if (!prefs.containsKey(PrefsKeys.dailyV2Migrated)) {
       await prefs.setInt(PrefsKeys.dailyUserProgressDay, 1);
@@ -955,7 +1024,7 @@ class DailyChallengeManager {
       final diffHours = diff.inHours;
       if (diffHours >= 24) {
         final elapsedDays = diffHours ~/ 24;
-        currentDay = ((currentDay - 1 + elapsedDays) % 30) + 1;
+        currentDay = ((currentDay - 1 + elapsedDays) % kTotalDays) + 1;
         await prefs.setInt(PrefsKeys.dailyUserProgressDay, currentDay);
         
         final newStartTime = startTime.add(Duration(hours: elapsedDays * 24));
@@ -966,56 +1035,76 @@ class DailyChallengeManager {
     return currentDay;
   }
 
+  static int weekOf(int globalDay) {
+    final d = ((globalDay - 1) % kTotalDays);
+    return ((d ~/ kDaysPerWeek) % kThemeCount) + 1;
+  }
 
+  static int dayInWeekOf(int globalDay) {
+    final d = ((globalDay - 1) % kTotalDays);
+    return (d % kDaysPerWeek) + 1;
+  }
 
-  static List<DailyChallenge> getChallengesForDay(int dayNum) {
-    if (dayNum < 1 || dayNum > 30) dayNum = 1;
-    final dayData = _kDailyChallengesPlan[dayNum - 1];
+  static String themeOf(int globalDay) => _kDailyChallengesPlan[weekOf(globalDay) - 1].theme;
 
-    final easyGame = kAllGames.firstWhere((g) => g.id == dayData.easy.gameId);
-    final mediumGame = kAllGames.firstWhere((g) => g.id == dayData.medium.gameId);
-    final hardGame = kAllGames.firstWhere((g) => g.id == dayData.hard.gameId);
+  static const List<String> _kDiffLabels = ['Easy', 'Medium', 'Hard'];
 
-    return [
-      DailyChallenge(
-        difficulty: 'Easy',
-        game: easyGame,
-        levelIndex: dayData.easy.levelIndex,
-        modifierName: dayData.easy.modifierName,
-        modifierDescription: dayData.easy.modifierDescription,
-        modifierType: dayData.easy.modifierType,
-        extraParams: dayData.easy.extraParams,
-      ),
-      DailyChallenge(
-        difficulty: 'Medium',
-        game: mediumGame,
-        levelIndex: dayData.medium.levelIndex,
-        modifierName: dayData.medium.modifierName,
-        modifierDescription: dayData.medium.modifierDescription,
-        modifierType: dayData.medium.modifierType,
-        extraParams: dayData.medium.extraParams,
-      ),
-      DailyChallenge(
-        difficulty: 'Hard',
-        game: hardGame,
-        levelIndex: dayData.hard.levelIndex,
-        modifierName: dayData.hard.modifierName,
-        modifierDescription: dayData.hard.modifierDescription,
-        modifierType: dayData.hard.modifierType,
-        extraParams: dayData.hard.extraParams,
-      ),
-    ];
+  static List<DailyChallenge> getChallengesForDay(int globalDay) {
+    final week = weekOf(globalDay);            // 1..14
+    final dayInWeek = dayInWeekOf(globalDay);  // 1..7
+    final wk = _kDailyChallengesPlan[week - 1];
+    final trio = [wk.easy, wk.medium, wk.hard]; // Day-1 [slot0, slot1, slot2]
+
+    final slotToGame = _slotAssignment(trio, dayInWeek); // slot -> index into trio
+
+    final out = <DailyChallenge>[];
+    for (int slot = 0; slot < 3; slot++) {
+      final c = trio[slotToGame[slot]];
+      final level = c.levelIndex + slot * c.step;   // level scales with the slot
+      out.add(DailyChallenge(
+        difficulty: _kDiffLabels[slot],
+        game: kAllGames.firstWhere((g) => g.id == c.gameId),
+        levelIndex: level,
+        modifierName: c.modifierName,
+        modifierDescription: c.modifierDescription,
+        modifierType: c.modifierType,
+        extraParams: c.extraParams,
+      ));
+    }
+    return out; // [0]=Easy, [1]=Medium, [2]=Hard, matching daily_screen
+  }
+
+  static List<int> _slotAssignment(List<_ChallengeData> trio, int dayInWeek) {
+    final slotToGame = List<int>.filled(3, -1);
+    final usedSlots = <int>{};
+    final freeGames = <int>[];
+    for (int i = 0; i < 3; i++) {                 // 1) place pinned games
+      final p = trio[i].pinDifficulty;
+      if (p != null) {
+        slotToGame[p] = i;
+        usedSlots.add(p);
+      } else {
+        freeGames.add(i);
+      }
+    }
+    final freeSlots = [for (int s = 0; s < 3; s++) if (!usedSlots.contains(s)) s];
+    final m = freeSlots.length;                   // 3 (no pin) or 2 (Chimp week)
+    final r = m == 0 ? 0 : (dayInWeek - 1) % m;   // 2) rotate free games through free slots
+    for (int j = 0; j < m; j++) {
+      slotToGame[freeSlots[j]] = freeGames[((j - r) % m + m) % m];
+    }
+    return slotToGame;
   }
 
   static List<DailyChallenge> getChallengesForDate(DateTime date) {
-    // Retain compatibility for legacy calls: map calendar date to a 1-30 cycle
+    // Retain compatibility for legacy calls: map calendar date to a 1-98 cycle
     final dateUtc = date.toUtc();
     final epoch = DateTime.utc(2026, 6, 1);
     int daysDifference = dateUtc.difference(epoch).inDays;
     if (daysDifference < 0) {
-      daysDifference = 30 + (daysDifference % 30);
+      daysDifference = kTotalDays + (daysDifference % kTotalDays);
     }
-    final dayNumber = (daysDifference % 30) + 1;
+    final dayNumber = (daysDifference % kTotalDays) + 1;
     return getChallengesForDay(dayNumber);
   }
 
@@ -1129,6 +1218,46 @@ class DailyChallengeManager {
         await prefs.setBool(perfectKey, true);
         int perfectDays = prefs.getInt(PrefsKeys.dailyV2PerfectDays) ?? 0;
         await prefs.setInt(PrefsKeys.dailyV2PerfectDays, perfectDays + 1);
+
+        // --- Perfect Week Streak Logic ---
+        final today = DateTime.parse(dateStr); // dateStr is UTC yyyy-MM-dd
+        final last = prefs.getString(PrefsKeys.weeklyLastPerfectDate) ?? '';
+        int streak = prefs.getInt(PrefsKeys.weeklyPerfectStreak) ?? 0;
+        
+        List<String> history = prefs.getStringList(PrefsKeys.perfectWeekHistory) ?? [];
+        if (!history.contains(dateStr)) {
+          history.add(dateStr);
+          await prefs.setStringList(PrefsKeys.perfectWeekHistory, history);
+        }
+
+        if (last != dateStr) {
+          if (last.isEmpty) {
+            streak = 1;
+          } else {
+            final lastDateObj = DateTime.parse(last);
+            // Calculate actual date difference in days in UTC
+            final lastDateUtc = DateTime.utc(lastDateObj.year, lastDateObj.month, lastDateObj.day);
+            final todayUtc = DateTime.utc(today.year, today.month, today.day);
+            final diff = todayUtc.difference(lastDateUtc).inDays;
+            
+            if (diff == 1) {
+              streak += 1;
+            } else if (diff > 1) {
+              streak = 1;
+              history = [dateStr];
+              await prefs.setStringList(PrefsKeys.perfectWeekHistory, history);
+            }
+          }
+          await prefs.setString(PrefsKeys.weeklyLastPerfectDate, dateStr);
+          
+          if (streak >= 7) {
+            final diamonds = prefs.getInt(PrefsKeys.diamondStars) ?? 0;
+            await prefs.setInt(PrefsKeys.diamondStars, diamonds + 1);
+            streak = 0; // Reset streak after award
+            await prefs.remove(PrefsKeys.perfectWeekHistory);
+          }
+          await prefs.setInt(PrefsKeys.weeklyPerfectStreak, streak);
+        }
       }
     }
 
