@@ -107,7 +107,9 @@ class _DailyScreenState extends State<DailyScreen> {
   }
 
   Future<void> _loadDailyState() async {
-    final now = DateTime.now().toUtc();
+    final prefs = await SharedPreferences.getInstance();
+    final debugOffset = prefs.getInt('debug_date_offset') ?? 0;
+    final now = DateTime.now().toUtc().add(Duration(days: debugOffset));
     _dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
 
     _activeDay = await DailyChallengeManager.getActiveDay();
@@ -345,6 +347,10 @@ class _DailyScreenState extends State<DailyScreen> {
     currentDay = ((currentDay - 1 + offset) % DailyChallengeManager.kTotalDays) + 1;
     if (currentDay < 1) currentDay = DailyChallengeManager.kTotalDays;
     await prefs.setInt(PrefsKeys.dailyUserProgressDay, currentDay);
+    
+    final currentOffset = prefs.getInt('debug_date_offset') ?? 0;
+    await prefs.setInt('debug_date_offset', currentOffset + offset);
+
     await prefs.setString(PrefsKeys.dailyChallengeStartTime, DateTime.now().toUtc().toIso8601String());
     await _loadDailyState();
   }
@@ -429,78 +435,124 @@ class _DailyScreenState extends State<DailyScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: AppTheme.cardShadow,
       ),
-      child: Row(
+      child: Column(
         children: [
-          Stack(
-            alignment: Alignment.center,
+          Row(
             children: [
-              SizedBox(
-                width: 64,
-                height: 64,
-                child: CircularProgressIndicator(
-                  value: progressVal,
-                  strokeWidth: 6,
-                  backgroundColor: context.textMuted.withAlpha(30),
-                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.dustyMauve),
-                ),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 64,
+                    height: 64,
+                    child: CircularProgressIndicator(
+                      value: progressVal,
+                      strokeWidth: 6,
+                      backgroundColor: context.textMuted.withAlpha(30),
+                      valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.dustyMauve),
+                    ),
+                  ),
+                  Text(
+                    '$_completedTodayCount/3',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: context.textPrimary,
+                    ),
+                  ),
+                ],
               ),
-              Text(
-                '$_completedTodayCount/3',
-                style: GoogleFonts.outfit(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: context.textPrimary,
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 18),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            '$_streak Day Streak',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: context.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            '$_perfectDays Perfect Days',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: context.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 18),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '$_streak Day Streak',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: context.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '$_perfectDays Perfect Days',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: context.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          const SizedBox(height: 16),
+          Divider(color: context.textMuted.withOpacity(0.15), height: 1),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildStarStat('★', const Color(0xFFCD7F32), 'Bronze', _bronzeCount),
+              _buildStarStat('★', const Color(0xFFC0C0C0), 'Silver', _silverCount),
+              _buildStarStat('★', const Color(0xFFFFD700), 'Gold', _goldCount),
+              _buildStarStat('💎', Colors.cyanAccent, 'Diamond', _diamondStars),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStarStat(String symbol, Color color, String label, int count) {
+    return Column(
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(symbol, style: TextStyle(color: color, fontSize: 16)),
+            const SizedBox(width: 4),
+            Text(
+              '$count',
+              style: GoogleFonts.outfit(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: context.textPrimary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: GoogleFonts.outfit(
+            fontSize: 10,
+            color: context.textMuted,
+          ),
+        ),
+      ],
     );
   }
 
@@ -987,27 +1039,53 @@ class _DailyScreenState extends State<DailyScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.amber,
                       side: const BorderSide(color: Colors.amber, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                    child: Text('Day -1', style: GoogleFonts.outfit(fontSize: 12)),
+                    child: Text('Day -1', style: GoogleFonts.outfit(fontSize: 11)),
                   ),
                   OutlinedButton(
                     onPressed: () => _debugShiftDay(1),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.amber,
                       side: const BorderSide(color: Colors.amber, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                    child: Text('Day +1', style: GoogleFonts.outfit(fontSize: 12)),
+                    child: Text('Day +1', style: GoogleFonts.outfit(fontSize: 11)),
                   ),
                   OutlinedButton(
                     onPressed: () => _debugShiftDay(7),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.amber,
                       side: const BorderSide(color: Colors.amber, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                    child: Text('Week +1', style: GoogleFonts.outfit(fontSize: 12)),
+                    child: Text('Week +1', style: GoogleFonts.outfit(fontSize: 11)),
+                  ),
+                  OutlinedButton(
+                    onPressed: () async {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setInt(PrefsKeys.dailyUserProgressDay, 1);
+                      await prefs.setInt('debug_date_offset', 0);
+                      for (final key in prefs.getKeys().toList()) {
+                        if (key.startsWith('daily_v2_completed_') || 
+                            key.startsWith('daily_star_for_date_') || 
+                            key.startsWith('daily_v2_perfect_')) {
+                          await prefs.remove(key);
+                        }
+                      }
+                      await prefs.remove(PrefsKeys.weeklyPerfectStreak);
+                      await prefs.remove(PrefsKeys.diamondStars);
+                      await prefs.remove(PrefsKeys.perfectWeekHistory);
+                      await prefs.remove(PrefsKeys.dailyV2LastDate);
+                      await prefs.remove(PrefsKeys.dailyV2Streak);
+                      await _loadDailyState();
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.redAccent,
+                      side: const BorderSide(color: Colors.redAccent, width: 1.2),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                    child: Text('Reset All', style: GoogleFonts.outfit(fontSize: 11)),
                   ),
                 ],
               ),

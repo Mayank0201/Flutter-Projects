@@ -185,7 +185,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         _seedFromCenter = _activeModifiers.contains('centerSeed');
         hasObstacles = false;
       } else {
-        _activeModifiers = {};
+        _activeModifiers = _playDailyMode && _dailyModifierType.isNotEmpty ? {_dailyModifierType} : {};
         if (_currentLevel < 5) {
           _gridSize = 5;
           _numColors = 4;
@@ -281,7 +281,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         _movesLeft = (fallbackOpt < 99 ? fallbackOpt : 15) + buffer;
       }
 
-      if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
+      if ((_playDailyMode || _currentLevel >= 30) && _activeModifiers.contains('timer')) {
         _timeLeft = 20 + (_gridSize * 8);
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {

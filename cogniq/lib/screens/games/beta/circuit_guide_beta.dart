@@ -442,7 +442,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
               }
 
               bool tortuosityOk = true;
-              if (!_playDailyMode && _currentLevel >= 30 && generationRetries < 5) {
+              if ((_playDailyMode || _currentLevel >= 30) && generationRetries < 5) {
                 bool checkTort = _activeModifiers.contains('tortuosity');
                 if (checkTort && treeNodes.length < W * 1.8) {
                   tortuosityOk = false;
@@ -450,7 +450,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
               }
 
               bool junctionsOk = true;
-              if (!_playDailyMode && _currentLevel >= 30 && generationRetries < 5) {
+              if ((_playDailyMode || _currentLevel >= 30) && generationRetries < 5) {
                 bool checkJunc = _activeModifiers.contains('junctionDensity');
                 if (checkJunc && playableCount > 0 && (tCount / playableCount) < 0.25) {
                   junctionsOk = false;

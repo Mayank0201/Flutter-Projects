@@ -11,6 +11,7 @@ import '../../../utils/point_manager.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../widgets/buy_hints_dialog.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
 
 class KillerSudokuBetaScreen extends StatefulWidget {
   const KillerSudokuBetaScreen({super.key});
@@ -421,6 +422,10 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   }
 
   void _nextLevel() {
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _loadLevel();
@@ -813,29 +818,39 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             ),
           ),
           if (_isSuccess)
-            Container(
-              color: Colors.black.withOpacity(0.6),
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                      const SizedBox(height: 16),
-                      Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
-                      AutoNextCountdown(
-                        onNext: _nextLevel,
-                        accentColor: AppTheme.dustyMauve,
-                      ),
-                    ],
+            if (_playDailyMode)
+              Positioned.fill(
+                child: ChallengeClearedOverlay(
+                  accentColor: AppTheme.dustyMauve,
+                  onComplete: () {
+                    Navigator.pop(context, true);
+                  },
+                ),
+              )
+            else
+              Container(
+                color: Colors.black.withOpacity(0.6),
+                child: Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16)),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
+                        const SizedBox(height: 16),
+                        Text('Level ${_currentLevel + 1} Cleared!', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 16),
+                        AutoNextCountdown(
+                          onNext: _nextLevel,
+                          accentColor: AppTheme.dustyMauve,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
         ],
       ),
       ),

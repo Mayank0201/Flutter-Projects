@@ -18,6 +18,7 @@ import '../../../widgets/animated_level_indicator.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../widgets/loss_overlay.dart';
 import '../../../theme/settings_manager.dart';
+import '../../../widgets/challenge_cleared_overlay.dart';
 class QueensLevel {
   final int n;
   final List<List<int>> regions;
@@ -1318,6 +1319,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
   void _nextLevel() async {
     if (!_won) return;
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
     if (await ShuffleManager.tryShuffleNavigate(context, 'queens')) return;
 
     setState(() {
@@ -1795,6 +1800,15 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               );
             }),
           ),
+          if (_won && _playDailyMode)
+            Positioned.fill(
+              child: ChallengeClearedOverlay(
+                accentColor: AppTheme.queensOrange,
+                onComplete: () {
+                  Navigator.pop(context, true);
+                },
+              ),
+            ),
           if (_gameOver)
             Positioned.fill(
               child: LossOverlay(
