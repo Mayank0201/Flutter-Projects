@@ -126,7 +126,6 @@ class _DailyScreenState extends State<DailyScreen> {
     if (_completedMedium) _completedTodayCount++;
     if (_completedHard) _completedTodayCount++;
 
-    final prefs = await SharedPreferences.getInstance();
     _bronzeCount = prefs.getInt('daily_bronze_stars') ?? 0;
     _silverCount = prefs.getInt('daily_silver_stars') ?? 0;
     _goldCount = prefs.getInt('daily_gold_stars') ?? 0;
