@@ -104,7 +104,11 @@ class SettingsNotifier extends ChangeNotifier {
         k.startsWith('streak_') ||
         k == 'global_level_cleared_count' ||
         k == 'daily_streak' ||
-        k == 'daily_last_completed_date'
+        k == 'daily_last_completed_date' ||
+        k == 'diamond_stars' ||
+        k == 'weekly_perfect_streak' ||
+        k == 'perfect_week_history' ||
+        k == 'debug_date_offset'
     ).toList();
 
     for (final key in keys) {
@@ -117,9 +121,13 @@ class SettingsNotifier extends ChangeNotifier {
       await HomeWidget.saveWidgetData('favorite_game', 'Grid Path');
       await HomeWidget.saveWidgetData('todays_puzzle_name', 'Puzzle');
       await HomeWidget.saveWidgetData('todays_puzzle_desc', 'Train your mind');
+      await HomeWidget.saveWidgetData('daily_bronze_stars', 0);
+      await HomeWidget.saveWidgetData('daily_silver_stars', 0);
+      await HomeWidget.saveWidgetData('daily_gold_stars', 0);
+      await HomeWidget.saveWidgetData('daily_diamond_stars', 0);
       await HomeWidget.updateWidget(
         name: 'StreakWidgetProvider',
-        androidName: 'StreakWidgetProvider',
+        androidName: 'com.mayank.cogniq.StreakWidgetProvider',
         qualifiedAndroidName: 'com.mayank.cogniq.StreakWidgetProvider',
       );
     } catch (_) {}

@@ -171,6 +171,23 @@ class _MasyuScreenState extends State<MasyuScreen> {
     final level = _kLevels[_currentLevel % _kLevels.length];
     _gridSize = level.gridSize;
     _grid = List.from(level.pearls);
+
+    if (_playDailyMode && _dailyModifierType == 'prism') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Prism Mode: White pearls ⚪ act as Black ⚫, and Black pearls ⚫ act as White ⚪!',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              ),
+              backgroundColor: AppTheme.dustyMauve,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      });
+    }
   }
 
   void _generateEndgameLevel(int levelIndex) {
@@ -1242,23 +1259,40 @@ class _MasyuScreenState extends State<MasyuScreen> {
                           onNext: _nextLevel,
                           accentColor: AppTheme.dustyMauve,
                         )
-                      : ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: context.bgCard,
-                            foregroundColor: context.textPrimary,
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _activeEdges.clear();
-                              _dragPath.clear();
-                              _isSuccess = false;
-                              _hintIdx = -1;
-                            });
-                          },
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Reset'),
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: context.bgCard,
+                                foregroundColor: context.textPrimary,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _activeEdges.clear();
+                                  _dragPath.clear();
+                                  _isSuccess = false;
+                                  _hintIdx = -1;
+                                });
+                              },
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Reset'),
+                            ),
+                            if (_playDailyMode && _dailyModifierType == 'prism')
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.dustyMauve,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                onPressed: _checkSolution,
+                                icon: const Icon(Icons.check),
+                                label: const Text('Verify'),
+                              ),
+                          ],
                         ),
                 ),
               ],

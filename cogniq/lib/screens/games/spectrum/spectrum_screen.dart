@@ -891,8 +891,9 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       body: Stack(
         children: [
           SafeArea(
-            child: Column(
-              children: [
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
                 if (_isDailyMode)
                   Container(
                     width: double.infinity,
@@ -1024,7 +1025,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                       ),
                     ),
                   ),
-                const Spacer(),
+                const SizedBox(height: 20),
                 // Gradient board
                 Center(
                   child: Container(
@@ -1134,7 +1135,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                     ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(height: 20),
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -1154,6 +1155,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
               ],
             ),
           ),
+        ),
           if (_won && _isDailyMode)
             Positioned.fill(
               child: ChallengeClearedOverlay(

@@ -469,12 +469,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   int get _minWordLength {
     if (_isTutorialMode) return 4;
     if (_playDailyMode) return 4;
-    if (_levelIndex < 45) return 4;
-    if (_levelIndex < 60) return 5;
+    if (_levelIndex < 35) return 4;
+    if (_levelIndex < 50) return 5;
     
     int desired = 6;
     if (_levelIndex >= 90) {
-      desired = 5 + ((_levelIndex - 90) % 2);
+      desired = 6 + ((_levelIndex - 90) % 2);
     }
     
     int validCount = _level.validWords.where((w) => w.length >= desired && w.contains(_level.centerLetter)).length;
@@ -494,10 +494,10 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       return 10.clamp(capMin, capMax);
     }
     if (_isEndgame) {
-      final computedTarget = _level.targetCount + 2;
+      final computedTarget = _level.targetCount + 4;
       return computedTarget.clamp(capMin, capMax);
     }
-    final computedTarget = 4 + (_levelIndex ~/ 3);
+    final computedTarget = 5 + (_levelIndex ~/ 2.5);
     return computedTarget.clamp(capMin, capMax);
   }
 
@@ -826,7 +826,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
   void _addLetterToGuess(int index, String letter, Offset center) {
     if (_won) return;
-    if (!_selectedIndices.contains(index)) {
+    if (_selectedIndices.isEmpty || _selectedIndices.last != index) {
       setState(() {
         _currentGuess.add(letter);
         _selectedIndices.add(index);
@@ -850,7 +850,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
     // Check center letter (index 0)
     final distCenter = (local - ctr).distance;
-    if (distCenter < 28.0 * scaleVal) {
+    if (distCenter < 20.0 * scaleVal) {
       _addLetterToGuess(0, _level.centerLetter, ctr);
       return;
     }
@@ -858,12 +858,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     // Check outer letters (indices 1 to 6)
     for (int i = 0; i < 6; i++) {
       final angle = i * pi / 3 - pi / 6;
-      final radius = 65.0 * scaleVal;
+      final radius = 75.0 * scaleVal;
       final x = radius * cos(angle);
       final y = radius * sin(angle);
       final outerCenter = ctr + Offset(x, y);
       final distOuter = (local - outerCenter).distance;
-      if (distOuter < 24.0 * scaleVal) {
+      if (distOuter < 20.0 * scaleVal) {
         _addLetterToGuess(i + 1, _level.outerLetters[i], outerCenter);
         return;
       }
@@ -1144,7 +1144,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Find $_targetCount words (min $_minWordLength letters) containing "${_isWhisper ? '?' : _level.centerLetter}"',
+                _playDailyMode && _dailyModifierType == 'minimal'
+                    ? 'Find hidden words (min $_minWordLength letters) containing "${_level.centerLetter}"'
+                    : 'Find $_targetCount words (min $_minWordLength letters) containing "${_isWhisper ? '?' : _level.centerLetter}"',
                 style: GoogleFonts.outfit(color: accentColor, fontSize: context.scale(13), fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 20),
@@ -1158,8 +1160,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                       spacing: 12,
                       runSpacing: 10,
                       alignment: WrapAlignment.center,
-                      children: List.generate(_targetCount, (index) {
-                        final list = _foundWords.toList();
+                      children: List.generate(
+                        _playDailyMode && _dailyModifierType == 'minimal'
+                            ? _foundWords.length
+                            : _targetCount,
+                        (index) {
+                          final list = _foundWords.toList();
                         final hasWord = index < list.length;
                         final bool isSolvedSpy = _isSpy && index < _spyOriginalWords.length && _foundWords.contains(_spyOriginalWords[index]);
                         
@@ -1314,7 +1320,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                         // Outer letter buttons (6 of them)
                         ...List.generate(6, (index) {
                           final angle = index * pi / 3 - pi / 6;
-                          final radius = context.scale(65.0);
+                          final radius = context.scale(75.0);
                           final x = radius * cos(angle);
                           final y = radius * sin(angle);
                           final letter = _level.outerLetters[index];
@@ -1323,10 +1329,10 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                             left: context.scale(100) + x - context.scale(24),
                             top: context.scale(100) + y - context.scale(24),
                             child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
                               onTap: () {
                                 if (_won) return;
                                 final selectIdx = index + 1;
-                                if (_selectedIndices.contains(selectIdx)) return;
                                 setState(() {
                                   _currentGuess.add(letter);
                                   _selectedIndices.add(selectIdx);

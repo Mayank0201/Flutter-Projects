@@ -93,7 +93,18 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         _hintCount = hintCount;
         _actualGameLevel = savedLvl;
         _isTutorialMode = false;
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        final diff = prefs.getString(PrefsKeys.dailyModifierDifficulty) ?? 'Easy';
+        if (_playDailyMode) {
+          if (diff == 'Easy') {
+            _currentLevel = savedLvl % 5;
+          } else if (diff == 'Medium') {
+            _currentLevel = 5 + (savedLvl % 5);
+          } else {
+            _currentLevel = 10 + (savedLvl % 10);
+          }
+        } else {
+          _currentLevel = savedLvl;
+        }
         _loadLevel();
       });
     }
@@ -368,7 +379,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
 
     if (_userPattern.isEmpty) return;
 
-    final targetPattern = _isEndgame
+    final targetPattern = (_isEndgame || (_playDailyMode && _transformType > 0))
         ? _targetPattern.map((idx) => _transformIndex(idx, _gridN, _transformType)).toList()
         : _targetPattern;
 
@@ -735,7 +746,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                             color: _isMemorizing ? Colors.amber : context.textPrimary,
                           ),
                         ),
-                        if (_isEndgame && _transformType > 0) ...[
+                        if ((_isEndgame || _playDailyMode) && _transformType > 0) ...[
                           const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

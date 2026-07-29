@@ -1586,7 +1586,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       if (box == null) return;
                                       final localPos = box.globalToLocal(details.globalPosition);
                                       final row = (localPos.dy / cellSize).floor();
-                                      final col = (localPos.dx / cellSize).floor();
+                                      int col = (localPos.dx / cellSize).floor();
+                                      if (_activeModifiers.contains('mirror')) {
+                                        col = _level.n - 1 - col;
+                                      }
                                       if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
                                         _tap(row, col);
                                       }
@@ -1596,7 +1599,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       if (box == null) return;
                                       final localPos = box.globalToLocal(details.globalPosition);
                                       final row = (localPos.dy / cellSize).floor();
-                                      final col = (localPos.dx / cellSize).floor();
+                                      int col = (localPos.dx / cellSize).floor();
+                                      if (_activeModifiers.contains('mirror')) {
+                                        col = _level.n - 1 - col;
+                                      }
                                       if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
                                         _onDragStart(row, col);
                                       }
@@ -1606,7 +1612,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       if (box == null) return;
                                       final localPos = box.globalToLocal(details.globalPosition);
                                       final row = (localPos.dy / cellSize).floor();
-                                      final col = (localPos.dx / cellSize).floor();
+                                      int col = (localPos.dx / cellSize).floor();
+                                      if (_activeModifiers.contains('mirror')) {
+                                        col = _level.n - 1 - col;
+                                      }
                                       if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
                                         _onDragUpdate(row, col);
                                       }
@@ -1619,35 +1628,50 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       children: List.generate(_level.n, (r) =>
                                         Row(mainAxisSize: MainAxisSize.min,
                                           children: List.generate(_level.n, (c) {
-                                            final regionId = _level.regions[r][c];
-                                            final state = _cells[r][c];
+                                            final col = _activeModifiers.contains('mirror') ? (_level.n - 1 - c) : c;
+                                            final regionId = _level.regions[r][col];
+                                            final state = _cells[r][col];
 
                                             final borderColor = context.textPrimary;
                                             final dividerColor = context.textSecondary.withAlpha(60);
 
                                             BorderSide getTopBorder() {
-                                              if (r == 0 || _level.regions[r - 1][c] != regionId) {
+                                              if (r == 0 || _level.regions[r - 1][col] != regionId) {
                                                 return BorderSide(color: borderColor, width: 2.5);
                                               }
                                               return BorderSide(color: dividerColor, width: 0.8);
                                             }
 
                                             BorderSide getLeftBorder() {
-                                              if (c == 0 || _level.regions[r][c - 1] != regionId) {
-                                                return BorderSide(color: borderColor, width: 2.5);
+                                              if (_activeModifiers.contains('mirror')) {
+                                                if (col == _level.n - 1 || _level.regions[r][col + 1] != regionId) {
+                                                  return BorderSide(color: borderColor, width: 2.5);
+                                                }
+                                                return BorderSide(color: dividerColor, width: 0.8);
+                                              } else {
+                                                if (col == 0 || _level.regions[r][col - 1] != regionId) {
+                                                  return BorderSide(color: borderColor, width: 2.5);
+                                                }
+                                                return BorderSide(color: dividerColor, width: 0.8);
                                               }
-                                              return BorderSide(color: dividerColor, width: 0.8);
                                             }
 
                                             BorderSide getRightBorder() {
-                                              if (c == _level.n - 1) {
-                                                return BorderSide(color: borderColor, width: 2.5);
+                                              if (_activeModifiers.contains('mirror')) {
+                                                if (col == 0 || _level.regions[r][col - 1] != regionId) {
+                                                  return BorderSide(color: borderColor, width: 2.5);
+                                                }
+                                                return BorderSide(color: dividerColor, width: 0.8);
+                                              } else {
+                                                if (col == _level.n - 1 || _level.regions[r][col + 1] != regionId) {
+                                                  return BorderSide(color: borderColor, width: 2.5);
+                                                }
+                                                return BorderSide(color: dividerColor, width: 0.8);
                                               }
-                                              return BorderSide(color: dividerColor, width: 0.8);
                                             }
 
                                             BorderSide getBottomBorder() {
-                                              if (r == _level.n - 1) {
+                                              if (r == _level.n - 1 || _level.regions[r + 1][col] != regionId) {
                                                 return BorderSide(color: borderColor, width: 2.5);
                                               }
                                               return BorderSide(color: dividerColor, width: 0.8);
@@ -1679,11 +1703,13 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                                   Color(0xFF63242F), // Dark Muted Rose
                                                   Color(0xFF1E293B), // Dark Muted Slate
                                                 ];
-                                                final regionColor = context.isDarkMode 
-                                                    ? regionColorsDark[regionId % regionColorsDark.length]
-                                                    : regionColorsLight[regionId % regionColorsLight.length];
+                                                final regionColor = (_activeModifiers.contains('glitch') && _glitchTick)
+                                                    ? (context.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))
+                                                    : (context.isDarkMode 
+                                                        ? regionColorsDark[regionId % regionColorsDark.length]
+                                                        : regionColorsLight[regionId % regionColorsLight.length]);
 
-                                                String cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}, Region ${regionId + 1}';
+                                                String cellLabel = 'Cell Row ${r + 1}, Column ${col + 1}, Region ${regionId + 1}';
                                                 if (state == 1) {
                                                   cellLabel += ', X mark';
                                                 } else if (state == 2) {

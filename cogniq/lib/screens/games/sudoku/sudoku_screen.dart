@@ -1150,6 +1150,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
   bool _gameOver = false;
   int _warpTimeLeft = 90;
   Timer? _warpTimer;
+  bool _isPanMode = false;
 
   bool _inRecallTest = false;
   bool _shuffleActive = false;
@@ -1546,7 +1547,13 @@ class _SudokuScreenState extends State<SudokuScreen> {
 
     int targetFilled;
     if (_playDailyMode && _dailyModifierType == 'minimal') {
-      targetFilled = 12;
+      if (size == 4) {
+        targetFilled = 4;
+      } else if (size == 6) {
+        targetFilled = 10;
+      } else {
+        targetFilled = 17;
+      }
     } else if (!_playDailyMode && index >= 30) {
       if (size == 4) {
         targetFilled = 5;
@@ -2213,136 +2220,177 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     const SizedBox(height: 16),
                   ],
                   // Sudoku Board Display
+                  if (_playDailyMode && _dailyModifierType == 'zoom') ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ChoiceChip(
+                          label: Text('Input Mode', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 12)),
+                          selected: !_isPanMode,
+                          onSelected: (val) => setState(() => _isPanMode = !val),
+                          selectedColor: accentColor.withAlpha(40),
+                          checkmarkColor: accentColor,
+                        ),
+                        const SizedBox(width: 12),
+                        ChoiceChip(
+                          label: Text('Pan Mode', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 12)),
+                          selected: _isPanMode,
+                          onSelected: (val) => setState(() => _isPanMode = val),
+                          selectedColor: accentColor.withAlpha(40),
+                          checkmarkColor: accentColor,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   Center(
-                    child: Container(
-                      width: context.scale(boardScale),
-                      height: context.scale(boardScale),
-                      decoration: BoxDecoration(
-                        color: context.bgCard,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: context.textMuted, width: 2),
-                      ),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: FogOverlay(
-                              enabled: _playDailyMode && _dailyModifierType == 'fog',
-                              radius: (context.scale(boardScale) / size) * _dailyRadius,
-                              focalPoint: (_selectedRow != -1 && _selectedCol != -1)
-                                  ? Offset(
-                                      (_selectedCol + 0.5) * (context.scale(boardScale) / size),
-                                      (_selectedRow + 0.5) * (context.scale(boardScale) / size),
-                                    )
-                                  : null,
-                              child: GridView.builder(
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: size * size,
-                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: size,
-                                ),
-                                itemBuilder: (ctx, idx) {
-                                  final r = idx ~/ size;
-                                  final c = idx % size;
-                                  final value = _board[r][c];
-                                  final isOrig = _isOriginal(r, c);
-                                  final isSel = r == _selectedRow && c == _selectedCol;
+                    child: Builder(
+                      builder: (context) {
+                        Widget boardWidget = Container(
+                          width: context.scale(boardScale),
+                          height: context.scale(boardScale),
+                          decoration: BoxDecoration(
+                            color: context.bgCard,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: context.textMuted, width: 2),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: FogOverlay(
+                                  enabled: _playDailyMode && _dailyModifierType == 'fog',
+                                  radius: (context.scale(boardScale) / size) * _dailyRadius,
+                                  focalPoint: (_selectedRow != -1 && _selectedCol != -1)
+                                      ? Offset(
+                                          (_selectedCol + 0.5) * (context.scale(boardScale) / size),
+                                          (_selectedRow + 0.5) * (context.scale(boardScale) / size),
+                                        )
+                                      : null,
+                                  child: GridView.builder(
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    itemCount: size * size,
+                                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: size,
+                                    ),
+                                    itemBuilder: (ctx, idx) {
+                                      final r = idx ~/ size;
+                                      final c = idx % size;
+                                      final value = _board[r][c];
+                                      final isOrig = _isOriginal(r, c);
+                                      final isSel = r == _selectedRow && c == _selectedCol;
 
-                                  BorderSide borderRight;
-                                  BorderSide borderBottom;
+                                      BorderSide borderRight;
+                                      BorderSide borderBottom;
 
-                                  if (size == 4) {
-                                    borderRight = (c == 1)
-                                        ? BorderSide(color: context.textMuted, width: 2)
-                                        : BorderSide(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 0.5,
-                                          );
-                                    borderBottom = (r == 1)
-                                        ? BorderSide(color: context.textMuted, width: 2)
-                                        : BorderSide(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 0.5,
-                                          );
-                                  } else if (size == 6) {
-                                    borderRight = (c == 2)
-                                        ? BorderSide(color: context.textMuted, width: 2)
-                                        : BorderSide(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 0.5,
-                                          );
-                                    borderBottom = (r == 1 || r == 3)
-                                        ? BorderSide(color: context.textMuted, width: 2)
-                                        : BorderSide(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 0.5,
-                                          );
-                                  } else {
-                                    // size == 9
-                                    borderRight = (c == 2 || c == 5)
-                                        ? BorderSide(color: context.textMuted, width: 2)
-                                        : BorderSide(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 0.5,
-                                          );
-                                    borderBottom = (r == 2 || r == 5)
-                                        ? BorderSide(color: context.textMuted, width: 2)
-                                        : BorderSide(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 0.5,
-                                          );
-                                  }
+                                      if (size == 4) {
+                                        borderRight = (c == 1)
+                                            ? BorderSide(color: context.textMuted, width: 2)
+                                            : BorderSide(
+                                                color: context.textMuted.withAlpha(40),
+                                                width: 0.5,
+                                              );
+                                        borderBottom = (r == 1)
+                                            ? BorderSide(color: context.textMuted, width: 2)
+                                            : BorderSide(
+                                                color: context.textMuted.withAlpha(40),
+                                                width: 0.5,
+                                              );
+                                      } else if (size == 6) {
+                                        borderRight = (c == 2)
+                                            ? BorderSide(color: context.textMuted, width: 2)
+                                            : BorderSide(
+                                                color: context.textMuted.withAlpha(40),
+                                                width: 0.5,
+                                              );
+                                        borderBottom = (r == 1 || r == 3)
+                                            ? BorderSide(color: context.textMuted, width: 2)
+                                            : BorderSide(
+                                                color: context.textMuted.withAlpha(40),
+                                                width: 0.5,
+                                              );
+                                      } else {
+                                        borderRight = (c == 2 || c == 5)
+                                            ? BorderSide(color: context.textMuted, width: 2)
+                                            : BorderSide(
+                                                color: context.textMuted.withAlpha(40),
+                                                width: 0.5,
+                                              );
+                                        borderBottom = (r == 2 || r == 5)
+                                            ? BorderSide(color: context.textMuted, width: 2)
+                                            : BorderSide(
+                                                color: context.textMuted.withAlpha(40),
+                                                width: 0.5,
+                                              );
+                                      }
 
-                                  final cellLabel = 'Cell Row ${r + 1}, Column ${c + 1}'
-                                      '${isOrig ? ", fixed clue" : ""}'
-                                      '${value != 0 ? ", value $value" : ", empty"}';
+                                      final cellLabel =
+                                          'Cell Row ${r + 1}, Column ${c + 1}, value ${value == 0 ? 'empty' : value}';
 
-                                  return Semantics(
-                                    label: cellLabel,
-                                    selected: isSel,
-                                    button: true,
-                                    child: GestureDetector(
-                                      onTap: () => _selectCell(r, c),
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: isSel
-                                              ? accentColor.withAlpha(45)
-                                              : (_inRecallTest
-                                                  ? context.bgCard
-                                                  : (isOrig
-                                                      ? context.bgSurface
-                                                      : context.bgCard)),
-                                          border: Border(
-                                            right: borderRight,
-                                            bottom: borderBottom,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            _inRecallTest
-                                                ? (_recallCorrectSelections.contains((r, c)) ? '$value' : '')
-                                                : (value != 0 ? '$value' : ''),
-                                            style: AppTheme.numberStyle(
-                                              fontSize: context.scale(
-                                                size == 9 ? 15 : 18,
+                                      return Semantics(
+                                        label: cellLabel,
+                                        selected: isSel,
+                                        button: true,
+                                        child: GestureDetector(
+                                          onTap: _isPanMode ? null : () => _selectCell(r, c),
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: isSel
+                                                  ? accentColor.withAlpha(45)
+                                                  : (_inRecallTest
+                                                      ? context.bgCard
+                                                      : (isOrig
+                                                          ? context.bgSurface
+                                                          : context.bgCard)),
+                                              border: Border(
+                                                right: borderRight,
+                                                bottom: borderBottom,
                                               ),
-                                              fontWeight: isOrig
-                                                  ? FontWeight.w900
-                                                  : FontWeight.w600,
-                                              color: isOrig
-                                                  ? context.textPrimary
-                                                  : accentColor,
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                _inRecallTest
+                                                    ? (_recallCorrectSelections.contains((r, c)) ? '$value' : '')
+                                                    : (value != 0 ? '$value' : ''),
+                                                style: AppTheme.numberStyle(
+                                                  fontSize: context.scale(
+                                                    size == 9 ? 15 : 18,
+                                                  ),
+                                                  fontWeight: isOrig
+                                                      ? FontWeight.w900
+                                                      : FontWeight.w600,
+                                                  color: isOrig
+                                                      ? context.textPrimary
+                                                      : accentColor,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  );
-                                },
+                                      );
+                                    },
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
                           ),
-                        ],
-                      ),
+                        );
+
+                        if (_playDailyMode && _dailyModifierType == 'zoom') {
+                          boardWidget = SizedBox(
+                            width: context.scale(boardScale),
+                            height: context.scale(boardScale),
+                            child: InteractiveViewer(
+                              panEnabled: _isPanMode,
+                              scaleEnabled: false,
+                              minScale: 1.4,
+                              maxScale: 1.4,
+                              transformationController: TransformationController(Matrix4.identity()..scale(1.4)),
+                              child: boardWidget,
+                            ),
+                          );
+                        }
+                        return boardWidget;
+                      },
                     ),
                   ),
                   const SizedBox(height: 24),

@@ -36,8 +36,9 @@ class StreakWidgetProvider : HomeWidgetProvider() {
                     val bronze = widgetData.getInt("daily_bronze_stars", 0)
                     val silver = widgetData.getInt("daily_silver_stars", 0)
                     val gold = widgetData.getInt("daily_gold_stars", 0)
+                    val diamond = widgetData.getInt("daily_diamond_stars", 0)
 
-                    Log.d(TAG, "Read SharedPreferences -> Streak: $streak, Solved: $totalSolved, Bronze: $bronze, Silver: $silver, Gold: $gold, Puzzle: $puzzleName")
+                    Log.d(TAG, "Read SharedPreferences -> Streak: $streak, Solved: $totalSolved, Bronze: $bronze, Silver: $silver, Gold: $gold, Diamond: $diamond, Puzzle: $puzzleName")
 
                     // Header streak badge (short form)
                     val streakLabel = if (streak == 1) " Day" else " Days"
@@ -51,6 +52,7 @@ class StreakWidgetProvider : HomeWidgetProvider() {
                     setTextViewText(R.id.bronze_stars_text, "★ $bronze")
                     setTextViewText(R.id.silver_stars_text, "★ $silver")
                     setTextViewText(R.id.gold_stars_text, "★ $gold")
+                    setTextViewText(R.id.diamond_stars_text, "💎 $diamond")
 
                     // Puzzle card
                     setTextViewText(R.id.puzzle_name_text, puzzleName)

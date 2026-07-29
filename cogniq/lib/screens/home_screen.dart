@@ -16,10 +16,11 @@ import '../utils/daily_challenge_manager.dart';
 import 'daily_screen.dart';
 import 'achievements_screen.dart';
 import 'trails_screen.dart';
+import '../widgets/points_store_dialog.dart';
 import '../widgets/buy_hints_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
 import '../utils/prefs_keys.dart';
-import 'daily_challenge_test_screen.dart';
+// import 'daily_challenge_test_screen.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/notification_manager.dart';
 import '../utils/shuffle_manager.dart';
@@ -936,8 +937,11 @@ class _HomeScreenState extends State<HomeScreen>
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.easeInOutCubic,
-                  left:
-                      _currentTab * tabWidth + (tabWidth - tabWidth * 0.85) / 2,
+                  left: (() {
+                    int visualIdx = _currentTab;
+                    if (_currentTab >= 3) visualIdx = _currentTab + 1;
+                    return visualIdx * tabWidth + (tabWidth - tabWidth * 0.85) / 2;
+                  })(),
                   width: tabWidth * 0.85,
                   top: 4,
                   bottom: 4,
@@ -967,18 +971,12 @@ class _HomeScreenState extends State<HomeScreen>
                       'Stats',
                       tabWidth,
                     ),
+                    _buildShopNavItem(tabWidth),
                     _buildNavItem(
                       3,
                       Icons.person_outlined,
                       Icons.person,
                       'Profile',
-                      tabWidth,
-                    ),
-                    _buildNavItem(
-                      4,
-                      Icons.bug_report_outlined,
-                      Icons.bug_report,
-                      'Debug',
                       tabWidth,
                     ),
                   ],
@@ -987,6 +985,26 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildShopNavItem(double tabWidth) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          PointsStoreDialog.show(context, onPurchaseComplete: () {
+            _loadDailyChallengeInfo();
+          });
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Center(
+          child: Icon(
+            Icons.shopping_bag_outlined,
+            color: context.textSecondary,
+            size: 20,
+          ),
+        ),
       ),
     );
   }
@@ -1065,8 +1083,6 @@ class _HomeScreenState extends State<HomeScreen>
           activeTitle: _activeTitle,
           onSelectTitle: _showTitleSelector,
         );
-      case 4:
-        return const DailyChallengeTestScreen();
       default:
         return _buildHomeTab();
     }

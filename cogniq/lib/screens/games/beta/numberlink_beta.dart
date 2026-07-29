@@ -99,7 +99,18 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         _hintCount = hCount;
         _actualGameLevel = savedLvl;
         _isTutorialMode = false;
-        _currentLevel = _playDailyMode ? (savedLvl % 10) : savedLvl;
+        final diff = prefs.getString(PrefsKeys.dailyModifierDifficulty) ?? 'Easy';
+        if (_playDailyMode) {
+          if (diff == 'Easy') {
+            _currentLevel = savedLvl % 5;
+          } else if (diff == 'Medium') {
+            _currentLevel = 5 + (savedLvl % 5);
+          } else {
+            _currentLevel = 10 + (savedLvl % 10);
+          }
+        } else {
+          _currentLevel = savedLvl;
+        }
         _loadLevel();
       });
     }

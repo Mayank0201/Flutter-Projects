@@ -52,6 +52,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   bool _timeBonusEarned = false;
   bool _gameOver = false;
   Set<String> _activeModifiers = {};
+  int _lives = 3;
+  final Set<int> _hiddenRowTargets = {};
+  final Set<int> _hiddenColTargets = {};
 
   @override
   void initState() {
@@ -153,6 +156,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _timeBonusEarned = false;
     _gameOver = false;
     _wrongTaps.clear();
+    _lives = 3;
+    _hiddenRowTargets.clear();
+    _hiddenColTargets.clear();
 
     if (!_playDailyMode && _currentLevel >= 30) {
       int tempGridSize = 5;
@@ -222,6 +228,22 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
           _gridSize = 4;
         } else {
           _gridSize = 5;
+        }
+      }
+
+      final randSelect = isCurated ? Random(_currentLevel * 45 + 6) : rand;
+      if (_activeModifiers.contains('whisper')) {
+        final rowIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
+        final colIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
+        
+        int toHideRows = (_gridSize * 0.6).round().clamp(1, _gridSize - 1);
+        int toHideCols = (_gridSize * 0.6).round().clamp(1, _gridSize - 1);
+        
+        for (int i = 0; i < toHideRows; i++) {
+          _hiddenRowTargets.add(rowIndices[i]);
+        }
+        for (int i = 0; i < toHideCols; i++) {
+          _hiddenColTargets.add(colIndices[i]);
         }
       }
 
@@ -454,12 +476,13 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         _keep[idx] = false;
       });
       _tryAutoCheck();
-    } else {
-      // Incorrect: the number should be kept!
-      AudioManager.playFail();
-      settingsNotifier.hapticError();
       setState(() {
         _wrongTaps.add(idx);
+        _lives--;
+        if (_lives <= 0) {
+          _gameTimer?.cancel();
+          _gameOver = true;
+        }
       });
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) {
@@ -806,6 +829,26 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                             textAlign: TextAlign.center,
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Lives: ',
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                color: context.textSecondary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            ...List.generate(3, (i) => Icon(
+                              i < _lives ? Icons.favorite : Icons.favorite_border,
+                              color: Colors.redAccent,
+                              size: 16,
+                            )),
+                          ],
+                        ),
                         const SizedBox(height: 24),
                         RepaintBoundary(
                           child: Container(
@@ -856,7 +899,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          isMatch || !_activeModifiers.contains('whisper') ? '$target' : '?',
+                                          isMatch || !_activeModifiers.contains('whisper') || !_hiddenColTargets.contains(c) ? '$target' : '?',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,
@@ -890,7 +933,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          isMatch || !_activeModifiers.contains('whisper') ? '$target' : '?',
+                                          isMatch || !_activeModifiers.contains('whisper') || !_hiddenRowTargets.contains(r) ? '$target' : '?',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,
@@ -1022,7 +1065,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                     _generatePuzzle();
                   });
                 },
-                subtitle: 'You ran out of time!',
+                subtitle: _lives <= 0 ? 'You ran out of lives!' : 'You ran out of time!',
                 accentColor: AppTheme.dustyMauve,
               ),
             ),

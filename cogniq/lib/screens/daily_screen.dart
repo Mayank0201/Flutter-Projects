@@ -59,6 +59,7 @@ class _DailyScreenState extends State<DailyScreen> {
   String _timeLeft = '';
   int _activeDay = 1;
   DateTime? _challengeStartTime;
+  DateTime _currentDate = DateTime.now().toUtc();
 
   int _bronzeCount = 0;
   int _silverCount = 0;
@@ -110,6 +111,7 @@ class _DailyScreenState extends State<DailyScreen> {
     final prefs = await SharedPreferences.getInstance();
     final debugOffset = prefs.getInt('debug_date_offset') ?? 0;
     final now = DateTime.now().toUtc().add(Duration(days: debugOffset));
+    _currentDate = now;
     _dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
 
     _activeDay = await DailyChallengeManager.getActiveDay();
@@ -239,7 +241,7 @@ class _DailyScreenState extends State<DailyScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Challenge cleared! +1 Hint added.',
+                'Challenge cleared! +25 points earned.',
                 style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
               ),
               backgroundColor: AppTheme.wordleGreen,
@@ -738,10 +740,30 @@ class _DailyScreenState extends State<DailyScreen> {
                   ),
                 )
               else
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: context.textMuted.withAlpha(120),
-                  size: 14,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.bolt, color: Colors.amber, size: 20),
+                      tooltip: 'Auto-Complete (Debug)',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () async {
+                        await DailyChallengeManager.completeChallenge(
+                          challenge.difficulty,
+                          _dateStr,
+                          game.id,
+                        );
+                        await _loadDailyState();
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: context.textMuted.withAlpha(120),
+                      size: 14,
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -962,7 +984,7 @@ class _DailyScreenState extends State<DailyScreen> {
               const SizedBox(height: 6),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(7, (i) => DateTime.now().toUtc().subtract(Duration(days: 6 - i)))
+                children: List.generate(7, (i) => _currentDate.subtract(Duration(days: 6 - i)))
                     .map((day) => _buildWeeklyDayItem(day))
                     .toList(),
               ),
@@ -1072,11 +1094,15 @@ class _DailyScreenState extends State<DailyScreen> {
                           await prefs.remove(key);
                         }
                       }
+                      await prefs.setInt(PrefsKeys.dailyBronzeStars, 0);
+                      await prefs.setInt(PrefsKeys.dailySilverStars, 0);
+                      await prefs.setInt(PrefsKeys.dailyGoldStars, 0);
                       await prefs.remove(PrefsKeys.weeklyPerfectStreak);
-                      await prefs.remove(PrefsKeys.diamondStars);
+                      await prefs.setInt(PrefsKeys.diamondStars, 0);
                       await prefs.remove(PrefsKeys.perfectWeekHistory);
                       await prefs.remove(PrefsKeys.dailyV2LastDate);
                       await prefs.remove(PrefsKeys.dailyV2Streak);
+                      await DailyChallengeManager.syncStarsToWidget();
                       await _loadDailyState();
                     },
                     style: OutlinedButton.styleFrom(

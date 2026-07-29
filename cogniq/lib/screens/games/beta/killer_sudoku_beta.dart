@@ -758,6 +758,9 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                                         setState(() {
                                           _grid[_selectedIdx] = i;
                                         });
+                                        if (_grid.every((val) => val != 0)) {
+                                          _checkSolution();
+                                        }
                                       }
                                     },
                                     child: Container(
@@ -802,15 +805,11 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                   ),
                 ),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: context.bgCard, foregroundColor: context.textPrimary),
                       onPressed: _loadLevel, icon: const Icon(Icons.refresh), label: const Text('Reset'),
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve, foregroundColor: Colors.white),
-                      onPressed: _checkSolution, icon: const Icon(Icons.check), label: const Text('Check'),
                     ),
                   ],
                 ),
