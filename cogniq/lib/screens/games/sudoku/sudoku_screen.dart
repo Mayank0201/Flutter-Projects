@@ -970,20 +970,20 @@ const List<SudokuLevel> _kLevels = [
   SudokuLevel(
     size: 6,
     startBoard: [
-      [0, 5, 0, 2, 0, 6],
-      [6, 0, 4, 0, 1, 0],
-      [0, 1, 0, 6, 0, 4],
-      [4, 0, 5, 0, 2, 0],
-      [0, 1, 0, 4, 0, 5],
-      [5, 0, 6, 0, 3, 0],
+      [5, 0, 0, 1, 0, 2],
+      [0, 1, 4, 0, 6, 0],
+      [0, 5, 0, 2, 0, 4],
+      [4, 0, 3, 0, 1, 0],
+      [0, 6, 0, 4, 0, 3],
+      [3, 0, 0, 6, 2, 0],
     ],
     solution: [
-      [1, 5, 3, 2, 4, 6],
-      [6, 2, 4, 5, 1, 3],
-      [3, 1, 2, 6, 5, 4],
-      [4, 6, 5, 1, 2, 3],
-      [2, 3, 1, 4, 6, 5],
-      [5, 4, 6, 3, 3, 2],
+      [5, 3, 6, 1, 4, 2],
+      [2, 1, 4, 3, 6, 5],
+      [6, 5, 1, 2, 3, 4],
+      [4, 2, 3, 5, 1, 6],
+      [1, 6, 2, 4, 5, 3],
+      [3, 4, 5, 6, 2, 1],
     ],
   ),
   SudokuLevel(
@@ -1249,6 +1249,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
   int _hintCount = 0;
 
   Future<void> _initLevel() async {
+    await HintManager.startLevel('sudoku');
     _hintCount = await HintManager.getHints('sudoku');
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
@@ -1423,9 +1424,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
     final earned = await HintManager.onLevelCleared('sudoku');
     if (earned) {
       final newCount = await HintManager.getHints('sudoku');
-      setState(() {
-        _hintCount = newCount;
-      });
+      if (mounted) {
+        setState(() {
+          _hintCount = newCount;
+        });
+      }
     }
   }
 
@@ -1963,12 +1966,14 @@ class _SudokuScreenState extends State<SudokuScreen> {
 
     await HintManager.useHint('sudoku');
     final newCount = await HintManager.getHints('sudoku');
-    setState(() {
-      _hintCount = newCount;
-      _board[_selectedRow][_selectedCol] =
-          _level.solution[_selectedRow][_selectedCol];
-      _message = 'Revealed correct number!';
-    });
+    if (mounted) {
+      setState(() {
+        _hintCount = newCount;
+        _board[_selectedRow][_selectedCol] =
+            _level.solution[_selectedRow][_selectedCol];
+        _message = 'Revealed correct number!';
+      });
+    }
     _checkBoard();
     if (!_won) {
       _saveNormalState();

@@ -883,9 +883,7 @@ class _DailyScreenState extends State<DailyScreen> {
     final theme = DailyChallengeManager.themeOf(_activeDay);
     
     // Find active weekly modifier description
-    final activeDesc = _challenges.isNotEmpty 
-        ? _challenges.first.modifierDescription 
-        : 'Special rules apply to all game boards this week.';
+    final activeDesc = DailyChallengeManager.themeDescriptionOf(_activeDay);
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -1098,6 +1096,9 @@ class _DailyScreenState extends State<DailyScreen> {
                       await prefs.setInt(PrefsKeys.dailySilverStars, 0);
                       await prefs.setInt(PrefsKeys.dailyGoldStars, 0);
                       await prefs.remove(PrefsKeys.weeklyPerfectStreak);
+                      await prefs.remove(PrefsKeys.weeklyLastPerfectDate);
+                      await prefs.setInt(PrefsKeys.dailyV2PerfectDays, 0);
+                      await prefs.remove(PrefsKeys.dailyChallengeStartTime);
                       await prefs.setInt(PrefsKeys.diamondStars, 0);
                       await prefs.remove(PrefsKeys.perfectWeekHistory);
                       await prefs.remove(PrefsKeys.dailyV2LastDate);

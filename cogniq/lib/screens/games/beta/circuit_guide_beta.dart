@@ -103,6 +103,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   }
 
   void _loadLevel() {
+    HintManager.startLevel('circuit_guide');
     setState(() {
       _isSuccess = false;
       _lockedWires.clear();
@@ -306,7 +307,12 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         final Map<int, int> targetNeighbors = {};
         List<List<int>> connections = List.generate(W * W, (_) => <int>[]);
         
+        int dfsSteps = 0;
         bool findPathDFS(int current, Set<int> treeNodes, List<int> path, Set<int> pathSet, List<List<int>> connections, Random r) {
+          dfsSteps++;
+          if (dfsSteps > 4000) {
+            return false;
+          }
           if (treeNodes.contains(current)) {
             if (connections[current].length < 3) {
               path.add(current);
@@ -413,6 +419,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
               List<int> path = [tNeighbor];
               Set<int> pathSet = {tNeighbor};
               
+              dfsSteps = 0;
               bool pathFound = findPathDFS(tNeighbor, treeNodes, path, pathSet, connections, retryRng);
               
               if (pathFound) {
@@ -808,10 +815,12 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     final earned = await HintManager.onLevelCleared('circuit_guide');
     final hCount = await HintManager.getHints('circuit_guide');
 
-    setState(() {
-      _hintCount = hCount;
-      _isSuccess = true;
-    });
+    if (mounted) {
+      setState(() {
+        _hintCount = hCount;
+        _isSuccess = true;
+      });
+    }
 
     if (earned && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1011,7 +1020,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -1019,14 +1028,14 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}'), 
                       style: AppTheme.numberStyle(
                         color: AppTheme.dustyMauve, 
                         fontSize: 14, 
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (!_isTutorialMode) ...[
+                    if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],

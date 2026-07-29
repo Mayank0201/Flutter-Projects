@@ -725,6 +725,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   }
 
   Future<void> _initLevel() async {
+    await HintManager.startLevel('queens');
     _hintCount = await HintManager.getHints('queens');
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
@@ -1587,9 +1588,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       final localPos = box.globalToLocal(details.globalPosition);
                                       final row = (localPos.dy / cellSize).floor();
                                       int col = (localPos.dx / cellSize).floor();
-                                      if (_activeModifiers.contains('mirror')) {
-                                        col = _level.n - 1 - col;
-                                      }
                                       if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
                                         _tap(row, col);
                                       }
@@ -1600,9 +1598,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       final localPos = box.globalToLocal(details.globalPosition);
                                       final row = (localPos.dy / cellSize).floor();
                                       int col = (localPos.dx / cellSize).floor();
-                                      if (_activeModifiers.contains('mirror')) {
-                                        col = _level.n - 1 - col;
-                                      }
                                       if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
                                         _onDragStart(row, col);
                                       }
@@ -1613,9 +1608,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       final localPos = box.globalToLocal(details.globalPosition);
                                       final row = (localPos.dy / cellSize).floor();
                                       int col = (localPos.dx / cellSize).floor();
-                                      if (_activeModifiers.contains('mirror')) {
-                                        col = _level.n - 1 - col;
-                                      }
                                       if (row >= 0 && row < _level.n && col >= 0 && col < _level.n) {
                                         _onDragUpdate(row, col);
                                       }

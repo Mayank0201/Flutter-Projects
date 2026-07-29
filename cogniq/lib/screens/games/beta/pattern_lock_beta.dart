@@ -163,6 +163,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   }
 
   void _loadLevel() {
+    HintManager.startLevel('pattern_lock');
     _memorizeTimer?.cancel();
     _gameTimer?.cancel();
     _eclipseTimer?.cancel();
@@ -468,10 +469,12 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     final earned = await HintManager.onLevelCleared('pattern_lock');
     final hCount = await HintManager.getHints('pattern_lock');
 
-    setState(() {
-      _hintCount = hCount;
-      _isSuccess = true;
-    });
+    if (mounted) {
+      setState(() {
+        _hintCount = hCount;
+        _isSuccess = true;
+      });
+    }
 
     if (earned && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -699,7 +702,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -707,14 +710,14 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}'), 
                       style: AppTheme.numberStyle(
                         color: AppTheme.dustyMauve, 
                         fontSize: 14, 
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (!_isTutorialMode) ...[
+                    if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],

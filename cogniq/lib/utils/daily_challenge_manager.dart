@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:home_widget/home_widget.dart';
 import '../models/game_info.dart';
@@ -220,7 +221,7 @@ class DailyChallengeManager {
         gameId: 'chimp',
         difficulty: 'Easy',
         levelIndex: 1,
-        step: 0,
+        step: 1,
         modifierName: 'Corrupted Sequence',
         modifierDescription: 'The numbers briefly glitch or show random symbols, requiring fast memorization.',
         modifierType: 'glitch',
@@ -239,6 +240,7 @@ class DailyChallengeManager {
         difficulty: 'Hard',
         levelIndex: 2,
         step: 3,
+        pinDifficulty: 2,
         modifierName: 'Glitch Matrix',
         modifierDescription: 'A visual interference/static effect briefly disrupts grid boundaries.',
         modifierType: 'glitch',
@@ -416,7 +418,7 @@ class DailyChallengeManager {
         gameId: 'chimp',
         difficulty: 'Medium',
         levelIndex: 2,
-        step: 0,
+        step: 1,
         modifierName: 'Shifting Patches',
         modifierDescription: 'The numbers shuffle and swap grid slots after you tap the first 3 digits.',
         modifierType: 'chaos',
@@ -426,6 +428,7 @@ class DailyChallengeManager {
         difficulty: 'Hard',
         levelIndex: 1,
         step: 2,
+        pinDifficulty: 2,
         modifierName: 'Collapsing Moves',
         modifierDescription: 'Colors randomly shuffle after every 4 moves, requiring rapid adaptation.',
         modifierType: 'chaos',
@@ -509,7 +512,7 @@ class DailyChallengeManager {
         gameId: 'chimp',
         difficulty: 'Medium',
         levelIndex: 2,
-        step: 0,
+        step: 1,
         modifierName: 'Vanish Board',
         modifierDescription: 'Numbers vanish after 1 second of visibility, forcing rapid recall.',
         modifierType: 'time_warp',
@@ -519,6 +522,7 @@ class DailyChallengeManager {
         difficulty: 'Hard',
         levelIndex: 10,
         step: 6,
+        pinDifficulty: 2,
         modifierName: 'Hourglass Board',
         modifierDescription: 'A ticking timer runs. Correct numbers add 5 seconds; incorrect guesses subtract 10.',
         modifierType: 'time_warp',
@@ -1043,6 +1047,26 @@ class DailyChallengeManager {
 
   static String themeOf(int globalDay) => _kDailyChallengesPlan[weekOf(globalDay) - 1].theme;
 
+  static const Map<String, String> _kThemeBlurbs = {
+    'Fog Day':        'A heavy fog covers every board this week — visibility is limited to a small area around your cursor across all three puzzles.',
+    'Mirror Day':     'Boards are flipped and mirrored left-to-right this week. Expect reversed layouts and controls in each daily puzzle.',
+    'Monochrome Day': 'Colour is drained to shades of grey this week. Judge every puzzle by brightness alone.',
+    'Retro Day':      'Everything is rendered in blocky, pixelated retro style this week.',
+    'Glitch Day':     'Boards briefly glitch, shift and corrupt this week — memorise fast and adapt.',
+    'Whisper Day':    'Key clues are hidden or blanked out this week; deduce the missing information.',
+    'Hidden Rule Day':'A secret extra rule applies to each puzzle this week — figure out what it is.',
+    'Zoom Day':       'Boards are zoomed in this week; pan and drag to see the whole puzzle.',
+    'Eclipse Day':    'The board darkens in and out this week — plan your moves during the lit windows.',
+    'Spy Day':        'One clue is a decoy/lie this week; find it and work around it.',
+    'Chaos Day':      'Colours and tiles shuffle mid-solve this week — stay adaptable.',
+    'Nightmare Trial':'Minimal clues, maximum difficulty this week. Only the essentials are given.',
+    'Prism Day':      'Colour and pearl rules are twisted this week — assumptions are inverted.',
+    'Time Warp Day':  'The clock is against you this week; boards change or vanish on a timer.',
+  };
+
+  static String themeDescriptionOf(int globalDay) =>
+      _kThemeBlurbs[themeOf(globalDay)] ?? 'Special rules apply to all game boards this week.';
+
   static const List<String> _kDiffLabels = ['Easy', 'Medium', 'Hard'];
 
   static List<DailyChallenge> getChallengesForDay(int globalDay) {
@@ -1063,33 +1087,27 @@ class DailyChallengeManager {
       if (c.modifierType == 'fog') {
         if (gameId == 'sudoku' || gameId == 'killersudoku') {
           desc = 'The Sudoku board is blacked out by fog. Selecting a cell illuminates a 3x3 region around it.';
-        } else if (gameId == 'minefinder') {
+        } else if (gameId == 'minesweeper') {
           desc = 'A heavy fog obscures the screen. Only the cells immediately surrounding the selected location are visible.';
-        } else {
-          desc = 'A dark fog covers the board. Visibility is limited to a small spotlight around your cursor.';
         }
       } else if (c.modifierType == 'zoom') {
         if (gameId == 'sudoku' || gameId == 'killersudoku') {
           desc = 'The Sudoku grid is zoomed in. Toggle Pan Mode to drag and scroll, and Input Mode to place numbers.';
         } else if (gameId == 'queens' || gameId == 'star_battle') {
           desc = 'The board is zoomed in. Toggle Pan Mode to drag and scroll, and Input Mode to place stars.';
-        } else if (gameId == 'minefinder') {
+        } else if (gameId == 'minesweeper') {
           desc = 'The minefield is zoomed in. Drag and pan to explore, and toggle input mode to flag or reveal.';
-        } else {
-          desc = 'The view is highly zoomed in. Drag and pan the board to inspect details and solve the puzzle.';
         }
       } else if (c.modifierType == 'mirror') {
         if (gameId == 'patternlock' || gameId == 'pattern_lock') {
           desc = 'The pattern lock grid and visual preview lines are horizontally mirrored. Trace the pattern in reverse.';
-        } else {
-          desc = 'The board layout and drawing coordinates are horizontally mirrored. Solve the puzzle in its flipped state.';
         }
       } else if (c.modifierType == 'whisper') {
         if (gameId == 'spellingbee' || gameId == 'word_hive') {
           desc = 'The central letter of the hive is hidden (blank). Deduce it and find the target words.';
         } else if (gameId == 'sumstrike') {
           desc = 'The row and column target sums are hidden (blanked out). You must deduce them to match.';
-        } else if (gameId == 'minefinder') {
+        } else if (gameId == 'minesweeper') {
           desc = 'The remaining mine counter is hidden. You must flag all mines to auto-clear the board.';
         } else if (gameId == 'sudoku' || gameId == 'killersudoku') {
           desc = 'Some starting clues or cage sums are hidden, requiring you to deduce the missing values.';
@@ -1201,12 +1219,21 @@ class DailyChallengeManager {
     final starKey = PrefsKeys.dailyStarForDate(dateStr);
     int completedCount = await getCompletedCountForDate(dateStr);
     
-    // Assign new star
+    // Determine the previous tier awarded for THIS date (if any) and move the count.
+    final prevStar = prefs.getString(starKey);
     String newStar = completedCount == 1 ? 'bronze' : completedCount == 2 ? 'silver' : 'gold';
     await prefs.setString(starKey, newStar);
 
-    final starCountKey = newStar == 'bronze' ? PrefsKeys.dailyBronzeStars : newStar == 'silver' ? PrefsKeys.dailySilverStars : PrefsKeys.dailyGoldStars;
-    await prefs.setInt(starCountKey, (prefs.getInt(starCountKey) ?? 0) + 1);
+    String keyFor(String s) => s == 'bronze'
+        ? PrefsKeys.dailyBronzeStars
+        : s == 'silver' ? PrefsKeys.dailySilverStars : PrefsKeys.dailyGoldStars;
+
+    if (prevStar != null && prevStar != newStar) {
+      final oldK = keyFor(prevStar);
+      await prefs.setInt(oldK, max(0, (prefs.getInt(oldK) ?? 1) - 1)); // remove the superseded tier
+    }
+    final newK = keyFor(newStar);
+    await prefs.setInt(newK, (prefs.getInt(newK) ?? 0) + 1);
 
     // Push stars to widget
     await syncStarsToWidget();
@@ -1267,7 +1294,7 @@ class DailyChallengeManager {
             
             if (diff == 1) {
               streak += 1;
-            } else if (diff > 1) {
+            } else {
               streak = 1;
               history = [dateStr];
               await prefs.setStringList(PrefsKeys.perfectWeekHistory, history);

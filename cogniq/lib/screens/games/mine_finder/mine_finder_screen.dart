@@ -100,6 +100,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   }
 
   Future<void> _initLevel() async {
+    await HintManager.startLevel('minesweeper');
     _hintCount = await HintManager.getHints('minesweeper');
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;

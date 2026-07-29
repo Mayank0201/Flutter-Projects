@@ -304,6 +304,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   }
 
   void _loadLevel() {
+    HintManager.startLevel('killersudoku');
     HintManager.getHints('killersudoku').then((v) {
       if (mounted) setState(() => _hintCount = v);
     });
@@ -365,14 +366,14 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
           _cages = [0, 1, 1, 1, 0, 0, 2, 2, 3, 4, 4, 2, 3, 5, 5, 5];
           _cageSums = [7, 9, 8, 7, 3, 6];
         } else if (_currentLevel == 2) {
-          _cages = [0, 1, 1, 2, 0, 3, 1, 2, 0, 3, 4, 2, 5, 3, 4, 6];
-          _cageSums = [7, 7, 9, 7, 6, 3, 1];
+          _cages = [0, 1, 1, 2, 0, 3, 3, 2, 0, 3, 4, 2, 5, 3, 4, 6];
+          _cageSums = [7, 4, 9, 10, 6, 3, 1];
         } else if (_currentLevel == 3) {
-          _cages = [0, 1, 1, 2, 0, 0, 1, 2, 3, 4, 5, 2, 3, 4, 5, 6];
-          _cageSums = [8, 8, 6, 5, 5, 4, 4];
+          _cages = [0, 1, 1, 2, 0, 0, 0, 2, 3, 4, 5, 2, 3, 4, 5, 6];
+          _cageSums = [10, 6, 6, 5, 5, 4, 4];
         } else if (_currentLevel == 4) {
-          _cages = [0, 0, 1, 1, 2, 0, 3, 3, 2, 4, 4, 3, 2, 5, 4, 6];
-          _cageSums = [7, 5, 9, 6, 10, 1, 2];
+          _cages = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7];
+          _cageSums = [5, 5, 5, 5, 5, 5, 5, 5];
         } else if (_currentLevel == 5) {
           _cages = [0, 0, 1, 2, 3, 0, 1, 2, 3, 4, 4, 2, 5, 5, 6, 6];
           _cageSums = [9, 5, 8, 5, 3, 4, 6];
@@ -402,8 +403,11 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   Future<void> _onLevelCleared() async {
     _gameTimer?.cancel();
     final prefs = await SharedPreferences.getInstance();
-    int highest = prefs.getInt('beta_level_killersudoku') ?? 0;
-    if (_currentLevel + 1 > highest) {
+    if (!_playDailyMode) {
+      int highest = prefs.getInt('level_killersudoku') ?? 0;
+      if (_currentLevel + 1 > highest) {
+        await prefs.setInt('level_killersudoku', _currentLevel + 1);
+      }
       await prefs.setInt('beta_level_killersudoku', _currentLevel + 1);
     }
     if (_timeLeft > 0 && _timeBonusEarned) {
@@ -429,6 +433,9 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     setState(() {
       _currentLevel++;
       _loadLevel();
+    });
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setInt('level_killersudoku', _currentLevel);
     });
   }
 
@@ -591,10 +598,12 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     if (hintCell != -1) {
       await HintManager.useHint('killersudoku');
       final newCount = await HintManager.getHints('killersudoku');
-      setState(() {
-        _hintCount = newCount;
-        _grid[hintCell] = _solution[hintCell];
-      });
+      if (mounted) {
+        setState(() {
+          _hintCount = newCount;
+          _grid[hintCell] = _solution[hintCell];
+        });
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The board is already correctly solved!')));
     }
@@ -660,16 +669,18 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             onPressed: _showHint,
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    Text(_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
+                    if (!_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                    ],
                   ],
                 ),
               ),

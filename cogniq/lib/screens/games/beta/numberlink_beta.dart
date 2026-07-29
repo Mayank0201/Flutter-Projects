@@ -117,6 +117,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   }
 
   void _loadLevel() {
+    HintManager.startLevel('colour_link');
     setState(() {
       _isSuccess = false;
       _dragColor = 0;
@@ -521,10 +522,12 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     final earned = await HintManager.onLevelCleared('colour_link');
     final hCount = await HintManager.getHints('colour_link');
 
-    setState(() {
-      _hintCount = hCount;
-      _isSuccess = true;
-    });
+    if (mounted) {
+      setState(() {
+        _hintCount = hCount;
+        _isSuccess = true;
+      });
+    }
 
     if (earned && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -544,6 +547,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   }
 
   void _nextLevel() async {
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
     if (await ShuffleManager.isActive()) {
       final next = await ShuffleManager.pickNextGame('colour_link');
       if (mounted) ShuffleManager.navigateToGame(context, next);
@@ -553,6 +560,8 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
       _currentLevel++;
       _loadLevel();
     });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('level_colour_link', _currentLevel);
   }
 
   void _showJumpToLevelDialog() {
@@ -762,7 +771,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -770,14 +779,14 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}'), 
                       style: AppTheme.numberStyle(
                         color: AppTheme.dustyMauve, 
                         fontSize: 14, 
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (!_isTutorialMode) ...[
+                    if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],

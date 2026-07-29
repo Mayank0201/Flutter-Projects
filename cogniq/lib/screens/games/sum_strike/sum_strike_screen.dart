@@ -148,6 +148,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   }
 
   void _generatePuzzle() {
+    HintManager.startLevel('sumstrike');
     if (!_playDailyMode && _currentLevel >= 500) {
       return;
     }
@@ -469,13 +470,16 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   void _toggleCell(int idx) {
     if (_isSuccess || !_keep[idx] || _wrongTaps.contains(idx)) return;
 
+    settingsNotifier.hapticTap();
+    setState(() {
+      _keep[idx] = false;
+    });
+
     if (_solutionMask[idx] == false) {
       // Correct: the number should be struck out/deleted!
-      settingsNotifier.hapticTap();
-      setState(() {
-        _keep[idx] = false;
-      });
       _tryAutoCheck();
+    } else {
+      // Wrong strike — cell should have been kept. Cost a life and restore it.
       setState(() {
         _wrongTaps.add(idx);
         _lives--;
@@ -488,6 +492,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         if (mounted) {
           setState(() {
             _wrongTaps.remove(idx);
+            _keep[idx] = true;
           });
         }
       });
@@ -557,10 +562,11 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _gameTimer?.cancel();
     final prefs = await SharedPreferences.getInstance();
     if (!_playDailyMode) {
-      int highest = prefs.getInt('beta_level_sumplete') ?? 0;
+      int highest = prefs.getInt(PrefsKeys.gameLevel('sumstrike')) ?? 0;
       if (_currentLevel + 1 > highest) {
-        await prefs.setInt('beta_level_sumplete', _currentLevel + 1);
+        await prefs.setInt(PrefsKeys.gameLevel('sumstrike'), _currentLevel + 1);
       }
+      await prefs.setInt('beta_level_sumplete', _currentLevel + 1);
     }
 
     if (_timeBonusEarned && _timeLeft > 0) {
@@ -1016,7 +1022,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                   ),
                 ),
                 Center(
-                  child: _isSuccess
+                  child: (_isSuccess && !_playDailyMode)
                       ? AutoNextCountdown(
                           onNext: _nextLevel,
                           accentColor: AppTheme.dustyMauve,
@@ -1028,13 +1034,16 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
-                          onPressed: () {
-                            settingsNotifier.hapticTap();
-                            setState(() {
-                              _keep = List.filled(_keep.length, true);
-                              _wrongTaps.clear();
-                            });
-                          },
+                          onPressed: _isSuccess
+                              ? null
+                              : () {
+                                  settingsNotifier.hapticTap();
+                                  setState(() {
+                                    _keep = List.filled(_keep.length, true);
+                                    _wrongTaps.clear();
+                                    _lives = 3;
+                                  });
+                                },
                           icon: const Icon(Icons.refresh),
                           label: const Text('Reset'),
                         ),

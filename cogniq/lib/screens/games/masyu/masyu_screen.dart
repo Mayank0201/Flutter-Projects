@@ -151,6 +151,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   void _setupLevel() {
+    HintManager.startLevel('masyu');
     if (!_playDailyMode && _currentLevel >= 500) {
       return;
     }
@@ -538,7 +539,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
 
     bool dfs(int curr, List<int> path) {
       steps++;
-      if (steps > 10000) return false;
+      if (steps > 50000) return false;
       if (path.length >= 4) {
         final startNeighbors = getNeighbors(startCell);
         if (startNeighbors.contains(curr)) {
@@ -795,9 +796,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
     for (int i = 0; i < totalCells; i++) {
       int pearl = _grid[i];
       if (pearl == 0) continue;
-      if (isPrism) {
-        pearl = (pearl == 1) ? 2 : 1;
-      }
 
       int r = i ~/ _gridSize + 1, c = i % _gridSize + 1;
       if (!cellToLoopIndex.containsKey(i)) {
@@ -906,6 +904,10 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   void _nextLevel() {
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _setupLevel();
@@ -915,7 +917,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
     });
   }
 
-  void _showHint() {
+  bool _showHint() {
     _ensureSolution();
     if (_solutionEdges.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -925,7 +927,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
           duration: const Duration(seconds: 3),
         ),
       );
-      return;
+      return false;
     }
 
     // 1. Spot incorrect edges and erase them
@@ -957,7 +959,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) setState(() => _isHintShowing = false);
       });
-      return;
+      return true;
     }
 
     // 2. Give the next step by placing a correct edge
@@ -990,7 +992,9 @@ class _MasyuScreenState extends State<MasyuScreen> {
         if (mounted) setState(() => _isHintShowing = false);
       });
       _tryAutoCheck();
+      return true;
     }
+    return false;
   }
 
   @override
@@ -1121,9 +1125,11 @@ class _MasyuScreenState extends State<MasyuScreen> {
             onPressed: !_isSuccess && !_isHintShowing
                 ? () async {
                     if (_hintCount > 0) {
-                      _showHint();
-                      setState(() => _hintCount--);
-                      HintManager.useHint('masyu');
+                      final success = _showHint();
+                      if (success) {
+                        setState(() => _hintCount--);
+                        await HintManager.useHint('masyu');
+                      }
                     } else {
                       await BuyHintsDialog.show(
                         context,
@@ -1260,7 +1266,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                           accentColor: AppTheme.dustyMauve,
                         )
                       : Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
@@ -1280,18 +1286,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
                               icon: const Icon(Icons.refresh),
                               label: const Text('Reset'),
                             ),
-                            if (_playDailyMode && _dailyModifierType == 'prism')
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.dustyMauve,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                onPressed: _checkSolution,
-                                icon: const Icon(Icons.check),
-                                label: const Text('Verify'),
-                              ),
                           ],
                         ),
                 ),

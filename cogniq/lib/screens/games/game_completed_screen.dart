@@ -141,7 +141,9 @@ class GameCompletedScreen extends StatelessWidget {
                     onPressed: () async {
                       final prefs = await SharedPreferences.getInstance();
                       await prefs.setInt(prefKey!, 0);
-                      await prefs.remove('daily_backup_$prefKey');
+                      final gameId = prefKey!.startsWith('level_') ? prefKey!.substring(6) : prefKey!;
+                      await prefs.remove('daily_backup_$gameId');
+                      await prefs.remove('daily_backup_active_game');
                       if (context.mounted) {
                         Navigator.pushReplacementNamed(context, routeName!);
                       }

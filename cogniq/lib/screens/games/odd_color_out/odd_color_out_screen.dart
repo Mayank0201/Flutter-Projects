@@ -155,8 +155,10 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     } else {
       if (!_isDailyMode && _levelIndex >= 30) {
         delta = 0.04 * (30.0 / (30.0 + (_levelIndex - 30)));
+        if (delta < 0.035) delta = 0.035;
       } else {
         delta = 0.10 - (_levelIndex / 29.0) * 0.06;
+        if (delta < 0.035) delta = 0.035;
       }
       if (_isDailyMode && _dailyModifierType == 'whisper') {
         delta = 0.015;
@@ -386,6 +388,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   }
 
   Future<void> _loadPersistedLevel() async {
+    await HintManager.startLevel('oddcolor');
     _hintCount = await HintManager.getHints('oddcolor');
     final prefs = await SharedPreferences.getInstance();
     _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;

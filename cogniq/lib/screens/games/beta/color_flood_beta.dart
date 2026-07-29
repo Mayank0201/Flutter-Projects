@@ -122,6 +122,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   }
 
   void _loadLevel() {
+    HintManager.startLevel('color_flood');
     setState(() {
       _isSuccess = false;
       _activeModifiers.clear();
@@ -446,10 +447,12 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
     final earned = await HintManager.onLevelCleared('color_flood');
     final hCount = await HintManager.getHints('color_flood');
 
-    setState(() {
-      _hintCount = hCount;
-      _isSuccess = true;
-    });
+    if (mounted) {
+      setState(() {
+        _hintCount = hCount;
+        _isSuccess = true;
+      });
+    }
 
     if (earned && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -469,6 +472,10 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
   }
 
   void _nextLevel() async {
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
     if (await ShuffleManager.isActive()) {
       final next = await ShuffleManager.pickNextGame('color_flood');
       if (mounted) ShuffleManager.navigateToGame(context, next);
@@ -478,6 +485,8 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
       _currentLevel++;
       _loadLevel();
     });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('level_color_flood', _currentLevel);
   }
 
   void _flood(int targetColor) {
@@ -782,7 +791,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -790,14 +799,14 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _isTutorialMode ? 'Tutorial' : 'Level ${_currentLevel + 1}', 
+                      _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}'), 
                       style: AppTheme.numberStyle(
                         color: AppTheme.dustyMauve, 
                         fontSize: 14, 
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (!_isTutorialMode) ...[
+                    if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],

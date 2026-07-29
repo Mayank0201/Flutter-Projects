@@ -173,6 +173,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
   }
 
   void _setupLevel() {
+    HintManager.startLevel('bridges');
     final level = kBridgesLevels[_currentLevel % kBridgesLevels.length];
     _gridSize = level.gridSize;
 
@@ -582,6 +583,10 @@ class _BridgesScreenState extends State<BridgesScreen> {
   }
 
   void _nextLevel() {
+    if (_playDailyMode) {
+      Navigator.pop(context, true);
+      return;
+    }
     setState(() {
       _currentLevel++;
       _setupLevel();

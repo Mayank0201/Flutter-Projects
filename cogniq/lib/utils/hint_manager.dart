@@ -12,6 +12,10 @@ class HintManager {
   static final Map<String, bool> _hintUsedThisLevel = {};
   static bool _lastClearWasSuccessful = false;
 
+  static Future<void> startLevel(String gameId) async {
+    await getHints(gameId);
+  }
+
   static Future<int> getHints(String gameId) async {
     // 1. Reset hint-used flag for the current level
     _hintUsedThisLevel[gameId] = false;

@@ -462,9 +462,21 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   List<String> _spyScrambledWords = [];
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
   Timer? _gameTimer;
+  Timer? _eclipseTimer;
+  bool _isShadowed = false;
   bool _gameOver = false;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
+
+  bool get _hasWhisperAndTimer {
+    if (_playDailyMode) {
+      return _dailyModifierType == 'whisper' && _timeLeft >= 0;
+    }
+    return !_playDailyMode &&
+        _levelIndex >= 30 &&
+        _activeModifiers.contains('whisper') &&
+        _activeModifiers.contains('timer');
+  }
 
   int get _minWordLength {
     if (_isTutorialMode) return 4;
@@ -477,6 +489,10 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       desired = 6 + ((_levelIndex - 90) % 2);
     }
     
+    if (_hasWhisperAndTimer) {
+      desired--;
+    }
+    
     int validCount = _level.validWords.where((w) => w.length >= desired && w.contains(_level.centerLetter)).length;
     while (desired > 4 && validCount < 4) {
       desired--;
@@ -487,7 +503,11 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
   int get _targetCount {
     final int validCount = _level.validWords.where((w) => w.length >= _minWordLength && w.contains(_level.centerLetter)).length;
-    final int capMax = min(18, validCount);
+    int maxCap = 18;
+    if (_hasWhisperAndTimer) {
+      maxCap = 12;
+    }
+    final int capMax = min(maxCap, validCount);
     final int capMin = min(4, validCount);
 
     if (_playDailyMode && _dailyModifierType == 'whisper') {
@@ -504,6 +524,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   @override
   void dispose() {
     _gameTimer?.cancel();
+    _eclipseTimer?.cancel();
     _currentDragNotifier.dispose();
     super.dispose();
   }
@@ -691,6 +712,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   }
 
   void _loadLevel() {
+    HintManager.startLevel('spellingbee');
     _level = _kLevels[_levelIndex % _kLevels.length];
     _currentGuess.clear();
     _selectedIndices.clear();
@@ -705,7 +727,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'spellingbee',
         levelIndex: _levelIndex,
-        pool: ['whisper', 'timer'],
+        pool: ['whisper', 'timer', 'fog', 'zoom', 'eclipse'],
         minActive: 1,
         maxActive: 2,
         smallGrid: false,
@@ -720,6 +742,18 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
+
+    _eclipseTimer?.cancel();
+    _isShadowed = false;
+    if (_activeModifiers.contains('eclipse')) {
+      _eclipseTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+        if (mounted) {
+          setState(() {
+            _isShadowed = !_isShadowed;
+          });
+        }
+      });
+    }
 
     if (_isSpy) {
       final rand = Random(_levelIndex + 2026);
@@ -994,12 +1028,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
         title: GestureDetector(
-          onTap: _showJumpToLevelDialog,
+          onTap: _playDailyMode ? null : _showJumpToLevelDialog,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                _isTutorialMode ? 'Tutorial' : 'Word Hive (L. ${_levelIndex + 1})',
+                _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Word Hive (Daily)' : 'Word Hive'),
                 style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary, fontSize: 16),
               ),
               if (!_isTutorialMode && !_playDailyMode) ...[
@@ -1252,133 +1286,159 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               // Circular Honeycomb Layout (Pushed to bottom)
               Center(
                 child: RepaintBoundary(
-                  child: GestureDetector(
-                    onPanStart: (d) => _handlePan(d.globalPosition),
-                    onPanUpdate: (d) => _handlePan(d.globalPosition),
-                    onPanEnd: (d) => _handlePanEnd(),
-                    child: SizedBox(
-                      key: _honeycombKey,
-                      width: context.scale(200),
-                      height: context.scale(200),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          // Line paint behind letters
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _LineConnectorPainter(
-                                points: _linePoints,
-                                currentDragNotifier: _currentDragNotifier,
-                                color: accentColor,
-                              ),
-                            ),
-                          ),
-                        // Center letter button
-                        GestureDetector(
-                          onTap: () {
-                            if (_won) return;
-                            if (_selectedIndices.contains(0)) return;
-                            setState(() {
-                              _currentGuess.add(_level.centerLetter);
-                              _selectedIndices.add(0);
-                              _linePoints.add(Offset(context.scale(100), context.scale(100)));
-                              _message = '';
-                            });
-                          },
-                          child: Container(
-                            width: context.scale(56),
-                            height: context.scale(56),
-                            decoration: BoxDecoration(
-                              color: accentColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _selectedIndices.contains(0) ? Colors.white : Colors.white.withAlpha(120),
-                                width: _selectedIndices.contains(0) ? 3.5 : 2,
-                              ),
-                              boxShadow: _selectedIndices.contains(0)
-                                  ? [
-                                      BoxShadow(
-                                        color: accentColor.withOpacity(0.5),
-                                        blurRadius: 8,
-                                        spreadRadius: 2,
-                                      )
-                                    ]
-                                  : null,
-                            ),
-                            child: Center(
-                              child: Text(
-                                _isWhisper ? '?' : _level.centerLetter,
-                                style: GoogleFonts.outfit(
-                                  fontSize: context.scale(22),
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
+                  child: Transform.scale(
+                    scale: _activeModifiers.contains('zoom') ? 1.4 : 1.0,
+                    child: GestureDetector(
+                      onPanStart: (d) => _handlePan(d.globalPosition),
+                      onPanUpdate: (d) => _handlePan(d.globalPosition),
+                      onPanEnd: (d) => _handlePanEnd(),
+                      child: SizedBox(
+                        key: _honeycombKey,
+                        width: context.scale(200),
+                        height: context.scale(200),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Line paint behind letters
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _LineConnectorPainter(
+                                  points: _linePoints,
+                                  currentDragNotifier: _currentDragNotifier,
+                                  color: accentColor,
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                        // Outer letter buttons (6 of them)
-                        ...List.generate(6, (index) {
-                          final angle = index * pi / 3 - pi / 6;
-                          final radius = context.scale(75.0);
-                          final x = radius * cos(angle);
-                          final y = radius * sin(angle);
-                          final letter = _level.outerLetters[index];
-
-                          return Positioned(
-                            left: context.scale(100) + x - context.scale(24),
-                            top: context.scale(100) + y - context.scale(24),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                if (_won) return;
-                                final selectIdx = index + 1;
-                                setState(() {
-                                  _currentGuess.add(letter);
-                                  _selectedIndices.add(selectIdx);
-                                  final angle = index * pi / 3 - pi / 6;
-                                  final radius = context.scale(65.0);
-                                  final x = radius * cos(angle);
-                                  final y = radius * sin(angle);
-                                  _linePoints.add(Offset(context.scale(100) + x, context.scale(100) + y));
-                                  _message = '';
-                                });
-                              },
-                              child: Container(
-                                width: context.scale(48),
-                                height: context.scale(48),
-                                decoration: BoxDecoration(
-                                  color: _selectedIndices.contains(index + 1)
-                                      ? accentColor.withOpacity(0.15)
-                                      : context.bgCard,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: _selectedIndices.contains(index + 1)
-                                        ? accentColor
-                                        : context.textMuted.withAlpha(100),
-                                    width: _selectedIndices.contains(index + 1) ? 2.5 : 2,
+                          // Center letter button
+                          GestureDetector(
+                            onTap: () {
+                              if (_won) return;
+                              if (_selectedIndices.contains(0)) return;
+                              setState(() {
+                                _currentGuess.add(_level.centerLetter);
+                                _selectedIndices.add(0);
+                                _linePoints.add(Offset(context.scale(100), context.scale(100)));
+                                _message = '';
+                              });
+                            },
+                            child: Container(
+                              width: context.scale(56),
+                              height: context.scale(56),
+                              decoration: BoxDecoration(
+                                color: accentColor,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _selectedIndices.contains(0) ? Colors.white : Colors.white.withAlpha(120),
+                                  width: _selectedIndices.contains(0) ? 3.5 : 2,
+                                ),
+                                boxShadow: _selectedIndices.contains(0)
+                                    ? [
+                                        BoxShadow(
+                                          color: accentColor.withOpacity(0.5),
+                                          blurRadius: 8,
+                                          spreadRadius: 2,
+                                        )
+                                      ]
+                                    : null,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  _isWhisper ? '?' : _level.centerLetter,
+                                  style: GoogleFonts.outfit(
+                                    fontSize: context.scale(22),
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
                                   ),
                                 ),
-                                child: Center(
-                                  child: Text(
-                                    letter,
-                                    style: GoogleFonts.outfit(
-                                      fontSize: context.scale(18),
-                                      fontWeight: FontWeight.w800,
-                                      color: context.textPrimary,
+                              ),
+                            ),
+                          ),
+                          // Outer letter buttons (6 of them)
+                          ...List.generate(6, (index) {
+                            final angle = index * pi / 3 - pi / 6;
+                            final radius = context.scale(75.0);
+                            final x = radius * cos(angle);
+                            final y = radius * sin(angle);
+                            final letter = _level.outerLetters[index];
+
+                            return Positioned(
+                              left: context.scale(100) + x - context.scale(24),
+                              top: context.scale(100) + y - context.scale(24),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (_won) return;
+                                  final selectIdx = index + 1;
+                                  setState(() {
+                                    _currentGuess.add(letter);
+                                    _selectedIndices.add(selectIdx);
+                                    final angle = index * pi / 3 - pi / 6;
+                                    final radius = context.scale(65.0);
+                                    final x = radius * cos(angle);
+                                    final y = radius * sin(angle);
+                                    _linePoints.add(Offset(context.scale(100) + x, context.scale(100) + y));
+                                    _message = '';
+                                  });
+                                },
+                                child: Container(
+                                  width: context.scale(48),
+                                  height: context.scale(48),
+                                  decoration: BoxDecoration(
+                                    color: _selectedIndices.contains(index + 1)
+                                        ? accentColor.withOpacity(0.15)
+                                        : context.bgCard,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _selectedIndices.contains(index + 1)
+                                          ? accentColor
+                                          : context.textMuted.withAlpha(100),
+                                      width: _selectedIndices.contains(index + 1) ? 2.5 : 2,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      letter,
+                                      style: GoogleFonts.outfit(
+                                        fontSize: context.scale(18),
+                                        fontWeight: FontWeight.w800,
+                                        color: context.textPrimary,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
+                            );
+                          }),
+                          if (_activeModifiers.contains('fog'))
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: SpotlightFogPainter(
+                                    fogColor: Colors.black.withOpacity(0.92),
+                                    spotlightRadius: context.scale(60),
+                                  ),
+                                ),
+                              ),
                             ),
-                          );
-                        }),
-                      ],
+                          if (_activeModifiers.contains('eclipse'))
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: AnimatedOpacity(
+                                  duration: const Duration(milliseconds: 500),
+                                  opacity: _isShadowed ? 0.95 : 0.0,
+                                  child: Container(
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
             const SizedBox(height: 24),
               // Action button - backspace only (drag auto-submits, tap guess to submit)
               if (!_won && !_tutorialCompleted)
@@ -1472,5 +1532,36 @@ class _LineConnectorPainter extends CustomPainter {
   bool shouldRepaint(_LineConnectorPainter oldDelegate) {
     return oldDelegate.points.length != points.length ||
            oldDelegate.color != color;
+  }
+}
+
+class SpotlightFogPainter extends CustomPainter {
+  final Color fogColor;
+  final double spotlightRadius;
+
+  SpotlightFogPainter({
+    required this.fogColor,
+    required this.spotlightRadius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = fogColor
+      ..style = PaintingStyle.fill;
+
+    canvas.saveLayer(Offset.zero & size, Paint());
+    canvas.drawRect(Offset.zero & size, paint);
+
+    final clearPaint = Paint()
+      ..blendMode = BlendMode.clear
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(size.width / 2, size.height / 2), spotlightRadius, clearPaint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant SpotlightFogPainter oldDelegate) {
+    return oldDelegate.fogColor != fogColor || oldDelegate.spotlightRadius != spotlightRadius;
   }
 }
