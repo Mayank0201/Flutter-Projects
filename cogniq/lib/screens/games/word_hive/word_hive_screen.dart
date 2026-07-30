@@ -454,6 +454,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   Set<String> _activeModifiers = {};
 
   bool get _isWhisper {
+    if (_foundWords.length >= 5) return false;
     if (_playDailyMode) return _dailyModifierType == 'whisper';
     return !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('whisper');
   }
@@ -462,8 +463,6 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   List<String> _spyScrambledWords = [];
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
   Timer? _gameTimer;
-  Timer? _eclipseTimer;
-  bool _isShadowed = false;
   bool _gameOver = false;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
@@ -524,7 +523,6 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   @override
   void dispose() {
     _gameTimer?.cancel();
-    _eclipseTimer?.cancel();
     _currentDragNotifier.dispose();
     super.dispose();
   }
@@ -727,11 +725,14 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'spellingbee',
         levelIndex: _levelIndex,
-        pool: ['whisper', 'timer', 'fog', 'zoom', 'eclipse'],
+        pool: ['whisper', 'timer', 'minimal', 'spy'],
         minActive: 1,
         maxActive: 2,
         smallGrid: false,
       );
+      if (_activeModifiers.contains('whisper') && _activeModifiers.contains('timer')) {
+        _activeModifiers.remove('timer');
+      }
     } else {
       _activeModifiers = {};
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
@@ -742,18 +743,6 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
-
-    _eclipseTimer?.cancel();
-    _isShadowed = false;
-    if (_activeModifiers.contains('eclipse')) {
-      _eclipseTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-        if (mounted) {
-          setState(() {
-            _isShadowed = !_isShadowed;
-          });
-        }
-      });
-    }
 
     if (_isSpy) {
       final rand = Random(_levelIndex + 2026);
@@ -1286,9 +1275,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               // Circular Honeycomb Layout (Pushed to bottom)
               Center(
                 child: RepaintBoundary(
-                  child: Transform.scale(
-                    scale: _activeModifiers.contains('zoom') ? 1.4 : 1.0,
-                    child: GestureDetector(
+                  child: GestureDetector(
                       onPanStart: (d) => _handlePan(d.globalPosition),
                       onPanUpdate: (d) => _handlePan(d.globalPosition),
                       onPanEnd: (d) => _handlePanEnd(),
@@ -1409,36 +1396,12 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                               ),
                             );
                           }),
-                          if (_activeModifiers.contains('fog'))
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: CustomPaint(
-                                  painter: SpotlightFogPainter(
-                                    fogColor: Colors.black.withOpacity(0.92),
-                                    spotlightRadius: context.scale(60),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_activeModifiers.contains('eclipse'))
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: AnimatedOpacity(
-                                  duration: const Duration(milliseconds: 500),
-                                  opacity: _isShadowed ? 0.95 : 0.0,
-                                  child: Container(
-                                    color: Colors.black,
-                                  ),
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
             const SizedBox(height: 24),
               // Action button - backspace only (drag auto-submits, tap guess to submit)
               if (!_won && !_tutorialCompleted)

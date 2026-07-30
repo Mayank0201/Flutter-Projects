@@ -502,6 +502,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
     bool validateLoop(List<int> loop) {
       final K = loop.length;
       final loopSet = Set<int>.from(loop);
+      final bool isPrism = _playDailyMode && _dailyModifierType == 'prism';
       for (int i = 0; i < _grid.length; i++) {
         if (_grid[i] > 0 && !loopSet.contains(i)) return false;
       }
@@ -512,6 +513,9 @@ class _MasyuScreenState extends State<MasyuScreen> {
         int idx = loop[j];
         int pearl = _grid[idx];
         if (pearl == 0) continue;
+        if (isPrism) {
+          pearl = (pearl == 1) ? 2 : 1;
+        }
 
         int prev = loop[(j - 1 + K) % K];
         int next = loop[(j + 1) % K];
@@ -796,6 +800,9 @@ class _MasyuScreenState extends State<MasyuScreen> {
     for (int i = 0; i < totalCells; i++) {
       int pearl = _grid[i];
       if (pearl == 0) continue;
+      if (isPrism) {
+        pearl = (pearl == 1) ? 2 : 1;
+      }
 
       int r = i ~/ _gridSize + 1, c = i % _gridSize + 1;
       if (!cellToLoopIndex.containsKey(i)) {

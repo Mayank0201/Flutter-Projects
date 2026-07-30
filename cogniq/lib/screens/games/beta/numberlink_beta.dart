@@ -69,6 +69,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   bool _isTutorialMode = false;
   bool _tutorialCompleted = false;
   int _actualGameLevel = 0;
+  Set<String> _activeModifiers = {};
   bool get _isEndgame => !_playDailyMode && _currentLevel >= 30;
   Timer? _gameTimer;
   int _timeLeft = -1;
@@ -172,15 +173,22 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           ? Random(_currentLevel + 2026)
           : RotationEngine.getDeterminism('colourlink', _currentLevel);
 
-      final activeMods = RotationEngine.getActiveModifiers(
-        gameId: 'colourlink',
-        levelIndex: _currentLevel,
-        pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer'],
-        smallGrid: _gridSize <= 5,
-      );
+      if (!_playDailyMode && _currentLevel >= 30) {
+        _activeModifiers = RotationEngine.getActiveModifiers(
+          gameId: 'colourlink',
+          levelIndex: _currentLevel,
+          pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer'],
+          smallGrid: _gridSize <= 5,
+        );
+      } else {
+        _activeModifiers = {};
+        if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+          _activeModifiers.add(_dailyModifierType);
+        }
+      }
 
       int wallCount = 0;
-      if (!_playDailyMode && _currentLevel >= 30 && activeMods.contains('walls')) {
+      if (_activeModifiers.contains('walls')) {
         wallCount = 1 + (_gridSize ~/ 2);
       }
       
@@ -297,7 +305,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         ];
       }
 
-      if (_isEndgame) {
+      if (_activeModifiers.contains('timer')) {
         _timeLeft = 30 + (_gridSize * 12);
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
