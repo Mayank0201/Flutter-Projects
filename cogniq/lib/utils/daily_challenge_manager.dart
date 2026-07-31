@@ -1077,10 +1077,16 @@ class DailyChallengeManager {
 
     final slotToGame = _slotAssignment(trio, dayInWeek); // slot -> index into trio
 
+    final pinnedCount = trio.where((c) => c.pinDifficulty != null).length;
+    final m = 3 - pinnedCount;
+
     final out = <DailyChallenge>[];
     for (int slot = 0; slot < 3; slot++) {
       final c = trio[slotToGame[slot]];
-      final level = c.levelIndex + slot * c.step;   // level scales with the slot
+      int level = c.levelIndex + slot * c.step;   // level scales with the slot
+      if (m > 0) {
+        level += (dayInWeek - 1) ~/ m;
+      }
       
       String desc = c.modifierDescription;
       final gameId = c.gameId;
@@ -1203,6 +1209,26 @@ class DailyChallengeManager {
     return streak;
   }
 
+  static Future<int> getOrUpdatePerfectStreak(String dateStr) async {
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getString(PrefsKeys.weeklyLastPerfectDate) ?? '';
+    int streak = prefs.getInt(PrefsKeys.weeklyPerfectStreak) ?? 0;
+
+    if (last.isNotEmpty && last != dateStr) {
+      final lastDateObj = DateTime.parse(last);
+      final today = DateTime.parse(dateStr);
+      final lastDateUtc = DateTime.utc(lastDateObj.year, lastDateObj.month, lastDateObj.day);
+      final todayUtc = DateTime.utc(today.year, today.month, today.day);
+      final diff = todayUtc.difference(lastDateUtc).inDays;
+      if (diff > 1) {
+        streak = 0;
+        await prefs.setInt(PrefsKeys.weeklyPerfectStreak, 0);
+        await prefs.remove(PrefsKeys.perfectWeekHistory);
+      }
+    }
+    return streak;
+  }
+
   static Future<int> getPerfectDays() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(PrefsKeys.dailyV2PerfectDays) ?? 0;
@@ -1228,10 +1254,6 @@ class DailyChallengeManager {
         ? PrefsKeys.dailyBronzeStars
         : s == 'silver' ? PrefsKeys.dailySilverStars : PrefsKeys.dailyGoldStars;
 
-    if (prevStar != null && prevStar != newStar) {
-      final oldK = keyFor(prevStar);
-      await prefs.setInt(oldK, max(0, (prefs.getInt(oldK) ?? 1) - 1)); // remove the superseded tier
-    }
     final newK = keyFor(newStar);
     await prefs.setInt(newK, (prefs.getInt(newK) ?? 0) + 1);
 

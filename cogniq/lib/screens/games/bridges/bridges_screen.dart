@@ -181,7 +181,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'bridges',
         levelIndex: _currentLevel,
-        pool: ['hiddenIslands', 'timer'],
+        pool: ['hiddenIslands', 'timer', 'zoom'],
         minActive: 1,
         maxActive: 2,
         smallGrid: _gridSize <= 6,

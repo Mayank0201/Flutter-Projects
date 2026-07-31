@@ -165,14 +165,6 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         _numColors = 5;
       }
 
-      _grid = List.filled(_gridSize * _gridSize, 0);
-      _paths = List.generate(_numColors, (_) => []);
-      _wallCells.clear();
-
-      final rng = _playDailyMode
-          ? Random(_currentLevel + 2026)
-          : RotationEngine.getDeterminism('colourlink', _currentLevel);
-
       if (!_playDailyMode && _currentLevel >= 30) {
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'colourlink',
@@ -180,12 +172,24 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
           pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer'],
           smallGrid: _gridSize <= 5,
         );
+        if (_activeModifiers.contains('gridSize_pairCount')) {
+          _gridSize = (_gridSize + 1).clamp(4, 9);
+          _numColors = (_numColors + 1).clamp(2, (_gridSize * _gridSize) ~/ 4);
+        }
       } else {
         _activeModifiers = {};
         if (_playDailyMode && _dailyModifierType.isNotEmpty) {
           _activeModifiers.add(_dailyModifierType);
         }
       }
+
+      _grid = List.filled(_gridSize * _gridSize, 0);
+      _paths = List.generate(_numColors, (_) => []);
+      _wallCells.clear();
+
+      final rng = _playDailyMode
+          ? Random(_currentLevel + 2026)
+          : RotationEngine.getDeterminism('colourlink', _currentLevel);
 
       int wallCount = 0;
       if (_activeModifiers.contains('walls')) {
@@ -274,6 +278,12 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
             if (testPaths[c - 1].length < 2) {
               pathsValid = false;
               break;
+            }
+          }
+          if (pathsValid && _activeModifiers.contains('tortuosity')) {
+            final totalLen = testPaths.fold<int>(0, (sum, p) => sum + p.length);
+            if (totalLen < (_gridSize * _gridSize * 0.75)) {
+              pathsValid = false; // reject boards where paths don't cover enough of the grid
             }
           }
           if (pathsValid) {

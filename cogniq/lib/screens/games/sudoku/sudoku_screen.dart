@@ -1161,17 +1161,10 @@ class _SudokuScreenState extends State<SudokuScreen> {
   final Set<(int, int)> _lockedRecallCells = {};
 
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
+  Set<String> _activeModifiers = {};
   bool get _isEclipseActive {
-    if (_playDailyMode && _dailyModifierType == 'eclipse') return true;
-    if (!_playDailyMode && _levelIndex >= 30) {
-      final activeMods = RotationEngine.getActiveModifiers(
-        gameId: 'sudoku',
-        levelIndex: _levelIndex,
-        pool: ['clueThinning', 'variantRule', 'eclipse', 'timer'],
-      );
-      return activeMods.contains('eclipse');
-    }
-    return false;
+    if (_playDailyMode) return _dailyModifierType == 'eclipse';
+    return !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('eclipse');
   }
   Timer? _gameTimer;
   int _timeLeft = -1;
@@ -1569,6 +1562,9 @@ class _SudokuScreenState extends State<SudokuScreen> {
           targetFilled = max(17, 25 - ((index - 45) ~/ 3));
         }
       }
+      if (_activeModifiers.contains('clueThinning')) {
+        targetFilled = max(4, targetFilled - (size == 4 ? 1 : size == 6 ? 2 : 3));
+      }
     } else if (size == 9) {
       if (index < 40) {
         targetFilled = 25; // levels 26-40
@@ -1613,6 +1609,15 @@ class _SudokuScreenState extends State<SudokuScreen> {
   }
 
   void _loadLevel() {
+    if (!_playDailyMode && _levelIndex >= 30) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'sudoku',
+        levelIndex: _levelIndex,
+        pool: ['clueThinning', 'eclipse', 'timer'],
+      );
+    } else {
+      _activeModifiers = {};
+    }
     _level = _getSudokuLevel(_levelIndex);
     _board = List.generate(_level.size, (r) => List.from(_level.startBoard[r]));
     _selectedRow = -1;
@@ -1658,7 +1663,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       _gameTimer?.cancel();
       _timeLeft = -1;
       _timeBonusEarned = false;
-      if (_isEndgame) {
+      if (_isEndgame && _activeModifiers.contains('timer')) {
         _timeLeft = _level.size == 4 ? 60 : (_level.size == 6 ? 120 : 240);
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {

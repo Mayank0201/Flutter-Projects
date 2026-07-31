@@ -174,7 +174,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'sumstrike',
         levelIndex: _currentLevel,
-        pool: ['negatives', 'denseStrike', 'timer'],
+        pool: ['negatives', 'denseStrike', 'timer', 'whisper'],
         minActive: 1,
         maxActive: 2,
         smallGrid: tempGridSize <= 4,

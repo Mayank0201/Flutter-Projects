@@ -173,7 +173,7 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'colorflood',
           levelIndex: _currentLevel,
-          pool: ['centerSeed', 'timer'],
+          pool: ['centerSeed', 'timer', 'chaos'],
           minActive: 2,
           maxActive: 3,
           smallGrid: (_gridSize <= 6),

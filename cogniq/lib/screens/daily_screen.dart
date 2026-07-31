@@ -109,8 +109,7 @@ class _DailyScreenState extends State<DailyScreen> {
 
   Future<void> _loadDailyState() async {
     final prefs = await SharedPreferences.getInstance();
-    final debugOffset = prefs.getInt('debug_date_offset') ?? 0;
-    final now = DateTime.now().toUtc().add(Duration(days: debugOffset));
+    final now = DateTime.now().toUtc();
     _currentDate = now;
     _dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
 
@@ -131,7 +130,7 @@ class _DailyScreenState extends State<DailyScreen> {
     _bronzeCount = prefs.getInt('daily_bronze_stars') ?? 0;
     _silverCount = prefs.getInt('daily_silver_stars') ?? 0;
     _goldCount = prefs.getInt('daily_gold_stars') ?? 0;
-    _weeklyPerfectStreak = prefs.getInt(PrefsKeys.weeklyPerfectStreak) ?? 0;
+    _weeklyPerfectStreak = await DailyChallengeManager.getOrUpdatePerfectStreak(_dateStr);
     _diamondStars = prefs.getInt(PrefsKeys.diamondStars) ?? 0;
     _perfectWeekHistory = prefs.getStringList(PrefsKeys.perfectWeekHistory) ?? [];
 
@@ -342,19 +341,6 @@ class _DailyScreenState extends State<DailyScreen> {
     );
   }
 
-  Future<void> _debugShiftDay(int offset) async {
-    final prefs = await SharedPreferences.getInstance();
-    int currentDay = prefs.getInt(PrefsKeys.dailyUserProgressDay) ?? 1;
-    currentDay = ((currentDay - 1 + offset) % DailyChallengeManager.kTotalDays) + 1;
-    if (currentDay < 1) currentDay = DailyChallengeManager.kTotalDays;
-    await prefs.setInt(PrefsKeys.dailyUserProgressDay, currentDay);
-    
-    final currentOffset = prefs.getInt('debug_date_offset') ?? 0;
-    await prefs.setInt('debug_date_offset', currentOffset + offset);
-
-    await prefs.setString(PrefsKeys.dailyChallengeStartTime, DateTime.now().toUtc().toIso8601String());
-    await _loadDailyState();
-  }
 
   List<Color> _themeGradient(String themeName) {
     final lower = themeName.toLowerCase();
@@ -740,30 +726,10 @@ class _DailyScreenState extends State<DailyScreen> {
                   ),
                 )
               else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.bolt, color: Colors.amber, size: 20),
-                      tooltip: 'Auto-Complete (Debug)',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () async {
-                        await DailyChallengeManager.completeChallenge(
-                          challenge.difficulty,
-                          _dateStr,
-                          game.id,
-                        );
-                        await _loadDailyState();
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      color: context.textMuted.withAlpha(120),
-                      size: 14,
-                    ),
-                  ],
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: context.textMuted.withAlpha(120),
+                  size: 14,
                 ),
             ],
           ),
@@ -891,7 +857,7 @@ class _DailyScreenState extends State<DailyScreen> {
         if (widget.isEmbedded) ...[
           const SizedBox(height: 10),
           Text(
-            'Daily Gauntlet',
+            'Weekly Gauntlet',
             style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary),
           ),
           const SizedBox(height: 4),
@@ -1027,97 +993,6 @@ class _DailyScreenState extends State<DailyScreen> {
           ),
         ),
         const SizedBox(height: 24),
-
-        // 6. Developer Debug Controls
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.amber.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.amber.withOpacity(0.2)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'DEVELOPER DEBUG CONTROLS',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.outfit(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.amber,
-                  letterSpacing: 1.1,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  OutlinedButton(
-                    onPressed: () => _debugShiftDay(-1),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.amber,
-                      side: const BorderSide(color: Colors.amber, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                    child: Text('Day -1', style: GoogleFonts.outfit(fontSize: 11)),
-                  ),
-                  OutlinedButton(
-                    onPressed: () => _debugShiftDay(1),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.amber,
-                      side: const BorderSide(color: Colors.amber, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                    child: Text('Day +1', style: GoogleFonts.outfit(fontSize: 11)),
-                  ),
-                  OutlinedButton(
-                    onPressed: () => _debugShiftDay(7),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.amber,
-                      side: const BorderSide(color: Colors.amber, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                    child: Text('Week +1', style: GoogleFonts.outfit(fontSize: 11)),
-                  ),
-                  OutlinedButton(
-                    onPressed: () async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setInt(PrefsKeys.dailyUserProgressDay, 1);
-                      await prefs.setInt('debug_date_offset', 0);
-                      for (final key in prefs.getKeys().toList()) {
-                        if (key.startsWith('daily_v2_completed_') || 
-                            key.startsWith('daily_star_for_date_') || 
-                            key.startsWith('daily_v2_perfect_')) {
-                          await prefs.remove(key);
-                        }
-                      }
-                      await prefs.setInt(PrefsKeys.dailyBronzeStars, 0);
-                      await prefs.setInt(PrefsKeys.dailySilverStars, 0);
-                      await prefs.setInt(PrefsKeys.dailyGoldStars, 0);
-                      await prefs.remove(PrefsKeys.weeklyPerfectStreak);
-                      await prefs.remove(PrefsKeys.weeklyLastPerfectDate);
-                      await prefs.setInt(PrefsKeys.dailyV2PerfectDays, 0);
-                      await prefs.remove(PrefsKeys.dailyChallengeStartTime);
-                      await prefs.setInt(PrefsKeys.diamondStars, 0);
-                      await prefs.remove(PrefsKeys.perfectWeekHistory);
-                      await prefs.remove(PrefsKeys.dailyV2LastDate);
-                      await prefs.remove(PrefsKeys.dailyV2Streak);
-                      await DailyChallengeManager.syncStarsToWidget();
-                      await _loadDailyState();
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.redAccent,
-                      side: const BorderSide(color: Colors.redAccent, width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                    child: Text('Reset All', style: GoogleFonts.outfit(fontSize: 11)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 40),
       ],
     );
@@ -1143,7 +1018,7 @@ class _DailyScreenState extends State<DailyScreen> {
         foregroundColor: context.textPrimary,
         elevation: 0,
         title: Text(
-          'Daily Gauntlet',
+          'Weekly Gauntlet',
           style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary),
         ),
         actions: [

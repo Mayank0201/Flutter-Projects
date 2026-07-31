@@ -191,274 +191,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
     }
   }
 
-  void _generateEndgameLevel(int levelIndex) {
-    final rand = RotationEngine.getDeterminism('masyu', levelIndex);
-    if (levelIndex >= 90) {
-      _gridSize = 5 + ((levelIndex - 90) % 5);
-    } else if (levelIndex >= 75) {
-      _gridSize = 8;
-    } else if (levelIndex >= 60) {
-      _gridSize = 7;
-    } else if (levelIndex >= 45) {
-      _gridSize = 6;
-    } else {
-      _gridSize = 5;
-    }
-    final total = _gridSize * _gridSize;
-    _grid = List.filled(total, 0);
-
-    bool isStraight(int a, int b, int c) {
-      int rA = a ~/ _gridSize, cA = a % _gridSize;
-      int rB = b ~/ _gridSize, cB = b % _gridSize;
-      int rC = c ~/ _gridSize, cC = c % _gridSize;
-      return (rA == rB && rB == rC) || (cA == cB && cB == cC);
-    }
-
-    for (int attempt = 0; attempt < 500; attempt++) {
-      final loop = _generateRandomLoop(_gridSize, rand);
-      if (loop == null) continue;
-
-      final candidates = <int>[];
-      final pearlTypes = <int, int>{};
-      final K = loop.length;
-
-      for (int i = 0; i < K; i++) {
-        int prev = loop[(i - 1 + K) % K];
-        int curr = loop[i];
-        int next = loop[(i + 1) % K];
-        if (isStraight(prev, curr, next)) {
-          pearlTypes[curr] = 1;
-        } else {
-          pearlTypes[curr] = 2;
-        }
-        candidates.add(curr);
-      }
-
-      candidates.shuffle(rand);
-
-      double decayVal = RotationEngine.getDecayValue(
-        level: levelIndex - 30,
-        start: 0.45,
-        floor: 0.22,
-        rate: 60.0,
-      );
-      int targetCount = (total * decayVal).round();
-      if (targetCount < _gridSize + 1) targetCount = _gridSize + 1;
-      if (targetCount > candidates.length) targetCount = candidates.length;
-
-      double blackRatio = 0.35 + (0.25 * ((levelIndex - 30) / (levelIndex - 30 + 100)));
-      if (blackRatio > 0.65) blackRatio = 0.65;
-
-      final selectedGrid = List.filled(total, 0);
-      int placed = 0;
-      int maxBlacks = (targetCount * blackRatio).round();
-      int placedBlacks = 0;
-
-      for (final cell in candidates) {
-        if (placed >= targetCount) break;
-        int type = pearlTypes[cell]!;
-        if (type == 2 && placedBlacks >= maxBlacks) continue;
-        selectedGrid[cell] = type;
-        if (type == 2) placedBlacks++;
-        placed++;
-      }
-
-      for (final cell in candidates) {
-        if (placed >= targetCount) break;
-        if (selectedGrid[cell] == 0) {
-          int type = pearlTypes[cell]!;
-          selectedGrid[cell] = type;
-          placed++;
-        }
-      }
-
-      if (_countMasyuSolutions(selectedGrid, _gridSize, 2) == 1) {
-        _grid = selectedGrid;
-        return;
-      }
-    }
-
-    _gridSize = 5;
-    _grid = [0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 0, 0, 0];
-  }
-
-  List<int>? _generateRandomLoop(int gridSize, Random rand) {
-    final totalCells = gridSize * gridSize;
-    final visited = List.filled(totalCells, false);
-    final startCell = rand.nextInt(totalCells);
-    visited[startCell] = true;
-
-    List<int> getNeighbors(int idx) {
-      final r = idx ~/ gridSize;
-      final c = idx % gridSize;
-      final res = <int>[];
-      if (r > 0) res.add(idx - gridSize);
-      if (r < gridSize - 1) res.add(idx + gridSize);
-      if (c > 0) res.add(idx - 1);
-      if (c < gridSize - 1) res.add(idx + 1);
-      return res;
-    }
-
-    List<int>? cycle;
-
-    bool dfs(int curr, List<int> path) {
-      if (path.length >= 6) {
-        final startNeighbors = getNeighbors(startCell);
-        if (startNeighbors.contains(curr)) {
-          if (rand.nextDouble() < 0.15) {
-            cycle = List.from(path);
-            return true;
-          }
-        }
-      }
-
-      final neighbors = getNeighbors(curr)..shuffle(rand);
-      for (final next in neighbors) {
-        if (next == startCell) continue;
-        if (!visited[next]) {
-          visited[next] = true;
-          path.add(next);
-          if (dfs(next, path)) return true;
-          path.removeLast();
-          visited[next] = false;
-        }
-      }
-      return false;
-    }
-
-    for (int attempt = 0; attempt < 200; attempt++) {
-      visited.fillRange(0, totalCells, false);
-      visited[startCell] = true;
-      cycle = null;
-      if (dfs(startCell, [startCell])) {
-        return cycle;
-      }
-    }
-    return null;
-  }
-
-  int _countMasyuSolutions(List<int> grid, int gridSize, int maxSolutions) {
-    int startCell = -1;
-    for (int i = 0; i < grid.length; i++) {
-      if (grid[i] > 0) {
-        startCell = i;
-        break;
-      }
-    }
-    if (startCell == -1) return 0;
-
-    final totalCells = gridSize * gridSize;
-
-    List<int> getNeighbors(int idx) {
-      final r = idx ~/ gridSize;
-      final c = idx % gridSize;
-      final res = <int>[];
-      if (r > 0) res.add(idx - gridSize);
-      if (r < gridSize - 1) res.add(idx + gridSize);
-      if (c > 0) res.add(idx - 1);
-      if (c < gridSize - 1) res.add(idx + 1);
-      return res;
-    }
-
-    bool isStraight(int a, int b, int c) {
-      int rA = a ~/ gridSize, cA = a % gridSize;
-      int rB = b ~/ gridSize, cB = b % gridSize;
-      int rC = c ~/ gridSize, cC = c % gridSize;
-      return (rA == rB && rB == rC) || (cA == cB && cB == cC);
-    }
-
-    bool isTurn(int a, int b, int c) {
-      return !isStraight(a, b, c);
-    }
-
-    bool validateLoop(List<int> loop) {
-      final K = loop.length;
-      final loopSet = Set<int>.from(loop);
-      for (int i = 0; i < grid.length; i++) {
-        if (grid[i] > 0 && !loopSet.contains(i)) return false;
-      }
-
-      for (int j = 0; j < K; j++) {
-        int idx = loop[j];
-        int pearl = grid[idx];
-        if (pearl == 0) continue;
-
-        int prev = loop[(j - 1 + K) % K];
-        int next = loop[(j + 1) % K];
-        int prevPrev = loop[(j - 2 + K) % K];
-        int nextNext = loop[(j + 2) % K];
-
-        if (pearl == 1) {
-          if (!isStraight(prev, idx, next)) return false;
-          bool prevTurns = isTurn(prevPrev, prev, idx);
-          bool nextTurns = isTurn(idx, next, nextNext);
-          if (!prevTurns && !nextTurns) return false;
-        } else if (pearl == 2) {
-          if (!isTurn(prev, idx, next)) return false;
-          bool prevStraight = isStraight(prevPrev, prev, idx);
-          bool nextStraight = isStraight(idx, next, nextNext);
-          if (!prevStraight || !nextStraight) return false;
-        }
-      }
-      return true;
-    }
-
-    int solutionsCount = 0;
-    final visited = List.filled(totalCells, false);
-    int steps = 0;
-
-    bool dfs(int curr, List<int> path) {
-      steps++;
-      if (steps > 10000) return false;
-      if (path.length >= 4) {
-        final startNeighbors = getNeighbors(startCell);
-        if (startNeighbors.contains(curr)) {
-          if (validateLoop(path)) {
-            solutionsCount++;
-            if (solutionsCount >= maxSolutions) return true;
-          }
-        }
-      }
-
-      final neighbors = getNeighbors(curr);
-      for (final next in neighbors) {
-        if (next == startCell) continue;
-        if (!visited[next]) {
-          if (path.length >= 2) {
-            int prevIdx = path[path.length - 2];
-            int pearlIdx = path[path.length - 1];
-            int pearlType = grid[pearlIdx];
-            if (pearlType == 1) {
-              if (!isStraight(prevIdx, pearlIdx, next)) continue;
-            } else if (pearlType == 2) {
-              if (!isTurn(prevIdx, pearlIdx, next)) continue;
-            }
-          }
-
-          if (path.length >= 3) {
-            int prevIdx = path[path.length - 2];
-            int pearlIdx = path[path.length - 1];
-            if (grid[prevIdx] == 2) {
-              if (!isStraight(prevIdx, pearlIdx, next)) continue;
-            }
-          }
-
-          visited[next] = true;
-          path.add(next);
-          if (dfs(next, path)) return true;
-          path.removeLast();
-          visited[next] = false;
-        }
-      }
-      return false;
-    }
-
-    visited[startCell] = true;
-    dfs(startCell, [startCell]);
-
-    return solutionsCount;
-  }
-
   void _ensureSolution() {
     if (_solveAttempted) return;
     _solveAttempted = true;
@@ -502,7 +234,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
     bool validateLoop(List<int> loop) {
       final K = loop.length;
       final loopSet = Set<int>.from(loop);
-      final bool isPrism = _playDailyMode && _dailyModifierType == 'prism';
       for (int i = 0; i < _grid.length; i++) {
         if (_grid[i] > 0 && !loopSet.contains(i)) return false;
       }
@@ -513,9 +244,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
         int idx = loop[j];
         int pearl = _grid[idx];
         if (pearl == 0) continue;
-        if (isPrism) {
-          pearl = (pearl == 1) ? 2 : 1;
-        }
 
         int prev = loop[(j - 1 + K) % K];
         int next = loop[(j + 1) % K];
@@ -796,13 +524,12 @@ class _MasyuScreenState extends State<MasyuScreen> {
     }
 
     // 3. Pearl rule validation along the reconstructed loop
-    final bool isPrism = _playDailyMode && _dailyModifierType == 'prism';
+    // NOTE: Prism ("Inverted Pearls") is a VISUAL-ONLY modifier — only the painter
+    // swaps pearl colors. Validation always uses the true pearl type so the puzzle
+    // stays solvable. Do not add an isPrism swap here.
     for (int i = 0; i < totalCells; i++) {
       int pearl = _grid[i];
       if (pearl == 0) continue;
-      if (isPrism) {
-        pearl = (pearl == 1) ? 2 : 1;
-      }
 
       int r = i ~/ _gridSize + 1, c = i % _gridSize + 1;
       if (!cellToLoopIndex.containsKey(i)) {

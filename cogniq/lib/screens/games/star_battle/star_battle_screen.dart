@@ -1045,7 +1045,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       } else {
         n = 10;
       }
-      final pool = ['regionContortion', 'timer'];
+      final pool = ['regionContortion', 'timer', 'glitch', 'zoom', 'mirror'];
       if (n > 7) {
         pool.add('twoStarMode');
       }
@@ -1054,7 +1054,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         levelIndex: _levelIndex,
         pool: pool,
         minActive: 2,
-        maxActive: 3,
+        maxActive: 4,
         smallGrid: (n <= 6),
       );
     } else {

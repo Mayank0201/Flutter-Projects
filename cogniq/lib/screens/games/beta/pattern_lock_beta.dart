@@ -56,10 +56,9 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
 
   int get _gridN {
     if (!_playDailyMode && _currentLevel >= 30) {
-      if (_currentLevel >= 80) {
-        return 6 + ((_currentLevel - 80) % 2); // Rotates 6, 7
-      }
-      return 7;
+      int base = _currentLevel >= 80 ? 6 + ((_currentLevel - 80) % 2) : 7;
+      if (_activeModifiers.contains('gridSize')) base += 1;
+      return base.clamp(3, 8);
     }
     if (_currentLevel < 5) return 3;
     if (_currentLevel < 10) return 4;
@@ -178,9 +177,19 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       _activeModifiers.clear();
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
         _activeModifiers.add(_dailyModifierType);
+      } else if (!_playDailyMode && _currentLevel >= 30) {
+        final baseN = _currentLevel >= 80 ? 6 + ((_currentLevel - 80) % 2) : 7;
+        _activeModifiers = RotationEngine.getActiveModifiers(
+          gameId: 'patternlock',
+          levelIndex: _currentLevel,
+          pool: ['pathComplexity', 'distractorDots', 'gridSize', 'boardTransform', 'memorizeTimer'],
+          minActive: 2,
+          maxActive: 3,
+          smallGrid: (baseN <= 5),
+        );
       }
       
-      final n = _gridN;
+      final n = _gridN; // now correctly reflects 'gridSize' if it was rolled above
       final rng = _playDailyMode
           ? Random(_currentLevel * 137 + 42)
           : RotationEngine.getDeterminism('patternlock', _currentLevel);
@@ -190,14 +199,6 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
       _distractorDots = [];
 
       if (!_playDailyMode && _currentLevel >= 30) {
-        _activeModifiers = RotationEngine.getActiveModifiers(
-          gameId: 'patternlock',
-          levelIndex: _currentLevel,
-          pool: ['pathComplexity', 'distractorDots', 'gridSize', 'boardTransform', 'memorizeTimer'],
-          minActive: 2,
-          maxActive: 3,
-          smallGrid: (n <= 5),
-        );
         targetLength = (5 + (_currentLevel % 3)).clamp(5, 8);
         if (_activeModifiers.contains('boardTransform')) {
           _transformType = 1 + rng.nextInt(3); // CW, 180, or Mirror
@@ -313,7 +314,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         _distractorDots = candidates.take(count).toList();
       }
 
-      bool hasMemorizeTimer = _playDailyMode || (_currentLevel >= 30 && _activeModifiers.contains('memorizeTimer'));
+      bool hasMemorizeTimer = false;
 
       if (hasMemorizeTimer) {
         double durationSeconds = max(1.5, targetLength * 0.6);
@@ -575,20 +576,24 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     settingsNotifier.hapticTap();
 
     bool isPrefix = true;
-    if (_userPattern.length > _targetPattern.length) {
+    final target = (_isEndgame || (_playDailyMode && _transformType > 0))
+        ? _targetPattern.map((idx) => _transformIndex(idx, _gridN, _transformType)).toList()
+        : _targetPattern;
+
+    if (_userPattern.length > target.length) {
       isPrefix = false;
     } else {
       for (int i = 0; i < _userPattern.length; i++) {
-        if (_userPattern[i] != _targetPattern[i]) {
+        if (_userPattern[i] != target[i]) {
           isPrefix = false;
           break;
         }
       }
     }
 
-    int nextDot = _targetPattern[0];
-    if (isPrefix && _userPattern.length < _targetPattern.length) {
-      nextDot = _targetPattern[_userPattern.length];
+    int nextDot = target[0];
+    if (isPrefix && _userPattern.length < target.length) {
+      nextDot = target[_userPattern.length];
     }
 
     setState(() {

@@ -62,7 +62,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       return _dailyModifierType == 'time_warp';
     }
     if (_levelIndex >= 30) {
-      return _activeModifiers.contains('numbersHide') && _levelIndex >= 45;
+      return _activeModifiers.contains('numbersHide');
     }
     return _chimpCycle >= 1;
   }
@@ -109,6 +109,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
   }
 
   Future<void> _loadPersistedLevel() async {
+    await HintManager.startLevel('chimp');
     _hintCount = await HintManager.getHints('chimp');
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
@@ -194,7 +195,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'chimp',
         levelIndex: _levelIndex,
-        pool: ['numbersHide', 'spatialSpread', 'positionShuffle', 'timer'],
+        pool: ['numbersHide', 'spatialSpread', 'positionShuffle', 'timer', 'glitch'],
         minActive: 2,
         maxActive: 3,
         smallGrid: _gridSize <= 4,
@@ -224,16 +225,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     _chaosShuffleDone = false;
     _glowingCells.clear();
 
-    if (_hasTimedExposure) {
-      final double exposureSecs = (_playDailyMode && _dailyModifierType == 'time_warp') ? 1.0 : max(2.0, 6.0 - _chimpCycle * 0.5);
-      Timer(Duration(milliseconds: (exposureSecs * 1000).toInt()), () {
-        if (mounted && !_started && !_failed && !_won) {
-          setState(() {
-            _exposureTimerFired = true;
-          });
-        }
-      });
-    }
+
 
     if (_isEndgame) {
       _timeLeft = 5 * _n;
@@ -313,15 +305,26 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
         : RotationEngine.getDeterminism('chimp', _levelIndex);
     final used = <(int,int)>{};
     final map = <int,(int,int)>{};
+    final bool spread = _activeModifiers.contains('spatialSpread');
+    (int,int)? last;
     int num = 1;
+    int stallGuard = 0;
     while (num <= _n) {
       final r = rng.nextInt(_gridSize);
       final c = rng.nextInt(_gridSize);
-      if (!used.contains((r,c))) {
-        used.add((r,c));
-        map[num] = (r,c);
-        num++;
+      if (used.contains((r,c))) continue;
+      if (spread && last != null && stallGuard < 500) {
+        final dist = (r - last.$1).abs() + (c - last.$2).abs();
+        if (dist < (_gridSize / 2).ceil()) {
+          stallGuard++;
+          continue; // force each next number further from the previous one
+        }
       }
+      stallGuard = 0;
+      used.add((r,c));
+      map[num] = (r,c);
+      last = (r,c);
+      num++;
     }
     return map;
   }
@@ -764,6 +767,23 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      if (_hasTimedExposure && !_exposureTimerFired && !_started && !_failed && !_won) ...[
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.patchesTeal,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _exposureTimerFired = true;
+                            });
+                          },
+                          child: Text('READY', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16)),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       if (_won && !_playDailyMode && !_isTutorialMode) 
                         AutoNextCountdown(
                           onNext: _nextLevel,

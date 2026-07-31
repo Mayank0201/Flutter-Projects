@@ -458,7 +458,10 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     if (_playDailyMode) return _dailyModifierType == 'whisper';
     return !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('whisper');
   }
-  bool get _isSpy => _playDailyMode && _dailyModifierType == 'spy';
+  bool get _isSpy {
+    if (_playDailyMode) return _dailyModifierType == 'spy';
+    return !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('spy');
+  }
   List<String> _spyOriginalWords = [];
   List<String> _spyScrambledWords = [];
   bool get _isEndgame => !_playDailyMode && _levelIndex >= 60;
@@ -1300,7 +1303,6 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                           GestureDetector(
                             onTap: () {
                               if (_won) return;
-                              if (_selectedIndices.contains(0)) return;
                               setState(() {
                                 _currentGuess.add(_level.centerLetter);
                                 _selectedIndices.add(0);

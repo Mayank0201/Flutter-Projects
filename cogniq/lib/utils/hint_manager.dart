@@ -12,20 +12,25 @@ class HintManager {
   static final Map<String, bool> _hintUsedThisLevel = {};
   static bool _lastClearWasSuccessful = false;
 
-  static Future<void> startLevel(String gameId) async {
-    await getHints(gameId);
-  }
-
-  static Future<int> getHints(String gameId) async {
-    // 1. Reset hint-used flag for the current level
+  // Call this exactly ONCE per level load — this is the ONLY place that resets the
+  // no-hint-used flag and checks/resets the clear streak. Every game already calls this
+  // at the top of its level-init function (_loadLevel / _initLevel / _loadPersistedLevel).
+  static Future<int> startLevel(String gameId) async {
     _hintUsedThisLevel[gameId] = false;
 
-    // 2. Check if we failed/restarted without clearing the last level
     if (!_lastClearWasSuccessful) {
       await AchievementManager.resetClearStreak();
     }
-    _lastClearWasSuccessful = false; // Reset clear check for the new level
+    _lastClearWasSuccessful = false;
 
+    return getHints(gameId);
+  }
+
+  // Pure read of the current hint count. Safe to call any number of times per level
+  // (after buying hints, after using a hint, on UI rebuilds, etc.) — it must NEVER
+  // mutate _hintUsedThisLevel or the clear streak. That mutation belongs ONLY in
+  // startLevel above. Do not add any side effects to this function.
+  static Future<int> getHints(String gameId) async {
     final prefs = await SharedPreferences.getInstance();
     final key = PrefsKeys.gameHints(gameId);
     if (!prefs.containsKey(key)) {
@@ -39,7 +44,7 @@ class HintManager {
     _hintUsedThisLevel[gameId] = true;
 
     final prefs = await SharedPreferences.getInstance();
-    final current = await getHints(gameId);
+    final current = await getHints(gameId); // non-mutating now — flag set above survives
     if (current > 0) {
       await prefs.setInt(PrefsKeys.gameHints(gameId), current - 1);
     }

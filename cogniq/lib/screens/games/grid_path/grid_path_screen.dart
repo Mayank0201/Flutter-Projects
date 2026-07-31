@@ -75,6 +75,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   }
 
   Future<void> _initLevel() async {
+    await HintManager.startLevel('zip');
     _hintCount = await HintManager.getHints('zip');
     final prefs = await SharedPreferences.getInstance();
     _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;

@@ -129,19 +129,19 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     }
     if (!_isDailyMode && _levelIndex >= 30) {
       if (_levelIndex >= 80) {
-        _rows = 10;
-        _cols = 10;
+        _rows = 14;
+        _cols = 8;
       } else if (_levelIndex >= 60 && _levelIndex < 80) {
         // Stage 4: Progressive grid size
         int tier = (_levelIndex - 60) ~/ 5;
         if (tier == 0) {
-          _rows = 8; _cols = 8;
+          _rows = 9; _cols = 7;
         } else if (tier == 1) {
-          _rows = 9; _cols = 9;
+          _rows = 11; _cols = 7;
         } else if (tier == 2) {
-          _rows = 9; _cols = 10;
+          _rows = 12; _cols = 8;
         } else {
-          _rows = 10; _cols = 10;
+          _rows = 14; _cols = 8;
         }
       } else if (_levelIndex >= 45 && _levelIndex < 60) {
         // Stage 3: Three-color mixing
@@ -177,25 +177,25 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         _cols = 7;
         break;
       case 5:
-        _rows = 8;
-        _cols = 8;
+        _rows = 9;
+        _cols = 7;
         break;
       case 6:
-        _rows = 9;
-        _cols = 9;
+        _rows = 11;
+        _cols = 7;
         break;
       case 7:
-        _rows = 9;
-        _cols = 10;
+        _rows = 12;
+        _cols = 8;
         break;
       case 8:
-        _rows = 10;
-        _cols = 10;
+        _rows = 14;
+        _cols = 8;
         break;
       default:
         final extraTiers = tier - 9;
-        _rows = (10 + extraTiers ~/ 2).clamp(10, 12);
-        _cols = (11 + (extraTiers + 1) ~/ 2).clamp(11, 13);
+        _rows = (14 + extraTiers).clamp(14, 16);
+        _cols = 8;
         break;
     }
   }
@@ -524,6 +524,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
   }
 
   Future<void> _loadPersistedLevel() async {
+    await HintManager.startLevel('hue');
     _hintCount = await HintManager.getHints('hue');
     final prefs = await SharedPreferences.getInstance();
     _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
