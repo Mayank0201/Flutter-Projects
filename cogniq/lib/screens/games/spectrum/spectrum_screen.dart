@@ -929,7 +929,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           GestureDetector(
-                            onTap: _showJumpToLevelDialog,
+                            onTap: null,
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -947,7 +947,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                                 ),
                                 if (!_isTutorialMode && !_isDailyMode) ...[
                                   const SizedBox(width: 4),
-                                  Icon(Icons.edit, size: 12, color: context.textPrimary),
+                                  Icon(null, size: 12, color: context.textPrimary),
                                 ],
                               ],
                             ),

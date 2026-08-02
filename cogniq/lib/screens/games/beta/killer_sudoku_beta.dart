@@ -669,7 +669,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             onPressed: _showHint,
           ),
           GestureDetector(
-            onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -679,7 +679,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                     Text(_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

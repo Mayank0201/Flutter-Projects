@@ -1020,7 +1020,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
         title: GestureDetector(
-          onTap: _playDailyMode ? null : _showJumpToLevelDialog,
+          onTap: null,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

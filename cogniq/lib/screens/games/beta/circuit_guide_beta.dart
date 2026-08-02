@@ -1020,7 +1020,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: (_isTutorialMode || _playDailyMode) ? null : _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -1037,7 +1037,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

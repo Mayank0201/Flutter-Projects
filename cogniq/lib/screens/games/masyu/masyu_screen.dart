@@ -906,7 +906,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -919,7 +919,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

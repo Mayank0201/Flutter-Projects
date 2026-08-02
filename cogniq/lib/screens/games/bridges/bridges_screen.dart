@@ -1006,7 +1006,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'bridges', 'Bridges'),
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -1019,7 +1019,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

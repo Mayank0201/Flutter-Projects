@@ -810,7 +810,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                             )
                           else if (!_isDailyMode)
                             GestureDetector(
-                              onTap: _showJumpToLevelDialog,
+                              onTap: null,
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [

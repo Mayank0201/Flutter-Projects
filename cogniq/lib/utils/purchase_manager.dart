@@ -12,7 +12,10 @@ import 'iap_backend.dart';
 enum PurchaseState { idle, pending, success, error, canceled }
 
 class PurchaseManager {
-  static InAppPurchase get _iap => InAppPurchase.instance;
+  @visibleForTesting
+  static InAppPurchase iapInstance = InAppPurchase.instance;
+
+  static InAppPurchase get _iap => iapInstance;
   static StreamSubscription<List<PurchaseDetails>>? _subscription;
 
   static List<ProductDetails> products = [];

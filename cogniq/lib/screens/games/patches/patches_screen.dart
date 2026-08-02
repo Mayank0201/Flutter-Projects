@@ -589,7 +589,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'chimp', 'Chimp Test'),
           ),
           GestureDetector(
-            onTap: _showJumpToLevelDialog,
+            onTap: null,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
@@ -608,7 +608,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.patchesTeal),
+                      const Icon(null, size: 12, color: AppTheme.patchesTeal),
                     ],
                   ],
                 ),
