@@ -24,6 +24,7 @@ class ChimpTestScreen extends StatefulWidget {
 }
 
 class _ChimpTestScreenState extends State<ChimpTestScreen> {
+  String? _forcedModifier;
   // Level config: (gridSize, numCount)
   static const List<(int, int)> _levels = [
     (3, 4), (3, 5), (3, 6),
@@ -168,16 +169,16 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     if (index < _levels.length) {
       return _levels[index];
     }
-    final cycleLevel = index - _levels.length;       // 0-based past hardcoded
-    final cycle = cycleLevel ~/ 11;                   // cycle index
-    final posInCycle = cycleLevel % 11;               // position within cycle
-    final numCount = (5 + posInCycle).clamp(5, 15);   // count goes 5 to 15
-    int gridSize;
-    if (cycle >= 2) {
-      gridSize = (numCount <= 6) ? 4 : (numCount <= 9 ? 5 : (numCount <= 12 ? 6 : 7));
+    final phase = index - 30;
+    int numCount;
+    if (phase < 13) {
+      numCount = 7 + (phase % 6); // 7 to 12
+    } else if (phase < 26) {
+      numCount = 7 + ((phase - 13) % 6); // 7 to 12
     } else {
-      gridSize = (numCount <= 6) ? 3 : (numCount <= 9 ? 4 : (numCount <= 12 ? 5 : 6));
+      numCount = 12 + ((phase - 26) % 4); // 12 to 15
     }
+    int gridSize = (numCount <= 6) ? 3 : (numCount <= 9 ? 4 : (numCount <= 12 ? 5 : 6));
     return (gridSize, numCount);
   }
 
@@ -192,14 +193,27 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     _gridSize = cfg.$1; _n = cfg.$2;
 
     if (!_playDailyMode && _levelIndex >= 30) {
+      int minActive = 2;
+      int maxActive = 3;
+      final phase = _levelIndex - 30;
+      if (phase < 13) {
+        minActive = 1; maxActive = 1;
+      } else if (phase < 26) {
+        minActive = 2; maxActive = 2;
+      } else {
+        minActive = 2; maxActive = 3;
+      }
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'chimp',
         levelIndex: _levelIndex,
-        pool: ['numbersHide', 'spatialSpread', 'positionShuffle', 'timer', 'glitch'],
-        minActive: 2,
-        maxActive: 3,
+        pool: ['numbersHide', 'spatialSpread', 'positionShuffle', 'timer', 'glitch', 'gravity'],
+        minActive: minActive,
+        maxActive: maxActive,
         smallGrid: _gridSize <= 4,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
     } else {
       _activeModifiers = {};
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
@@ -249,53 +263,99 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
     }
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'numbersHide':
+        return 'Numbers Hide: numbers vanish after the first tap';
+      case 'spatialSpread':
+        return 'Spatial Spread: numbers generated further apart';
+      case 'positionShuffle':
+        return 'Shuffle: numbers change position after 3 taps';
+      case 'timer':
+        return 'Timer: clear the board before time runs out';
+      case 'glitch':
+        return 'Glitch: numbers periodically turn to symbols';
+      case 'gravity':
+        return 'Gravity: numbers sink down after each tap';
+      default:
+        return '';
+    }
+  }
+
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 50',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _levelIndex + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['numbersHide', 'spatialSpread', 'positionShuffle', 'timer', 'glitch', 'gravity'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.patchesTeal),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _levelIndex = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _levelIndex = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.patchesTeal)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -435,7 +495,10 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
         _shuffleUntappedNumbers();
         _chaosShuffleDone = true;
       }
-      if (_hasDecoyTiles) {
+      final bool hasGravity = _forcedModifier == 'gravity' ||
+          (_activeModifiers.contains('gravity')) ||
+          _hasDecoyTiles;
+      if (hasGravity) {
         // Apply gravity to move things around as an extra challenge
         _sinkUntappedNumbers();
       }
@@ -589,7 +652,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'chimp', 'Chimp Test'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
@@ -608,7 +671,7 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.patchesTeal),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.patchesTeal),
                     ],
                   ],
                 ),
@@ -646,6 +709,20 @@ class _ChimpTestScreenState extends State<ChimpTestScreen> {
                           style: GoogleFonts.outfit(fontSize: context.scale(17), fontWeight: FontWeight.w700,
                             color: _won ? AppTheme.patchesTeal : Colors.redAccent)),
                       const SizedBox(height: 16),
+                      if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: Text(
+                            _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.patchesTeal.withOpacity(0.9),
+                            ),
+                          ),
+                        ),
+                      ],
                       // Grid
                       SizedBox(
                         width: gridW,

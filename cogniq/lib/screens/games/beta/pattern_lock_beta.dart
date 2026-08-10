@@ -27,6 +27,7 @@ class PatternLockBetaScreen extends StatefulWidget {
 }
 
 class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
+  String? _forcedModifier;
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
@@ -161,6 +162,25 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
     });
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'pathComplexity':
+        return 'Complexity: extra bends and intersections';
+      case 'distractorDots':
+        return 'Distractors: fake dots shown during memorization';
+      case 'gridSize':
+        return 'Grid Size: larger grid dimension';
+      case 'boardTransform':
+        return 'Mirror: pattern is mirrored or rotated';
+      case 'memorizeTimer':
+        return 'Timer: pattern hides automatically after a few seconds';
+      case 'eclipse':
+        return 'Eclipse: screen blackouts occur periodically';
+      default:
+        return '';
+    }
+  }
+
   void _loadLevel() {
     HintManager.startLevel('pattern_lock');
     _memorizeTimer?.cancel();
@@ -182,11 +202,14 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'patternlock',
           levelIndex: _currentLevel,
-          pool: ['pathComplexity', 'distractorDots', 'gridSize', 'boardTransform', 'memorizeTimer'],
+          pool: ['pathComplexity', 'distractorDots', 'gridSize', 'boardTransform', 'memorizeTimer', 'eclipse'],
           minActive: 2,
           maxActive: 3,
           smallGrid: (baseN <= 5),
         );
+        if (_forcedModifier != null) {
+          _activeModifiers = {_forcedModifier!};
+        }
       }
       
       final n = _gridN; // now correctly reflects 'gridSize' if it was rolled above
@@ -305,16 +328,37 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
         int count = 2 + (_currentLevel - 30) ~/ 10;
         if (count > 5) count = 5;
         final List<int> candidates = [];
+        final patternSet = _targetPattern.toSet();
         for (int i = 0; i < n * n; i++) {
-          if (!_targetPattern.contains(i)) {
+          if (patternSet.contains(i)) continue;
+          final rowA = i ~/ n;
+          final colA = i % n;
+          bool isNear = false;
+          for (final p in patternSet) {
+            final rowB = p ~/ n;
+            final colB = p % n;
+            if ((rowA - rowB).abs() + (colA - colB).abs() <= 2) {
+              isNear = true;
+              break;
+            }
+          }
+          if (isNear) {
             candidates.add(i);
+          }
+        }
+        if (candidates.isEmpty) {
+          for (int i = 0; i < n * n; i++) {
+            if (!patternSet.contains(i)) {
+              candidates.add(i);
+            }
           }
         }
         candidates.shuffle(rng);
         _distractorDots = candidates.take(count).toList();
       }
 
-      bool hasMemorizeTimer = false;
+      bool hasMemorizeTimer = _forcedModifier == 'memorizeTimer' ||
+          (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('memorizeTimer'));
 
       if (hasMemorizeTimer) {
         double durationSeconds = max(1.5, targetLength * 0.6);
@@ -507,52 +551,79 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 50',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['pathComplexity', 'distractorDots', 'gridSize', 'boardTransform', 'memorizeTimer', 'eclipse'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -707,7 +778,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -724,7 +795,7 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -787,6 +858,20 @@ class _PatternLockBetaScreenState extends State<PatternLockBetaScreen> {
                         ],
 
                         const SizedBox(height: 12),
+                        if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Text(
+                              _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.dustyMauve.withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                        ],
                         RepaintBoundary(
                           child: GestureDetector(
                             onPanStart: _onPanStart,

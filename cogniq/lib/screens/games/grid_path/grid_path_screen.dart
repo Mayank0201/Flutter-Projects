@@ -34,6 +34,7 @@ class GridPathScreen extends StatefulWidget {
 }
 
 class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProviderStateMixin {
+  String? _forcedModifier;
   int _levelIndex = 0;
   late ZipLevel _level;
   bool _isTutorialMode = false;
@@ -59,11 +60,15 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
   bool _gameOver = false;
+  bool _isMemorizingPhase = false;
+  int _memorizeTimeLeft = 10;
+  Timer? _memorizeTimer;
 
   @override
   void dispose() {
     _blindStepsTimer?.cancel();
     _gameTimer?.cancel();
+    _memorizeTimer?.cancel();
     super.dispose();
   }
 
@@ -347,25 +352,29 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       activeMods = RotationEngine.getActiveModifiers(
         gameId: 'zip',
         levelIndex: levelIndex,
-        pool: ['waypointSparsity', 'nonRectShape', 'timer'],
+        pool: ['waypointSparsity', 'nonRectShape', 'timer', 'retro', 'minimal'],
         minActive: 2,
         maxActive: 3,
         smallGrid: isSmallGrid,
       );
-      _activeModifiers = activeMods;
     } else if (levelIndex < 5) {
       gridSize = 3;
-      _activeModifiers = {};
     } else if (levelIndex < 15) {
       gridSize = 4;
-      _activeModifiers = {};
     } else if (levelIndex < 30) {
       gridSize = 5;
-      _activeModifiers = {};
     } else {
       gridSize = 6;
-      _activeModifiers = {};
     }
+
+    if (_forcedModifier != null) {
+      activeMods = {_forcedModifier!};
+    }
+
+    if (activeMods.contains('nonRectShape') && !activeMods.contains('timer')) {
+      activeMods = Set.from(activeMods)..add('timer');
+    }
+    _activeModifiers = activeMods;
 
     final int rows = gridSize;
     final int cols = gridSize;
@@ -405,7 +414,8 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     List<(int, int)> path = [];
     final successfulWalls = <String>{};
 
-    final bool isNonRect = !_isDailyMode && levelIndex >= 30 && activeMods.contains('nonRectShape');
+    final bool isNonRect = (_isDailyMode && _dailyModifierType == 'nonRectShape') ||
+        (!_isDailyMode && activeMods.contains('nonRectShape'));
 
     if (!isNonRect) {
       // Rectangular grid: generate twisty Hamiltonian path via backbite scramble
@@ -511,6 +521,23 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     return ZipLevel(rows: rows, cols: cols, waypoints: waypoints);
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'waypointSparsity':
+        return 'Sparse: fewer waypoints shown';
+      case 'nonRectShape':
+        return 'Non-Rect Grid: custom grid borders';
+      case 'timer':
+        return 'Timer: clear before time runs out';
+      case 'retro':
+        return 'Retro: visual path styling';
+      case 'minimal':
+        return 'Minimal: waypoints disappear after 10s';
+      default:
+        return '';
+    }
+  }
+
   void _loadLevel([SharedPreferences? prefs]) {
     _gameTimer?.cancel();
     _timeLeft = -1;
@@ -560,17 +587,33 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
     _blindStepsTimer?.cancel();
     _hideGridPathElements = false;
-    if (_isDailyMode && _dailyModifierType == 'minimal') {
-      _blindStepsTimer = Timer(const Duration(seconds: 1), () {
+    _memorizeTimer?.cancel();
+    _isMemorizingPhase = false;
+
+    final bool isMinimal = _forcedModifier == 'minimal' ||
+        (_isDailyMode && _dailyModifierType == 'minimal') ||
+        (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('minimal'));
+    if (isMinimal) {
+      _isMemorizingPhase = true;
+      _memorizeTimeLeft = 10;
+      _memorizeTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
           setState(() {
-            _hideGridPathElements = true;
+            if (_memorizeTimeLeft > 1) {
+              _memorizeTimeLeft--;
+            } else {
+              _memorizeTimer?.cancel();
+              _isMemorizingPhase = false;
+              _hideGridPathElements = true;
+            }
           });
         }
       });
     }
 
-    if (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('timer')) {
+    final bool startTimer = (_isDailyMode && _dailyModifierType == 'timer') ||
+        (!_isDailyMode && _activeModifiers.contains('timer'));
+    if (startTimer) {
       _timeLeft = 20 + (_level.rows * 12);
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -592,52 +635,79 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 100',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _levelIndex + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['waypointSparsity', 'nonRectShape', 'timer', 'retro', 'minimal'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.zipPink),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _levelIndex = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _levelIndex = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.zipPink)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -886,7 +956,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
           ),
           IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
           InkWell(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -903,7 +973,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             ),
                   if (!_isTutorialMode && !_isDailyMode) ...[
                     const SizedBox(width: 4),
-                    const Icon(null, size: 14, color: AppTheme.zipPink),
+                    const Icon(Icons.edit, size: 14, color: AppTheme.zipPink),
                   ],
                 ],
               ),
@@ -949,19 +1019,54 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                     ),
                   Text('${_path.length} / ${_level.totalCellsToVisit} cells',
                     style: GoogleFonts.outfit(color: context.textMuted, fontSize: context.scale(12))),
-                  const SizedBox(height: 4),
-                  if (_msg.isNotEmpty) Padding(
+                   const SizedBox(height: 4),
+                   if (_isMemorizingPhase) ...[
+                     Container(
+                       width: double.infinity,
+                       margin: const EdgeInsets.only(bottom: 12),
+                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                       decoration: BoxDecoration(
+                         color: Colors.redAccent.withOpacity(0.12),
+                         borderRadius: BorderRadius.circular(8),
+                       ),
+                       child: Text(
+                         '📝 MEMORIZE THE PATH: $_memorizeTimeLeft s',
+                         style: GoogleFonts.spaceGrotesk(
+                           color: Colors.redAccent,
+                           fontWeight: FontWeight.bold,
+                           fontSize: 14,
+                           letterSpacing: 1.2,
+                         ),
+                         textAlign: TextAlign.center,
+                       ),
+                     ),
+                   ],
+                   if (_msg.isNotEmpty) Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Text(_msg, style: GoogleFonts.outfit(color: _won ? AppTheme.zipPink : context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center),
                   ),
-                  const SizedBox(height: 12),
-                  Builder(
+                   const SizedBox(height: 12),
+                   if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                     Padding(
+                       padding: const EdgeInsets.only(bottom: 8.0),
+                       child: Text(
+                         _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                         textAlign: TextAlign.center,
+                         style: GoogleFonts.outfit(
+                           fontSize: 13,
+                           fontWeight: FontWeight.w600,
+                           color: AppTheme.zipPink.withOpacity(0.9),
+                         ),
+                       ),
+                     ),
+                   ],
+                   Builder(
                     builder: (context) {
                       Widget gridWidget = RepaintBoundary(
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onTapUp: (d) {
-                            if (_won) return;
+                            if (_won || _isMemorizingPhase) return;
                             final c = _cellAtLocal(d.localPosition);
                             if (c != null) {
                               final r = c.$1;
@@ -999,7 +1104,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             }
                           },
                           onPanStart: (d) {
-                            if (_won) return;
+                            if (_won || _isMemorizingPhase) return;
                             final c = _cellAtLocal(d.localPosition);
                             if (c != null) {
                               if (_path.isEmpty) {
@@ -1036,7 +1141,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             }
                           },
                           onPanUpdate: (d) {
-                            if (_won || !_dragActive) return;
+                            if (_won || !_dragActive || _isMemorizingPhase) return;
                             final c = _cellAtLocal(d.localPosition);
                             if (c != null) {
                               if (_path.isNotEmpty && c == _path.last) return; // Ignore duplicate cell updates to prevent lag
@@ -1071,26 +1176,61 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                             _saveState();
                           },
                           child: SizedBox(
-                            key: _gridKey, width: sw, height: cellH * _level.rows,
-                            child: CustomPaint(
-                              painter: _ZipPainter(
-                                  level: _level,
-                                  path: List.from(_path),
-                                  solution: _solution,
-                                  cellW: cellW,
-                                  cellH: cellH,
-                                  won: _won,
-                                  cellBgColor: context.bgCard,
-                                  gridColor: context.textMuted.withAlpha(70),
-                                  pathColor: AppTheme.zipPink,
-                                  fillColor: AppTheme.zipPink.withAlpha(35),
-                                  visitedWpColor: AppTheme.softSage,
-                                  modifierType: _dailyModifierType,
-                                  hideWaypoints: _hideGridPathElements,
-                                  isDarkMode: Theme.of(context).brightness == Brightness.dark,
-                                ),
-                            ),
-                          ),
+                             key: _gridKey, width: sw, height: cellH * _level.rows,
+                             child: Stack(
+                               children: [
+                                 Positioned.fill(
+                                   child: CustomPaint(
+                                     painter: _ZipPainter(
+                                         level: _level,
+                                         path: List.from(_path),
+                                         solution: _solution,
+                                         cellW: cellW,
+                                         cellH: cellH,
+                                         won: _won,
+                                         cellBgColor: context.bgCard,
+                                         gridColor: context.textMuted.withAlpha(70),
+                                         pathColor: AppTheme.zipPink,
+                                         fillColor: AppTheme.zipPink.withAlpha(35),
+                                         visitedWpColor: AppTheme.softSage,
+                                         modifierType: _forcedModifier ?? (_isDailyMode ? _dailyModifierType : (_activeModifiers.contains('retro') ? 'retro' : '')),
+                                         hideWaypoints: _hideGridPathElements,
+                                         isDarkMode: Theme.of(context).brightness == Brightness.dark,
+                                       ),
+                                   ),
+                                 ),
+                                 if (_isMemorizingPhase)
+                                   Positioned.fill(
+                                     child: Container(
+                                       color: Colors.black.withOpacity(0.5),
+                                       child: Center(
+                                         child: Column(
+                                           mainAxisAlignment: MainAxisAlignment.center,
+                                           children: [
+                                             Text(
+                                               'Memorize the path!',
+                                               style: GoogleFonts.outfit(
+                                                 fontSize: 22,
+                                                 fontWeight: FontWeight.bold,
+                                                 color: Colors.white,
+                                               ),
+                                             ),
+                                             const SizedBox(height: 8),
+                                             Text(
+                                               'Starting in $_memorizeTimeLeft s...',
+                                               style: GoogleFonts.outfit(
+                                                 fontSize: 16,
+                                                 color: Colors.white70,
+                                               ),
+                                             ),
+                                           ],
+                                         ),
+                                       ),
+                                     ),
+                                   ),
+                               ],
+                             ),
+                           ),
                         ),
                       );
 

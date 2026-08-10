@@ -145,36 +145,36 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         }
       } else if (_levelIndex >= 45 && _levelIndex < 60) {
         // Stage 3: Three-color mixing
-        _rows = 7;
-        _cols = 7;
+        _rows = 8;
+        _cols = 8;
       } else {
         // Stage 2: Distractor cards
-        _rows = 6;
-        _cols = 6;
+        _rows = 8;
+        _cols = 8;
       }
       return;
     }
     final tier = _levelIndex ~/ 5;
     switch (tier) {
       case 0:
-        _rows = 3;
-        _cols = 3;
-        break;
-      case 1:
-        _rows = 4;
-        _cols = 4;
-        break;
-      case 2:
         _rows = 5;
         _cols = 5;
         break;
-      case 3:
+      case 1:
         _rows = 6;
         _cols = 6;
         break;
-      case 4:
+      case 2:
         _rows = 7;
         _cols = 7;
+        break;
+      case 3:
+        _rows = 8;
+        _cols = 8;
+        break;
+      case 4:
+        _rows = 8;
+        _cols = 8;
         break;
       case 5:
         _rows = 9;
@@ -240,11 +240,14 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'spectrum',
         levelIndex: _levelIndex,
-        pool: ['monochrome', 'prism', 'timer', 'moveLimit', 'gradientComplexity', 'distractors'],
+        pool: ['monochrome', 'prism', 'timer', 'moveLimit', 'distractors'],
         minActive: 2,
         maxActive: 3,
         smallGrid: isSmallGrid,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
     } else {
       _activeModifiers = {};
     }
@@ -273,7 +276,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       _cBL = HSLColor.fromAHSL(1.0, h3, 0.80, 0.55).toColor();
       _cBR = HSLColor.fromAHSL(1.0, h4, 0.80, 0.55).toColor();
 
-      bool isThreeColor = (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('gradientComplexity'));
+      bool isThreeColor = _levelIndex >= 15 || (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('gradientComplexity'));
       if (isThreeColor) {
         _cBR = Color.lerp(_cBL, _cTR, 0.5)!;
       }
@@ -392,7 +395,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
 
     if (!_isDailyMode && _levelIndex >= 30) {
       if (_activeModifiers.contains('moveLimit')) {
-        _movesLeft = 15 + (_rows * _cols ~/ 3);
+        _movesLeft = 25 + (_rows * _cols ~/ 2);
       }
       if (_activeModifiers.contains('timer')) {
         _timeLeft = 5 * _rows * _cols;
@@ -505,19 +508,36 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     } catch (_) {}
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'monochrome':
+        return 'Monochrome: grid is grayscale';
+      case 'prism':
+        return 'Prism: colors shift dynamically over time';
+      case 'timer':
+        return 'Timer: solve before time runs out';
+      case 'moveLimit':
+        return 'Moves: complete within limit';
+      case 'distractors':
+        return 'Distractors: random false color tiles appear';
+      default:
+        return '';
+    }
+  }
+
   void _startPrismTimer() {
     _prismTimer?.cancel();
     bool isPrism = (_isDailyMode && _dailyModifierType == 'prism') ||
         (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('prism'));
     if (isPrism) {
       _prismHueOffset = 0.0;
-      _prismTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      _prismTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
         if (!mounted || _won) {
           timer.cancel();
           return;
         }
         setState(() {
-          _prismHueOffset = (_prismHueOffset + 2.0) % 360.0;
+          _prismHueOffset = (_prismHueOffset + 1.0) % 360.0;
         });
       });
     }
@@ -799,11 +819,14 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
-        title: Text(
-          _isTutorialMode ? 'Tutorial' : 'Spectrum',
-          style: GoogleFonts.outfit(
-            fontWeight: FontWeight.bold,
-            fontSize: context.scale(18),
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            _isTutorialMode ? 'Tutorial' : 'Spectrum',
+            style: GoogleFonts.outfit(
+              fontWeight: FontWeight.bold,
+              fontSize: context.scale(18),
+            ),
           ),
         ),
         actions: [
@@ -925,55 +948,56 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
                   child: Row(
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
-                            onTap: null,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _isTutorialMode
-                                      ? 'Tutorial  •  ${_rows}×${_cols}'
-                                      : _isDailyMode
-                                          ? 'Daily Challenge  •  ${_rows}×${_cols}'
-                                          : 'Level ${_levelIndex + 1}  •  ${_rows}×${_cols}',
-                                  style: AppTheme.numberStyle(
-                                    fontSize: context.scale(14),
-                                    fontWeight: FontWeight.bold,
-                                    color: context.textPrimary,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            GestureDetector(
+                              onTap: _showJumpToLevelDialog,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _isTutorialMode
+                                        ? 'Tutorial  •  ${_rows}×${_cols}'
+                                        : _isDailyMode
+                                            ? 'Daily Challenge  •  ${_rows}×${_cols}'
+                                            : 'Level ${_levelIndex + 1}  •  ${_rows}×${_cols}',
+                                    style: AppTheme.numberStyle(
+                                      fontSize: context.scale(14),
+                                      fontWeight: FontWeight.bold,
+                                      color: context.textPrimary,
+                                    ),
                                   ),
-                                ),
-                                if (!_isTutorialMode && !_isDailyMode) ...[
-                                  const SizedBox(width: 4),
-                                  Icon(null, size: 12, color: context.textPrimary),
+                                  if (!_isTutorialMode && !_isDailyMode) ...[
+                                    const SizedBox(width: 4),
+                                    Icon(Icons.edit, size: 12, color: context.textPrimary),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _isTutorialMode
-                                ? (_tutorialCompleted ? '✓ Solved!' : 'Drag/Swap tiles to order the spectrum')
-                                : _won
-                                    ? '✓ Solved!'
-                                    : (_movesLeft >= 0
-                                        ? 'Swaps left: $_movesLeft · tap 👁 to preview'
-                                        : 'Swap tiles · tap 👁 to preview'),
-                            style: GoogleFonts.outfit(
-                              fontSize: context.scale(11),
-                              color: (_won || _tutorialCompleted)
-                                  ? Colors.green
-                                  : context.textSecondary,
-                              fontWeight: (_won || _tutorialCompleted)
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
+                            const SizedBox(height: 2),
+                            Text(
+                              _isTutorialMode
+                                  ? (_tutorialCompleted ? '✓ Solved!' : 'Drag/Swap tiles to order the spectrum')
+                                  : _won
+                                      ? '✓ Solved!'
+                                      : (_movesLeft >= 0
+                                          ? 'Swaps left: $_movesLeft · tap 👁 to preview'
+                                          : 'Swap tiles · tap 👁 to preview'),
+                              style: GoogleFonts.outfit(
+                                fontSize: context.scale(11),
+                                color: (_won || _tutorialCompleted)
+                                    ? Colors.green
+                                    : context.textSecondary,
+                                fontWeight: (_won || _tutorialCompleted)
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                      const Spacer(),
                       // Correct tiles badge
                       if (!_won)
                         Column(
@@ -1003,6 +1027,20 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                     ],
                   ),
                 ),
+                if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
+                    child: Text(
+                      _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: accentColor.withOpacity(0.9),
+                      ),
+                    ),
+                  ),
+                ],
                 // Progress bar
                 if (!_won)
                   Padding(
@@ -1027,6 +1065,20 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
                     ),
                   ),
                 const SizedBox(height: 20),
+                if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(
+                      _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: accentColor.withOpacity(0.9),
+                      ),
+                    ),
+                  ),
+                ],
                 // Gradient board
                 Center(
                   child: Container(

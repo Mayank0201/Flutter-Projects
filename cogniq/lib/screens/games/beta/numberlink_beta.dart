@@ -27,6 +27,7 @@ class NumberlinkBetaScreen extends StatefulWidget {
 }
 
 class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
+  String? _forcedModifier;
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
@@ -42,7 +43,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   bool _shuffleActive = false;
 
   List<Color> get _colors {
-    if (_playDailyMode && _dailyModifierType == 'monochrome') {
+    final bool monochrome = _forcedModifier == 'monochrome' ||
+        (_playDailyMode && _dailyModifierType == 'monochrome') ||
+        (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('monochrome'));
+    if (monochrome) {
       return const [
         Color(0xFFE0E0E0), // Very light grey
         Color(0xFF9E9E9E), // Medium grey
@@ -117,6 +121,23 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     }
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'gridSize_pairCount':
+        return 'Grid Size: larger grid and extra pairs';
+      case 'walls':
+        return 'Walls: obstacle cells placed on the board';
+      case 'tortuosity':
+        return 'Winding: paths must cover 75%+ of the grid';
+      case 'timer':
+        return 'Timer: solve before time runs out';
+      case 'monochrome':
+        return 'Monochrome: color pairs are grayscale shades';
+      default:
+        return '';
+    }
+  }
+
   void _loadLevel() {
     HintManager.startLevel('colour_link');
     setState(() {
@@ -169,9 +190,12 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'colourlink',
           levelIndex: _currentLevel,
-          pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer'],
+          pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer', 'monochrome'],
           smallGrid: _gridSize <= 5,
         );
+        if (_forcedModifier != null) {
+          _activeModifiers = {_forcedModifier!};
+        }
         if (_activeModifiers.contains('gridSize_pairCount')) {
           _gridSize = (_gridSize + 1).clamp(4, 9);
           _numColors = (_numColors + 1).clamp(2, (_gridSize * _gridSize) ~/ 4);
@@ -484,7 +508,10 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
     }
 
     if (allConnected) {
-      if (totalPathCells == _gridSize * _gridSize - _wallCells.length) {
+      final int requiredCells = _activeModifiers.contains('tortuosity')
+          ? ((_gridSize * _gridSize - _wallCells.length) * 0.75).ceil()
+          : (_gridSize * _gridSize - _wallCells.length);
+      if (totalPathCells >= requiredCells) {
         if (_isTutorialMode) {
           if (!_tutorialCompleted) {
             AudioManager.playSuccess();
@@ -583,52 +610,79 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 50',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['gridSize_pairCount', 'walls', 'tortuosity', 'timer', 'monochrome'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -789,7 +843,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -806,7 +860,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -819,12 +873,12 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
         accentColor: AppTheme.dustyMauve,
         child: Stack(
           children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
-            child: Column(
-              children: [
-                Expanded(
-                  child: Center(
+          SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 36),
+              child: Column(
+                children: [
+                  Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -832,7 +886,22 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                           'Connect all matching colors & fill every cell on the board.',
                           style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 12),
+                        if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Text(
+                              _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.dustyMauve.withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
                         RepaintBoundary(
                           child: Builder(
                             builder: (context) {
@@ -876,7 +945,6 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
                       ],
                     ),
                   ),
-                ),
                 if (!_isSuccess)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -905,6 +973,7 @@ class _NumberlinkBetaScreenState extends State<NumberlinkBetaScreen> {
               ],
             ),
           ),
+        ),
           if (_isSuccess && _playDailyMode)
             Positioned.fill(
               child: ChallengeClearedOverlay(

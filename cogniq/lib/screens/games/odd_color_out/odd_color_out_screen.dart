@@ -27,6 +27,41 @@ class OddColorOutScreen extends StatefulWidget {
 }
 
 class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTickerProviderStateMixin {
+  String? _forcedModifier;
+  Set<String> _activeModifiers = {};
+
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_isDailyMode) return _dailyModifierType == name;
+    return !_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains(name);
+  }
+
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'hueChannel':
+        return 'Hue Shift: odd tile differs by color, not brightness';
+      case 'noise':
+        return 'Noise: colors jitter randomly';
+      case 'gradient':
+        return 'Gradient: background color varies across the grid';
+      case 'timer':
+        return 'Timer: find the odd tile before time runs out';
+      case 'monochrome':
+        return 'Monochrome: grid is grayscale';
+      case 'whisper':
+        return 'Whisper: ultra-subtle color difference';
+      case 'prism':
+        return 'Prism: grid is split diagonally into two base colors';
+      case 'eclipse':
+        return 'Eclipse: screen blackouts occur periodically';
+      case 'fog':
+        return 'Fog: overlay shadows obscure the grid';
+      case 'retro':
+        return 'Retro: CRT-style scanline overlay';
+      default:
+        return '';
+    }
+  }
   int _levelIndex = 0;
   bool _shuffleActive = false;
   int _hintCount = 0;
@@ -119,7 +154,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       }
     }
 
-    final double saturation = (_isDailyMode && _dailyModifierType == 'monochrome') ? 0.0 : (0.55 + rand.nextDouble() * 0.35); 
+    final double saturation = _isModActive('monochrome') ? 0.0 : (0.55 + rand.nextDouble() * 0.35); 
     final double lightness = 0.40 + rand.nextDouble() * 0.35;
 
     double baseHue = rand.nextDouble() * 360.0;
@@ -135,16 +170,26 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
 
     if (!_isDailyMode) {
       if (_levelIndex >= 30) {
-        final activeMods = RotationEngine.getActiveModifiers(
+        var activeMods = RotationEngine.getActiveModifiers(
           gameId: 'oddcolorout',
           levelIndex: _levelIndex,
-          pool: ['hueChannel', 'noise', 'gradient', 'timer'],
+          pool: ['hueChannel', 'noise', 'gradient', 'timer', 'monochrome', 'whisper', 'prism', 'eclipse', 'fog'],
+          minActive: 2,
+          maxActive: 4,
           smallGrid: _gridSide <= 5,
         );
+        if (_forcedModifier != null) {
+          activeMods = {_forcedModifier!};
+        }
+        _activeModifiers = activeMods;
         isHueChannel = activeMods.contains('hueChannel');
         hasNoise = activeMods.contains('noise');
         hasGradient = activeMods.contains('gradient');
+      } else {
+        _activeModifiers = {};
       }
+    } else {
+      _activeModifiers = {};
     }
 
     double delta = 0.0;
@@ -160,7 +205,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
         delta = 0.10 - (_levelIndex / 29.0) * 0.06;
         if (delta < 0.035) delta = 0.035;
       }
-      if (_isDailyMode && _dailyModifierType == 'whisper') {
+      if (_isModActive('whisper')) {
         delta = 0.015;
       }
       double oddLightness = lightness;
@@ -220,7 +265,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
           final double bLight = 0.35 + rand.nextDouble() * 0.30;
           return HSLColor.fromAHSL(1.0, bHue, bSat, bLight).toColor();
         }
-      } else if (_isDailyMode && _dailyModifierType == 'prism') {
+      } else if (_isModActive('prism')) {
         final double baseHue2 = (baseHue + 120.0) % 360.0;
         final Color baseColor2 = HSLColor.fromAHSL(1.0, baseHue2, saturation, lightness).toColor();
         final bool isTopLeft = (r + c < side);
@@ -296,13 +341,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     });
 
     if (!keepTimer && !_isDailyMode && _levelIndex >= 30) {
-      final activeMods = RotationEngine.getActiveModifiers(
-        gameId: 'oddcolorout',
-        levelIndex: _levelIndex,
-        pool: ['hueChannel', 'noise', 'gradient', 'timer'],
-        smallGrid: _gridSide <= 5,
-      );
-      if (activeMods.contains('timer')) {
+      if (_activeModifiers.contains('timer')) {
         _timeLeft = 25;
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -331,23 +370,23 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   void _startDailyTimers() {
     _eclipseTimer?.cancel();
     _chaosTimer?.cancel();
-    if (_isDailyMode) {
-      if (_dailyModifierType == 'eclipse') {
-        _isShadowed = true;
-        _eclipseTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-          if (!mounted) {
-            timer.cancel();
-            return;
-          }
-          if (_gameOver || _levelCleared) {
-            timer.cancel();
-            return;
-          }
-          setState(() {
-            _isShadowed = !_isShadowed;
-          });
+    if (_isModActive('eclipse')) {
+      _isShadowed = true;
+      _eclipseTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        if (_gameOver || _levelCleared) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          _isShadowed = !_isShadowed;
         });
-      } else if (_dailyModifierType == 'chaos' || _dailyModifierType == 'time_warp') {
+      });
+    }
+    if (_isDailyMode && (_dailyModifierType == 'chaos' || _dailyModifierType == 'time_warp')) {
         final int interval = (_dailyModifierType == 'time_warp') ? 2 : 4;
         _chaosTimeLeft = interval;
         _chaosTickId = 0;
@@ -384,7 +423,6 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
           }
         });
       }
-    }
   }
 
   Future<void> _loadPersistedLevel() async {
@@ -414,53 +452,79 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   }
 
   void _showJumpToLevelDialog() {
-    if (!kDebugMode) return;
-    final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 100',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _levelIndex + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['hueChannel', 'noise', 'gradient', 'timer', 'monochrome', 'whisper', 'prism', 'eclipse', 'fog', 'retro'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('oddcolor')),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _levelIndex = val - 1;
-                  _generateLevelColors();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _levelIndex = target - 1;
+                        _forcedModifier = selectedMod;
+                        _generateLevelColors();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.accentFor('oddcolor'))),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -810,7 +874,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                             )
                           else if (!_isDailyMode)
                             GestureDetector(
-                              onTap: null,
+                              onTap: _showJumpToLevelDialog,
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -821,7 +885,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                                     fontWeight: FontWeight.bold,
                                   ),
                                   const SizedBox(width: 4),
-                                  Icon(null, size: 14, color: context.textPrimary),
+                                  Icon(Icons.edit, size: 14, color: context.textPrimary),
                                 ],
                               ),
                             )
@@ -849,6 +913,20 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                   ),
                 ),
                 const SizedBox(height: 16),
+                if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(
+                      _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.accentFor('oddcolor').withOpacity(0.9),
+                      ),
+                    ),
+                  ),
+                ],
                 // Grid container
                 AnimatedBuilder(
                   animation: _shakeAnimation,
@@ -864,7 +942,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                       width: gridW,
                       height: gridW,
                       child: FogOverlay(
-                        enabled: _isDailyMode && _dailyModifierType == 'fog',
+                        enabled: _isModActive('fog'),
                         radius: cellW * 1.5,
                         child: Stack(
                           children: [
@@ -901,7 +979,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                                     ),
                                     child: Stack(
                                       children: [
-                                        if (_isDailyMode && _dailyModifierType == 'retro')
+                                        if (_isModActive('retro'))
                                           Positioned.fill(
                                             child: ClipRRect(
                                               borderRadius: BorderRadius.circular(min(12.0, 48.0 / side)),
@@ -924,7 +1002,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                                 );
                               },
                             ),
-                            if (_isDailyMode && _dailyModifierType == 'eclipse')
+                            if (_isModActive('eclipse'))
                               IgnorePointer(
                                 child: AnimatedOpacity(
                                   opacity: _isShadowed ? 0.94 : 0.0,

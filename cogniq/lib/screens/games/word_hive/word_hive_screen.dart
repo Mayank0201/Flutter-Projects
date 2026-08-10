@@ -432,6 +432,7 @@ class WordHiveScreen extends StatefulWidget {
 }
 
 class _WordHiveScreenState extends State<WordHiveScreen> {
+  String? _forcedModifier;
   int _levelIndex = 0;
   late SpellingBeeLevel _level;
   final List<String> _currentGuess = [];
@@ -486,9 +487,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     if (_levelIndex < 35) return 4;
     if (_levelIndex < 50) return 5;
     
-    int desired = 6;
+    int desired = 5;
     if (_levelIndex >= 90) {
-      desired = 6 + ((_levelIndex - 90) % 2);
+      desired = 5 + ((_levelIndex - 90) % 2);
     }
     
     if (_hasWhisperAndTimer) {
@@ -505,9 +506,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
   int get _targetCount {
     final int validCount = _level.validWords.where((w) => w.length >= _minWordLength && w.contains(_level.centerLetter)).length;
-    int maxCap = 18;
+    int maxCap = 12;
     if (_hasWhisperAndTimer) {
-      maxCap = 12;
+      maxCap = 8;
     }
     final int capMax = min(maxCap, validCount);
     final int capMin = min(4, validCount);
@@ -528,6 +529,21 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
     _gameTimer?.cancel();
     _currentDragNotifier.dispose();
     super.dispose();
+  }
+
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'whisper':
+        return 'Whisper: center letter hidden under "?"';
+      case 'timer':
+        return 'Timer: find all words before time runs out';
+      case 'minimal':
+        return 'Minimal: target word count is hidden';
+      case 'spy':
+        return 'Spy: target words encrypted as anagrams';
+      default:
+        return '';
+    }
   }
 
   @override
@@ -733,6 +749,9 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         maxActive: 2,
         smallGrid: false,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
       if (_activeModifiers.contains('whisper') && _activeModifiers.contains('timer')) {
         _activeModifiers.remove('timer');
       }
@@ -792,52 +811,79 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 121',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _levelIndex + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['whisper', 'timer', 'minimal', 'spy'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('spellingbee')),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _levelIndex = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _levelIndex = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.accentFor('spellingbee'))),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -1020,7 +1066,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
         title: GestureDetector(
-          onTap: null,
+          onTap: _showJumpToLevelDialog,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1030,7 +1076,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               ),
               if (!_isTutorialMode && !_playDailyMode) ...[
                 const SizedBox(width: 4),
-                Icon(null, size: 14, color: AppTheme.accentFor('spellingbee')),
+                Icon(Icons.edit, size: 14, color: AppTheme.accentFor('spellingbee')),
               ],
             ],
           ),
@@ -1142,16 +1188,28 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               color: context.textMuted,
             ),
           ],
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                _isTutorialMode
-                    ? 'Tutorial'
-                    : _playDailyMode 
-                        ? 'Daily' 
-                        : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
-                style: AppTheme.numberStyle(color: accentColor, fontSize: context.scale(13)),
+          GestureDetector(
+            onTap: _showJumpToLevelDialog,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _isTutorialMode
+                          ? 'Tutorial'
+                          : _playDailyMode 
+                              ? 'Daily' 
+                              : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
+                      style: AppTheme.numberStyle(color: accentColor, fontSize: context.scale(13), fontWeight: FontWeight.bold),
+                    ),
+                    if (!_isTutorialMode && !_playDailyMode) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.edit, size: 12, color: accentColor),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1165,7 +1223,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               child: Column(
             children: [
               Text(
-                'Drag over letters to connect and form words',
+                'Tap or drag letters to form words · letters can repeat',
                 style: GoogleFonts.outfit(color: context.textSecondary, fontSize: context.scale(13)),
               ),
               const SizedBox(height: 8),
@@ -1223,6 +1281,20 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+              if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Text(
+                    _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: accentColor.withOpacity(0.9),
+                    ),
+                  ),
+                ),
+              ],
               // Message / Display Current Guess
               Column(
                 mainAxisSize: MainAxisSize.min,

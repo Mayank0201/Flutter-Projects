@@ -1129,6 +1129,7 @@ class SudokuScreen extends StatefulWidget {
 }
 
 class _SudokuScreenState extends State<SudokuScreen> {
+  String? _forcedModifier;
   int _levelIndex = 0;
   late SudokuLevel _level;
   late List<List<int>> _board;
@@ -1608,15 +1609,39 @@ class _SudokuScreenState extends State<SudokuScreen> {
     );
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'clueThinning':
+        return 'Thin Clues: fewer pre-filled numbers provided';
+      case 'eclipse':
+        return 'Eclipse: scan and recall phases are enabled';
+      case 'timer':
+        return 'Timer: clear the board before time runs out';
+      case 'zoom':
+        return 'Zoom: enables zoom and pan mode';
+      case 'glitch':
+        return 'Glitch: rows swap every 3 correct inputs';
+      case 'time_warp':
+        return 'Time Warp: +5s for correct, −10s for wrong';
+      default:
+        return '';
+    }
+  }
+
   void _loadLevel() {
     if (!_playDailyMode && _levelIndex >= 30) {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'sudoku',
         levelIndex: _levelIndex,
-        pool: ['clueThinning', 'eclipse', 'timer'],
+        pool: ['clueThinning', 'eclipse', 'timer', 'zoom', 'glitch', 'time_warp'],
+        minActive: 2,
+        maxActive: 4,
       );
     } else {
       _activeModifiers = {};
+    }
+    if (_forcedModifier != null) {
+      _activeModifiers = {_forcedModifier!};
     }
     _level = _getSudokuLevel(_levelIndex);
     _board = List.generate(_level.size, (r) => List.from(_level.startBoard[r]));
@@ -1636,25 +1661,27 @@ class _SudokuScreenState extends State<SudokuScreen> {
     _recallPlacedCount = 0;
     _recallCorrectSelections.clear();
     _lockedRecallCells.clear();
-    if (_playDailyMode) {
-      if (_dailyModifierType == 'time_warp') {
-        _warpTimeLeft = 90;
-        _warpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (!mounted || _won || _gameOver) {
-            timer.cancel();
-            return;
+    
+    final bool hasTimeWarp = _forcedModifier == 'time_warp' ||
+        (_playDailyMode && _dailyModifierType == 'time_warp') ||
+        (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('time_warp'));
+    if (hasTimeWarp) {
+      _warpTimeLeft = 90;
+      _warpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted || _won || _gameOver) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          if (_warpTimeLeft > 0) {
+            _warpTimeLeft--;
+          } else {
+            _gameOver = true;
+            _message = 'Time is up!';
+            AudioManager.playFail();
           }
-          setState(() {
-            if (_warpTimeLeft > 0) {
-              _warpTimeLeft--;
-            } else {
-              _gameOver = true;
-              _message = 'Time is up!';
-              AudioManager.playFail();
-            }
-          });
         });
-      }
+      });
     }
     if (_isEclipseActive) {
       _startBlackoutTimer();
@@ -1693,52 +1720,79 @@ class _SudokuScreenState extends State<SudokuScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 111',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _levelIndex + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['clueThinning', 'eclipse', 'timer', 'zoom', 'glitch', 'time_warp'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('sudoku')),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _levelIndex = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _levelIndex = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.accentFor('sudoku'))),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -1828,7 +1882,10 @@ class _SudokuScreenState extends State<SudokuScreen> {
       AudioManager.playClick();
     });
     
-    if (_playDailyMode && _dailyModifierType == 'time_warp') {
+    final bool isTimeWarp = _forcedModifier == 'time_warp' ||
+        (_playDailyMode && _dailyModifierType == 'time_warp') ||
+        (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('time_warp'));
+    if (isTimeWarp) {
       if (num == targetVal) {
         _warpTimeLeft = (_warpTimeLeft + 5).clamp(0, 300);
         _message = '+5 Seconds!';
@@ -1843,7 +1900,10 @@ class _SudokuScreenState extends State<SudokuScreen> {
       }
     }
     
-    if (_playDailyMode && _dailyModifierType == 'glitch') {
+    final bool isGlitch = _forcedModifier == 'glitch' ||
+        (_playDailyMode && _dailyModifierType == 'glitch') ||
+        (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('glitch'));
+    if (isGlitch) {
       if (prevVal != num && num == targetVal) {
         _correctPlacementsCount++;
         if (_correctPlacementsCount >= 3) {
@@ -2121,7 +2181,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
               ),
             ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
@@ -2141,7 +2201,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      Icon(null, size: 12, color: accentColor),
+                      Icon(Icons.edit, size: 12, color: accentColor),
                     ],
                   ],
                 ),
@@ -2229,8 +2289,22 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ],
                     const SizedBox(height: 16),
                   ],
+                  if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: Text(
+                        _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: accentColor.withOpacity(0.9),
+                        ),
+                      ),
+                    ),
+                  ],
                   // Sudoku Board Display
-                  if (_playDailyMode && _dailyModifierType == 'zoom') ...[
+                  if (_forcedModifier == 'zoom' || (_playDailyMode && _dailyModifierType == 'zoom') || (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('zoom'))) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -2385,7 +2459,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                           ),
                         );
 
-                        if (_playDailyMode && _dailyModifierType == 'zoom') {
+                        if (_forcedModifier == 'zoom' || (_playDailyMode && _dailyModifierType == 'zoom') || (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('zoom'))) {
                           boardWidget = SizedBox(
                             width: context.scale(boardScale),
                             height: context.scale(boardScale),

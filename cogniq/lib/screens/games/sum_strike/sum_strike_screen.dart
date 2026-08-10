@@ -29,6 +29,8 @@ class SumStrikeScreen extends StatefulWidget {
 }
 
 class _SumStrikeScreenState extends State<SumStrikeScreen> {
+  String? _forcedModifier;
+
   int _currentLevel = 0;
   bool _isLoading = true;
   bool _isSuccess = false;
@@ -98,53 +100,97 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 200):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 50',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['negatives', 'denseStrike', 'timer', 'whisper', 'fog'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _generatePuzzle();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _generatePuzzle();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.accentFor('sumstrike'))),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
+  }
+
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'negatives':
+        return 'Negatives: grid contains negative number tiles';
+      case 'denseStrike':
+        return 'Dense: more target numbers must be tapped';
+      case 'timer':
+        return 'Timer: clear the board before time runs out';
+      case 'whisper':
+        return 'Whisper: row and column targets are partially hidden';
+      case 'fog':
+        return 'Fog: overlay shadows obscure the board';
+      default:
+        return '';
+    }
   }
 
   void _generatePuzzle() {
@@ -167,18 +213,22 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         tempGridSize = kSumStrikeLevels[_currentLevel].gridSize;
       } else {
         if (_currentLevel < 45) tempGridSize = 5;
-        else if (_currentLevel < 60) tempGridSize = 5;
-        else if (_currentLevel < 80) tempGridSize = 5;
-        else tempGridSize = 3 + ((_currentLevel - 80) % 4);
+        else if (_currentLevel < 65) tempGridSize = 6;
+        else if (_currentLevel < 85) tempGridSize = 6;
+        else tempGridSize = (6 + ((_currentLevel - 85) ~/ 10)).clamp(6, 7);
       }
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'sumstrike',
         levelIndex: _currentLevel,
-        pool: ['negatives', 'denseStrike', 'timer', 'whisper'],
+        pool: ['negatives', 'denseStrike', 'timer', 'whisper', 'fog'],
         minActive: 1,
         maxActive: 2,
         smallGrid: tempGridSize <= 4,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
+
     } else {
       _activeModifiers = {};
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
@@ -210,16 +260,16 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
           _gridSize = 5;
           maxNum = 9 + ((_currentLevel - 30) ~/ 3);
           if (maxNum > 15) maxNum = 15;
-        } else if (_currentLevel >= 45 && _currentLevel < 60) {
-          _gridSize = 5;
+        } else if (_currentLevel >= 45 && _currentLevel < 65) {
+          _gridSize = 6;
           maxNum = 14;
-        } else if (_currentLevel >= 60 && _currentLevel < 80) {
-          _gridSize = 5;
+        } else if (_currentLevel >= 65 && _currentLevel < 85) {
+          _gridSize = 6;
           maxNum = 15;
         } else {
-          // Rotation (L80+)
-          _gridSize = 3 + ((_currentLevel - 80) % 4); // Rotates 3x3, 4x4, 5x5, 6x6
-          maxNum = 9 + ((_currentLevel - 80) ~/ 10);
+          // L85+
+          _gridSize = (6 + ((_currentLevel - 85) ~/ 10)).clamp(6, 7);
+          maxNum = 9 + ((_currentLevel - 85) ~/ 10);
           if (maxNum > 18) maxNum = 18;
         }
       } else {
@@ -790,7 +840,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'sumstrike', 'Sum Strike'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -803,7 +853,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -814,12 +864,12 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       ),
       body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Expanded(
-                  child: Center(
+          SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -856,6 +906,20 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                           ],
                         ),
                         const SizedBox(height: 24),
+                        if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Text(
+                              _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.accentFor('sumstrike').withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                        ],
                         RepaintBoundary(
                           child: Container(
                             width: boardSize,
@@ -867,7 +931,9 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                               border: Border.all(color: context.textMuted.withAlpha(30)),
                             ),
                             child: FogOverlay(
-                              enabled: _playDailyMode && _dailyModifierType == 'fog',
+                              enabled: _forcedModifier == 'fog' ||
+                                  (_playDailyMode && _dailyModifierType == 'fog') ||
+                                  (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('fog')),
                               radius: cellW * _dailyRadius,
                               child: GridView.builder(
                                 physics: const NeverScrollableScrollPhysics(),
@@ -1020,8 +1086,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                       ],
                     ),
                   ),
-                ),
-                Center(
+                  Center(
                   child: (_isSuccess && !_playDailyMode)
                       ? AutoNextCountdown(
                           onNext: _nextLevel,
@@ -1051,6 +1116,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
               ],
             ),
           ),
+        ),
           if (_isSuccess && _playDailyMode)
             Positioned.fill(
               child: Container(

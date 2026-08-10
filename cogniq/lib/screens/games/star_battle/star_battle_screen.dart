@@ -1022,6 +1022,25 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _tryAutoCheck();
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'regionContortion':
+        return 'Region Contortion: regions are extremely twisted & snake-like';
+      case 'timer':
+        return 'Timer: clear the board before time runs out';
+      case 'glitch':
+        return 'Glitch: board boundaries vibrate erratically';
+      case 'zoom':
+        return 'Zoom: enables scroll/zoom modes';
+      case 'mirror':
+        return 'Mirror: regions are mirrored horizontally';
+      case 'twoStarMode':
+        return 'Two Stars: place 2 stars in each row/column/region';
+      default:
+        return '';
+    }
+  }
+
   void _loadLevel() {
     _gameTimer?.cancel();
     _timeLeft = -1;
@@ -1088,6 +1107,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         : RotationEngine.getDeterminism('queens', _levelIndex);
 
     _level = generateProceduralLevel(n, rand);
+    if (_activeModifiers.contains('mirror')) {
+      final mirroredRegions = List.generate(_level.regions.length, (r) => List<int>.from(_level.regions[r].reversed));
+      _level = QueensLevel(n: _level.n, regions: mirroredRegions);
+    }
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
     _history.clear();
     _error = ''; _won = false;
@@ -1458,7 +1481,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
             ),
           ],
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Row(
@@ -1480,7 +1503,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         ),
                   if (!_isTutorialMode && !_playDailyMode) ...[
                     const SizedBox(width: 4),
-                    const Icon(null, size: 12, color: AppTheme.queensOrange),
+                    const Icon(Icons.edit, size: 12, color: AppTheme.queensOrange),
                   ],
                 ],
               ),
@@ -1550,6 +1573,20 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
+                      if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
+                          child: Text(
+                            _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.outfit(
+                              fontSize: context.scale(12),
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.queensOrange.withOpacity(0.9),
+                            ),
+                          ),
+                        ),
+                      ],
                       if (_activeModifiers.contains('zoom')) ...[
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,

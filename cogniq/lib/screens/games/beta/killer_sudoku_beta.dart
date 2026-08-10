@@ -12,6 +12,7 @@ import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/fog_overlay.dart';
 
 class KillerSudokuBetaScreen extends StatefulWidget {
   const KillerSudokuBetaScreen({super.key});
@@ -19,6 +20,7 @@ class KillerSudokuBetaScreen extends StatefulWidget {
   State<KillerSudokuBetaScreen> createState() => _KillerSudokuBetaScreenState();
 }
 class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
+  String? _forcedModifier;
   int _currentLevel = 0;
   bool _isSuccess = false;
   int _gridSize = 4;
@@ -38,6 +40,35 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   Timer? _gameTimer;
   int _timeLeft = -1;
   bool _timeBonusEarned = false;
+  bool _isPanMode = false;
+
+  bool get _isZoomActive {
+    return _forcedModifier == 'zoom' ||
+        (_playDailyMode && _dailyModifierType == 'zoom') ||
+        (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('zoom'));
+  }
+
+  bool get _isEclipseActive {
+    return _forcedModifier == 'eclipse' ||
+        (_playDailyMode && _dailyModifierType == 'eclipse') ||
+        (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('eclipse'));
+  }
+
+  bool get _isFogActive {
+    return _forcedModifier == 'fog' ||
+        (_playDailyMode && _dailyModifierType == 'fog') ||
+        (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('fog'));
+  }
+
+  Timer? _blackoutTimer;
+  bool _isBlackout = false;
+  bool _inRecallTest = false;
+  bool _isScanPhase = true;
+  int _recallTargetCount = 2;
+  int _recallPlacedCount = 0;
+  final Set<int> _recallCorrectSelections = {};
+  final Set<int> _lockedRecallCells = {};
+  int _blackoutCountdown = 0;
 
   @override
   void initState() {
@@ -59,9 +90,31 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
     }
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'cageSize':
+        return 'Cage Size: larger cage sizes';
+      case 'clueThinning':
+        return 'Thin Clues: fewer pre-filled numbers provided';
+      case 'timer':
+        return 'Timer: clear the board before time runs out';
+      case 'spy':
+        return 'Spy: one cage has an incorrect sum';
+      case 'eclipse':
+        return 'Eclipse: scan cage sums before they disappear';
+      case 'zoom':
+        return 'Zoom: enables zoom and pan mode';
+      case 'fog':
+        return 'Fog: overlay shadows obscure the board';
+      default:
+        return '';
+    }
+  }
+
   @override
   void dispose() {
     _gameTimer?.cancel();
+    _blackoutTimer?.cancel();
     super.dispose();
   }
 
@@ -82,11 +135,14 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'killersudoku',
         levelIndex: _currentLevel,
-        pool: ['cageSize', 'clueThinning', 'timer'],
+        pool: ['cageSize', 'clueThinning', 'timer', 'spy', 'eclipse', 'zoom', 'fog'],
         minActive: 1,
         maxActive: 2,
         smallGrid: _gridSize == 6,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
       maxCageSize = _activeModifiers.contains('cageSize') ? (_gridSize == 9 ? 5 : 4) : 3;
       numGivens = _activeModifiers.contains('clueThinning') ? 0 : 3;
     } else if (!_playDailyMode && _currentLevel >= 10) {
@@ -315,6 +371,9 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
       _gameTimer?.cancel();
       _timeLeft = -1;
       _timeBonusEarned = false;
+      _blackoutTimer?.cancel();
+      _isScanPhase = true;
+      _blackoutCountdown = 10;
 
       _activeModifiers.clear();
       _spyCageId = -1;
@@ -398,6 +457,27 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
         _cageSums[_spyCageId] = _cageSums[_spyCageId] + 3;
       }
     });
+
+    if (_isEclipseActive) {
+      _blackoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        if (_isSuccess) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          if (_blackoutCountdown > 1) {
+            _blackoutCountdown--;
+          } else {
+            _isScanPhase = false;
+            _blackoutTimer?.cancel();
+          }
+        });
+      });
+    }
   }
 
   Future<void> _onLevelCleared() async {
@@ -496,52 +576,79 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 111',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['cageSize', 'clueThinning', 'timer', 'spy', 'eclipse', 'zoom', 'fog'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -669,7 +776,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
             onPressed: _showHint,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -679,7 +786,7 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                     Text(_playDailyMode ? 'Daily' : 'Level ${_currentLevel + 1}', style: AppTheme.numberStyle(color: AppTheme.dustyMauve, fontSize: 14, fontWeight: FontWeight.bold)),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -701,63 +808,165 @@ class _KillerSudokuBetaScreenState extends State<KillerSudokuBetaScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-
-                            RepaintBoundary(
-                              child: Container(
-                                width: _gridSize == 4 ? 280 : 320, height: _gridSize == 4 ? 280 : 320,
-                                decoration: BoxDecoration(color: context.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.textMuted.withAlpha(40))),
-                                child: GridView.builder(
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
-                                  itemCount: _gridSize * _gridSize,
-                                  itemBuilder: (context, idx) {
-                                    int cageId = (idx < _cages.length) ? _cages[idx] : 0;
-                                    Color cageColor = Colors.primaries[cageId % Colors.primaries.length].withOpacity(0.12);
-                                    bool isCageStart = _cages.indexOf(cageId) == idx;
-                                    return GestureDetector(
-                                      onTap: () {
-                                        settingsNotifier.hapticTap();
-                                        setState(() => _selectedIdx = idx);
-                                      },
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: cageColor,
-                                          border: Border(
-                                            top: BorderSide(color: idx >= _gridSize && _cages[idx - _gridSize] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                            bottom: BorderSide(color: idx < _gridSize * (_gridSize - 1) && _cages[idx + _gridSize] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                            left: BorderSide(color: idx % _gridSize > 0 && _cages[idx - 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                            right: BorderSide(color: idx % _gridSize < _gridSize - 1 && _cages[idx + 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
-                                          ),
-                                        ),
-                                        child: Stack(
-                                          children: [
-                                            if (isCageStart && cageId < _cageSums.length)
-                                              Positioned(top: 2, left: 2, child: Text('${_cageSums[cageId]}', style: GoogleFonts.spaceGrotesk(fontSize: 10, fontWeight: FontWeight.bold))),
-                                            Center(
-                                              child: Text(
-                                                _grid[idx] == 0 ? "" : "${_grid[idx]}",
-                                                style: GoogleFonts.spaceGrotesk(
-                                                  fontSize: _gridSize == 4 ? 18 : 15,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: _givenCells.contains(idx) ? Colors.blue.shade700 : context.textPrimary,
-                                                ),
-                                              ),
-                                            ),
-                                            if (_selectedIdx == idx)
-                                              Container(
-                                                decoration: BoxDecoration(
-                                                  border: Border.all(color: AppTheme.dustyMauve, width: 2),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
+                          if (_isEclipseActive && _isScanPhase) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: Text(
+                                'MEMORIZE CELLS & CAGES: $_blackoutCountdown s',
+                                style: GoogleFonts.spaceGrotesk(
+                                  color: Colors.redAccent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  letterSpacing: 1.2,
                                 ),
                               ),
                             ),
+                          ],
+                          if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12.0),
+                              child: Text(
+                                _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.dustyMauve.withOpacity(0.9),
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (_isZoomActive) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                ChoiceChip(
+                                  label: Text('Input Mode', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 12)),
+                                  selected: !_isPanMode,
+                                  onSelected: (val) => setState(() => _isPanMode = !val),
+                                  selectedColor: AppTheme.dustyMauve.withAlpha(40),
+                                  checkmarkColor: AppTheme.dustyMauve,
+                                ),
+                                const SizedBox(width: 12),
+                                ChoiceChip(
+                                  label: Text('Pan Mode', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 12)),
+                                  selected: _isPanMode,
+                                  onSelected: (val) => setState(() => _isPanMode = val),
+                                  selectedColor: AppTheme.dustyMauve.withAlpha(40),
+                                  checkmarkColor: AppTheme.dustyMauve,
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 16),
+                          ],
+                          RepaintBoundary(
+                            child: Builder(
+                              builder: (context) {
+                                final double sizeDim = _gridSize == 4 ? 280 : 320;
+                                
+                                Widget board = Container(
+                                  width: sizeDim,
+                                  height: sizeDim,
+                                  decoration: BoxDecoration(
+                                    color: context.bgCard,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: context.textMuted.withAlpha(40)),
+                                  ),
+                                  child: FogOverlay(
+                                    enabled: _isFogActive,
+                                    radius: (sizeDim / _gridSize) * 1.5,
+                                    focalPoint: (_selectedIdx != -1)
+                                        ? Offset(
+                                            ((_selectedIdx % _gridSize) + 0.5) * (sizeDim / _gridSize),
+                                            ((_selectedIdx ~/ _gridSize) + 0.5) * (sizeDim / _gridSize),
+                                          )
+                                        : null,
+                                    child: GridView.builder(
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
+                                      itemCount: _gridSize * _gridSize,
+                                      itemBuilder: (context, idx) {
+                                        int cageId = (idx < _cages.length) ? _cages[idx] : 0;
+                                        Color cageColor = Colors.primaries[cageId % Colors.primaries.length].withOpacity(0.12);
+                                        bool isCageStart = _cages.indexOf(cageId) == idx;
+                                        return GestureDetector(
+                                          onTap: (_isPanMode || (_isEclipseActive && _isScanPhase))
+                                              ? null
+                                              : () {
+                                                  settingsNotifier.hapticTap();
+                                                  setState(() => _selectedIdx = idx);
+                                                },
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: cageColor,
+                                              border: Border(
+                                                top: BorderSide(color: idx >= _gridSize && _cages[idx - _gridSize] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                                bottom: BorderSide(color: idx < _gridSize * (_gridSize - 1) && _cages[idx + _gridSize] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                                left: BorderSide(color: idx % _gridSize > 0 && _cages[idx - 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                                right: BorderSide(color: idx % _gridSize < _gridSize - 1 && _cages[idx + 1] == cageId ? Colors.transparent : Colors.black, width: 1.5),
+                                              ),
+                                            ),
+                                            child: Stack(
+                                              children: [
+                                                if (isCageStart && cageId < _cageSums.length)
+                                                  Positioned(
+                                                    top: 2,
+                                                    left: 2,
+                                                    child: Text(
+                                                      (_isEclipseActive && !_isScanPhase) ? '?' : '${_cageSums[cageId]}',
+                                                      style: GoogleFonts.spaceGrotesk(fontSize: 10, fontWeight: FontWeight.bold),
+                                                    ),
+                                                  ),
+                                                Center(
+                                                  child: Text(
+                                                    (_isEclipseActive && _isScanPhase)
+                                                        ? (_solution.length > idx ? "${_solution[idx]}" : "")
+                                                        : (_grid[idx] == 0 ? "" : "${_grid[idx]}"),
+                                                    style: GoogleFonts.spaceGrotesk(
+                                                      fontSize: _gridSize == 4 ? 18 : 15,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: _givenCells.contains(idx) ? Colors.blue.shade700 : context.textPrimary,
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (_selectedIdx == idx)
+                                                  Container(
+                                                    decoration: BoxDecoration(
+                                                      border: Border.all(color: AppTheme.dustyMauve, width: 2),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                );
+
+                                if (_isZoomActive) {
+                                  board = SizedBox(
+                                    width: sizeDim,
+                                    height: sizeDim,
+                                    child: InteractiveViewer(
+                                      panEnabled: _isPanMode,
+                                      scaleEnabled: false,
+                                      minScale: 1.4,
+                                      maxScale: 1.4,
+                                      transformationController: TransformationController(
+                                        Matrix4.identity()..scale(1.4),
+                                      ),
+                                      child: board,
+                                    ),
+                                  );
+                                }
+
+                                return board;
+                              }
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          if (!(_isEclipseActive && _isScanPhase))
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [

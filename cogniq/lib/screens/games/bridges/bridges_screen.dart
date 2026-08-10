@@ -34,6 +34,8 @@ class BridgesScreen extends StatefulWidget {
 }
 
 class _BridgesScreenState extends State<BridgesScreen> {
+  String? _forcedModifier;
+
   int _currentLevel = 0;
   bool _isLoading = true;
   bool _isSuccess = false;
@@ -75,7 +77,11 @@ class _BridgesScreenState extends State<BridgesScreen> {
     }
     return false;
   }
-  bool get _isFogActive => _playDailyMode && _dailyModifierType == 'fog';
+  bool get _isFogActive {
+    if (_forcedModifier == 'fog') return true;
+    if (_playDailyMode) return _dailyModifierType == 'fog';
+    return !_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('fog');
+  }
   final Set<int> _hiddenIslands = {};
   Timer? _gameTimer;
   int _timeLeft = -1;
@@ -123,52 +129,79 @@ class _BridgesScreenState extends State<BridgesScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 111',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['hiddenIslands', 'timer', 'zoom', 'fog'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _setupLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _setupLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.accentFor('bridges'))),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -181,11 +214,15 @@ class _BridgesScreenState extends State<BridgesScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'bridges',
         levelIndex: _currentLevel,
-        pool: ['hiddenIslands', 'timer', 'zoom'],
+        pool: ['hiddenIslands', 'timer', 'zoom', 'fog'],
         minActive: 1,
         maxActive: 2,
         smallGrid: _gridSize <= 6,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
+
     } else {
       _activeModifiers = {};
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
@@ -1006,7 +1043,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'bridges', 'Bridges'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -1019,7 +1056,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),

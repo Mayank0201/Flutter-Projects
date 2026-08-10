@@ -840,6 +840,20 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                             textAlign: TextAlign.center,
                           ),
                         ),
+                        if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+                            child: Text(
+                              _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.dustyMauve.withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         Builder(
                           builder: (context) {
@@ -856,34 +870,42 @@ class _ColorFloodBetaScreenState extends State<ColorFloodBetaScreen> {
                                 ),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
-                                  child: GridView.builder(
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
-                                    itemCount: _grid.length,
-                                    itemBuilder: (context, idx) {
-                                      final val = _grid[idx];
-                                      final isObstacle = val == _numColors;
-                                      return Container(
-                                        decoration: BoxDecoration(
-                                          color: isObstacle
-                                              ? Colors.grey.shade900
-                                              : _colors[val],
-                                          border: Border.all(
-                                            color: context.bgDark.withOpacity(0.12),
-                                            width: 1.0,
+                                  child: FogOverlay(
+                                    enabled: _isFogActive,
+                                    radius: (boardSize / _gridSize) * 2.0,
+                                    focalPoint: Offset(
+                                      ((_seedCell % _gridSize) + 0.5) * (boardSize / _gridSize),
+                                      ((_seedCell ~/ _gridSize) + 0.5) * (boardSize / _gridSize),
+                                    ),
+                                    child: GridView.builder(
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
+                                      itemCount: _grid.length,
+                                      itemBuilder: (context, idx) {
+                                        final val = _grid[idx];
+                                        final isObstacle = val == _numColors;
+                                        return Container(
+                                          decoration: BoxDecoration(
+                                            color: isObstacle
+                                                ? Colors.grey.shade900
+                                                : _colors[val],
+                                            border: Border.all(
+                                              color: context.bgDark.withOpacity(0.12),
+                                              width: 1.0,
+                                            ),
                                           ),
-                                        ),
-                                        child: isObstacle
-                                            ? const Center(
-                                                child: Icon(Icons.close_rounded, color: Colors.white24, size: 14),
-                                              )
-                                            : (idx == _seedCell
-                                                ? const Center(
-                                                    child: Icon(Icons.home, color: Colors.white, size: 20),
-                                                  )
-                                                : null),
-                                      );
-                                    },
+                                          child: isObstacle
+                                              ? const Center(
+                                                  child: Icon(Icons.close_rounded, color: Colors.white24, size: 14),
+                                                )
+                                              : (idx == _seedCell
+                                                  ? const Center(
+                                                      child: Icon(Icons.home, color: Colors.white, size: 20),
+                                                    )
+                                                  : null),
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),

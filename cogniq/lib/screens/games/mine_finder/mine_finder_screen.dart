@@ -26,6 +26,7 @@ class MineFinderScreen extends StatefulWidget {
 }
 
 class _MineFinderScreenState extends State<MineFinderScreen> {
+  String? _forcedModifier;
   int _levelIndex = 0;
   int _gridSize = 9;
   int _mineCount = 10;
@@ -67,10 +68,28 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     return false;
   }
   bool get _isFogActive {
+    if (_forcedModifier == 'fog') return true;
     if (_playDailyMode) {
       return _dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2';
     }
-    return false; // Fog is removed for normal/endgame levels!
+    return _levelIndex >= 30 && _activeModifiers.contains('fog');
+  }
+
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'limitedFlags':
+        return 'Limited Flags: max flags = mine count';
+      case 'hiddenCount':
+        return 'Hidden Mines: mine count and flag numbers are hidden';
+      case 'timer':
+        return 'Timer: clear the mines before time runs out';
+      case 'blind':
+        return 'Blind: flagging a safe cell results in instant loss';
+      case 'fog':
+        return 'Fog: overlay shadows obscure the board';
+      default:
+        return '';
+    }
   }
 
   int _countFlags() {
@@ -250,11 +269,14 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'mines',
         levelIndex: _levelIndex,
-        pool: ['limitedFlags', 'hiddenCount', 'timer'],
+        pool: ['limitedFlags', 'hiddenCount', 'timer', 'fog'],
         minActive: 2,
         maxActive: 3,
         smallGrid: _gridSize <= 10,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
     } else {
       _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
       final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
@@ -294,52 +316,79 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_levelIndex + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 121',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _levelIndex + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['limitedFlags', 'hiddenCount', 'timer', 'blind', 'fog'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentFor('minesweeper')),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _levelIndex = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _levelIndex = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.accentFor('minesweeper'))),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -696,23 +745,6 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       _flagged[r][c] = !_flagged[r][c];
       _message = '';
       AudioManager.playClick();
-
-      if (_playDailyMode && _dailyModifierType == 'blind') {
-        if (_flagged[r][c] && !_mines[r][c]) {
-          // Flagged a safe cell - instantly lost!
-          _lost = true;
-          _message = 'Oops! Flagged a safe cell.';
-          AudioManager.playFail();
-          // Reveal all mines
-          for (int i = 0; i < _gridSize; i++) {
-            for (int j = 0; j < _gridSize; j++) {
-              if (_mines[i][j]) {
-                _revealed[i][j] = true;
-              }
-            }
-          }
-        }
-      }
     });
 
     _checkWin();
@@ -982,7 +1014,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
               ),
             ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
@@ -1003,7 +1035,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      Icon(null, size: 12, color: accentColor),
+                      Icon(Icons.edit, size: 12, color: accentColor),
                     ],
                   ],
                 ),
@@ -1095,7 +1127,20 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-
+              if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12.0),
+                  child: Text(
+                    _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: accentColor.withOpacity(0.9),
+                    ),
+                  ),
+                ),
+              ],
               // Interactive Minesweeper Grid
               Container(
                 padding: const EdgeInsets.all(12),

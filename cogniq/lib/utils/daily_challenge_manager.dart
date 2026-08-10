@@ -491,9 +491,9 @@ class DailyChallengeManager {
         difficulty: 'Hard',
         levelIndex: 1,
         step: 2,
-        modifierName: 'Inverted Pearls',
-        modifierDescription: 'Black pearls act as white pearls and vice-versa, flipping loop rules.',
-        modifierType: 'prism',
+        modifierName: 'Timed Loop',
+        modifierDescription: 'Clear the board before time runs out.',
+        modifierType: 'timer',
       ),
     ),
     // Day 14: Time Warp Day

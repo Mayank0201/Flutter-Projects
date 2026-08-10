@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'dart:async';
+import '../../../widgets/fog_overlay.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
 import '../../../utils/prefs_keys.dart';
@@ -26,6 +27,7 @@ class CircuitGuideBetaScreen extends StatefulWidget {
 }
 
 class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
+  String? _forcedModifier;
   int _currentLevel = 0;
   bool _isSuccess = false;
   bool _playDailyMode = false;
@@ -46,6 +48,13 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
   bool _timeBonusEarned = false;
   final Set<int> _lockedWires = {};
   Set<String> _activeModifiers = {};
+  int _lastTappedIndex = -1;
+
+  bool get _isFogActive {
+    if (_forcedModifier == 'fog') return true;
+    if (_playDailyMode) return _dailyModifierType == 'fog';
+    return _currentLevel >= 30 && _activeModifiers.contains('fog');
+  }
 
   bool _adjacent(int a, int b, int W) {
     final ra = a ~/ W, ca = a % W, rb = b ~/ W, cb = b % W;
@@ -102,12 +111,34 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     }
   }
 
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'tortuosity':
+        return 'Winding: extra-long circuit paths';
+      case 'junctionDensity':
+        return 'Junctions: more intersecting wire options';
+      case 'decoyWires':
+        return 'Decoys: unused decoy wires placed on the board';
+      case 'scrambleDepth':
+        return 'Scramble: initial wires are heavily rotated';
+      case 'timer':
+        return 'Timer: power the circuit before time runs out';
+      case 'retro':
+        return 'Retro: visual green pixel skin';
+      case 'fog':
+        return 'Fog: overlay shadows obscure the board';
+      default:
+        return '';
+    }
+  }
+
   void _loadLevel() {
     HintManager.startLevel('circuit_guide');
     setState(() {
       _isSuccess = false;
       _lockedWires.clear();
       _activeModifiers.clear();
+      _lastTappedIndex = -1;
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
         _activeModifiers.add(_dailyModifierType);
       }
@@ -156,11 +187,14 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'circuitguide',
           levelIndex: _currentLevel,
-          pool: ['tortuosity', 'junctionDensity', 'decoyWires', 'scrambleDepth', 'timer'],
+          pool: ['tortuosity', 'junctionDensity', 'decoyWires', 'scrambleDepth', 'timer', 'retro', 'fog'],
           minActive: 2,
           maxActive: 3,
           smallGrid: isSmallGrid,
         );
+        if (_forcedModifier != null) {
+          _activeModifiers = {_forcedModifier!};
+        }
         
         final side = rng.nextInt(4);
         if (side == 0) {
@@ -724,52 +758,79 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
 
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 150):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 50',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['tortuosity', 'junctionDensity', 'decoyWires', 'scrambleDepth', 'timer', 'retro'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _loadLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _loadLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -781,6 +842,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
     AudioManager.playClick();
     settingsNotifier.hapticTap();
     setState(() {
+      _lastTappedIndex = idx;
       _rotations[idx]++;
     });
 
@@ -1020,7 +1082,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
             onPressed: _showRules,
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -1037,7 +1099,7 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                     ),
                     if (!_isTutorialMode && !_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -1067,6 +1129,20 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                           textAlign: TextAlign.center
                         ),
                         const SizedBox(height: 36),
+                        if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Text(
+                              _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.dustyMauve.withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                        ],
                         Container(
                           width: boardSize, 
                           height: boardSize,
@@ -1081,27 +1157,42 @@ class _CircuitGuideBetaScreenState extends State<CircuitGuideBetaScreen> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(10),
                             child: RepaintBoundary(
-                              child: GridView.builder(
-                                padding: EdgeInsets.zero,
-                                physics: const NeverScrollableScrollPhysics(),
-                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
-                                itemCount: _gridSize * _gridSize,
-                                itemBuilder: (context, idx) {
-                                  final isNodeConnected = connected[idx];
-                                  final isRetro = _activeModifiers.contains('retro');
-                                  return AnimatedCircuitNode(
-                                    type: _wireTypes[idx],
-                                    index: idx,
-                                    rotation: _rotations[idx],
-                                    isConnected: isNodeConnected,
-                                    onTap: () => _onRotate(idx),
-                                    activeColor: isRetro ? const Color(0xFF39FF14) : Colors.amber,
-                                    mutedColor: isRetro ? const Color(0xFF0F380F) : context.textMuted.withOpacity(0.25),
-                                    isLevel9: _currentLevel >= 9,
-                                    isLocked: _lockedWires.contains(idx),
-                                    isRetro: isRetro,
+                              child: Builder(
+                                builder: (context) {
+                                  final int srcIdx = _wireTypes.indexOf('SRC');
+                                  final int activeIdx = _lastTappedIndex != -1 ? _lastTappedIndex : (srcIdx != -1 ? srcIdx : 0);
+                                  final double revealRadius = (boardSize / _gridSize) * 1.6;
+                                  return FogOverlay(
+                                    enabled: _isFogActive,
+                                    radius: revealRadius,
+                                    focalPoint: Offset(
+                                      ((activeIdx % _gridSize) + 0.5) * (boardSize / _gridSize),
+                                      ((activeIdx ~/ _gridSize) + 0.5) * (boardSize / _gridSize),
+                                    ),
+                                    child: GridView.builder(
+                                      padding: EdgeInsets.zero,
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: _gridSize),
+                                      itemCount: _gridSize * _gridSize,
+                                      itemBuilder: (context, idx) {
+                                        final isNodeConnected = connected[idx];
+                                        final isRetro = _activeModifiers.contains('retro');
+                                        return AnimatedCircuitNode(
+                                          type: _wireTypes[idx],
+                                          index: idx,
+                                          rotation: _rotations[idx],
+                                          isConnected: isNodeConnected,
+                                          onTap: () => _onRotate(idx),
+                                          activeColor: isRetro ? const Color(0xFF39FF14) : Colors.amber,
+                                          mutedColor: isRetro ? const Color(0xFF0F380F) : context.textMuted.withOpacity(0.25),
+                                          isLevel9: _currentLevel >= 9,
+                                          isLocked: _lockedWires.contains(idx),
+                                          isRetro: isRetro,
+                                        );
+                                      },
+                                    ),
                                   );
-                                },
+                                }
                               ),
                             ),
                           ),

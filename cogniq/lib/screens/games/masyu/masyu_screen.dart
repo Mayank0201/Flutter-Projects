@@ -14,7 +14,6 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/hint_manager.dart';
-import '../../../utils/rotation_engine.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import 'masyu_levels.dart';
 
@@ -32,6 +31,8 @@ class MasyuScreen extends StatefulWidget {
 }
 
 class _MasyuScreenState extends State<MasyuScreen> {
+  String? _forcedModifier;
+
   int _currentLevel = 0;
   bool _isLoading = true;
   bool _isSuccess = false;
@@ -57,6 +58,17 @@ class _MasyuScreenState extends State<MasyuScreen> {
   final ValueNotifier<Offset?> _dragPositionNotifier = ValueNotifier<Offset?>(null);
 
   static const List<MasyuLevel> _kLevels = kMasyuLevels;
+
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'timer':
+        return 'Timer: clear the board before time runs out';
+      case 'fog':
+        return 'Fog: overlay shadows obscure the board';
+      default:
+        return '';
+    }
+  }
 
   @override
   void initState() {
@@ -101,52 +113,79 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   void _showJumpToLevelDialog() {
-    final controller = TextEditingController(text: '${_currentLevel + 1}');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: context.bgCard,
-        title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter level number (1 - 205):', style: GoogleFonts.outfit(color: context.textSecondary)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              style: GoogleFonts.outfit(color: context.textPrimary),
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. 50',
-                hintStyle: GoogleFonts.outfit(color: context.textMuted),
+      builder: (context) {
+        int target = _currentLevel + 1;
+        String? selectedMod = _forcedModifier;
+        final pool = ['timer'];
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: context.bgCard,
+              title: Text('Jump to Level', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Level Number (1+)',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      onChanged: (val) {
+                        target = int.tryParse(val) ?? target;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: selectedMod,
+                      dropdownColor: context.bgCard,
+                      style: GoogleFonts.outfit(color: context.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Force Modifier',
+                        labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('None (Default)')),
+                        ...pool.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedMod = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: context.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dustyMauve),
-            onPressed: () {
-              final val = int.tryParse(controller.text.trim());
-              if (val != null && val >= 1) {
-                Navigator.pop(context);
-                setState(() {
-                  _currentLevel = val - 1;
-                  _setupLevel();
-                });
-              }
-            },
-            child: Text('Go', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: GoogleFonts.outfit(color: context.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (target > 0) {
+                      setState(() {
+                        _currentLevel = target - 1;
+                        _forcedModifier = selectedMod;
+                        _setupLevel();
+                      });
+                    }
+                  },
+                  child: Text('Jump', style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 
@@ -173,22 +212,35 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _gridSize = level.gridSize;
     _grid = List.from(level.pearls);
 
-    if (_playDailyMode && _dailyModifierType == 'prism') {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Prism Mode: White pearls ⚪ act as Black ⚫, and Black pearls ⚫ act as White ⚪!',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-              ),
-              backgroundColor: AppTheme.dustyMauve,
-              duration: const Duration(seconds: 5),
-            ),
-          );
+    final activeMod = _forcedModifier ?? (_playDailyMode ? _dailyModifierType : null);
+    if (activeMod == 'timer') {
+      _timeLeft = 25 + (_gridSize * 8);
+      _timeBonusEarned = true;
+      _startTimer();
+    }
+  }
+
+  void _startTimer() {
+    _gameTimer?.cancel();
+    _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_isSuccess) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        if (_timeLeft > 0) {
+          _timeLeft--;
+        } else {
+          _timeLeft = 0;
+          _timeBonusEarned = false;
+          _gameTimer?.cancel();
         }
       });
-    }
+    });
   }
 
   void _ensureSolution() {
@@ -524,9 +576,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
     }
 
     // 3. Pearl rule validation along the reconstructed loop
-    // NOTE: Prism ("Inverted Pearls") is a VISUAL-ONLY modifier — only the painter
-    // swaps pearl colors. Validation always uses the true pearl type so the puzzle
-    // stays solvable. Do not add an isPrism swap here.
     for (int i = 0; i < totalCells; i++) {
       int pearl = _grid[i];
       if (pearl == 0) continue;
@@ -906,7 +955,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
             onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
           GestureDetector(
-            onTap: null,
+            onTap: _showJumpToLevelDialog,
             child: Padding(
               padding: const EdgeInsets.only(right: 16, left: 8),
               child: Center(
@@ -919,7 +968,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                     ),
                     if (!_playDailyMode) ...[
                       const SizedBox(width: 4),
-                      const Icon(null, size: 12, color: AppTheme.dustyMauve),
+                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
                     ],
                   ],
                 ),
@@ -952,6 +1001,26 @@ class _MasyuScreenState extends State<MasyuScreen> {
                           ),
                         ),
                         const SizedBox(height: 24),
+                        Builder(
+                          builder: (context) {
+                            final activeMod = _forcedModifier ?? (_playDailyMode ? _dailyModifierType : null);
+                            if (activeMod != null && activeMod.isNotEmpty) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12.0),
+                                child: Text(
+                                  _getModifierDescription(activeMod),
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.dustyMauve.withOpacity(0.9),
+                                  ),
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          }
+                        ),
                         RepaintBoundary(
                           child: Container(
                             width: boardSize,
@@ -981,7 +1050,6 @@ class _MasyuScreenState extends State<MasyuScreen> {
                                       dragPath: _dragPath,
                                       dragPosition: _dragPositionNotifier,
                                       hintIdx: _hintIdx,
-                                      isPrism: _playDailyMode && _dailyModifierType == 'prism',
                                     ),
                                   ),
                                 ),
@@ -1055,7 +1123,6 @@ class _MasyuPainter extends CustomPainter {
   final List<int> dragPath;
   final ValueNotifier<Offset?> dragPosition;
   final int hintIdx;
-  final bool isPrism;
 
   _MasyuPainter({
     required this.gridSize,
@@ -1066,7 +1133,6 @@ class _MasyuPainter extends CustomPainter {
     required this.dragPath,
     required this.dragPosition,
     required this.hintIdx,
-    required this.isPrism,
   }) : super(repaint: dragPosition);
 
   @override
@@ -1167,15 +1233,10 @@ class _MasyuPainter extends CustomPainter {
           canvas.drawCircle(center, rad * 1.8, glowPaint);
         }
 
-        int drawPearl = pearl;
-        if (isPrism) {
-          drawPearl = (pearl == 1) ? 2 : 1;
-        }
-
-        if (drawPearl == 1) {
+        if (pearl == 1) {
           canvas.drawCircle(center, rad, whitePearlPaint);
           canvas.drawCircle(center, rad, whiteBorderPaint);
-        } else if (drawPearl == 2) {
+        } else if (pearl == 2) {
           canvas.drawCircle(center, rad, blackPearlPaint);
           canvas.drawCircle(center, rad, blackBorderPaint);
         }
