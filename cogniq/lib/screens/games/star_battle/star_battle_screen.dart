@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:async';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,10 +13,10 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../utils/rules_helper.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/prefs_keys.dart';
+import '../../../utils/progress_guard.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import '../../../widgets/animated_level_indicator.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../widgets/loss_overlay.dart';
 import '../../../theme/settings_manager.dart';
@@ -339,6 +341,21 @@ const List<QueensLevel> _kLevels = [];
   QueensLevel(n: 8, regions: [[0,0,0,0,1,1,1,1],[0,2,2,2,1,3,3,3],[0,2,4,4,1,3,5,5],[0,2,4,6,6,3,5,7],[0,2,4,6,6,3,5,7],[0,2,4,4,1,3,5,5],[0,2,2,2,1,3,3,3],[0,0,0,0,1,1,1,1]]),
 ]; */
 
+/// The free-play modifier pool. Mirrored by `pools['queens']` in
+/// test/difficulty_curve_test.dart — keep the two in step. `twoStarMode` is
+/// appended at run time on boards larger than 7.
+///
+/// `silence` must never be added here: it defers every judgement to a Submit,
+/// while `ratchet` punishes a bad star the instant it lands.
+const List<String> kStarBattleModifierPool = [
+  'regionContortion',
+  'timer',
+  'glitch',
+  'zoom',
+  'mirror',
+  'ratchet',
+];
+
 class StarBattleScreen extends StatefulWidget {
   final int? dailyLevelIndex;
   const StarBattleScreen({super.key, this.dailyLevelIndex});
@@ -347,6 +364,7 @@ class StarBattleScreen extends StatefulWidget {
 }
 
 class _StarBattleScreenState extends State<StarBattleScreen> {
+  String? _forcedModifier;
   int _levelIndex = 0;
   late QueensLevel _level;
   late List<List<int>> _cells; // 0=empty, 1=X, 2=queen
@@ -365,17 +383,61 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   bool _glitchTick = false;
   bool _isPanMode = false;
   
-  bool get _isEndgame {
-    if (_playDailyMode) {
-      return _dailyModifierType == 'timer';
-    }
-    if (_levelIndex >= 30) {
-      return _activeModifiers.contains('timer');
-    }
-    return false;
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _levelIndex >= RotationEngine.modifierStartLevel('queens') &&
+        _activeModifiers.contains(name);
   }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isEndgame => _isModActive('timer');
+  bool get _useTwoStars => _isModActive('twoStarMode');
+  bool get _isZoomActive => _isModActive('zoom');
+  bool get _isGlitchActive => _isModActive('glitch');
+  bool get _isMirrorActive => _isModActive('mirror');
+
+  // COGNIQ-FIX:mod-desc-copy
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'regionContortion':
+        return 'Regions are contorted into winding, narrow shapes.';
+      case 'timer':
+        return 'Place all stars before the countdown expires.';
+      case 'twoStarMode':
+        return 'Two stars must be placed in each row, column, and region.';
+      case 'glitch':
+        return 'Board region colors periodically glitch and flicker.';
+      case 'zoom':
+        return 'The grid is magnified. Pan to view all cells.';
+      case 'mirror':
+        return 'Grid coordinates and inputs are flipped horizontally.';
+      case 'ratchet':
+        return 'Undo is locked — two misplaced stars loses the level.';
+      default:
+        return '';
+    }
+  }
+
+  String get _modifierBannerText {
+    if (_isTutorialMode) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
+  }
+
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
   bool _gameOver = false;
 
@@ -388,11 +450,71 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   final List<List<List<int>>> _history = [];
   bool _shuffleActive = false;
 
+  /// Held in state rather than rebuilt inside build(): a fresh controller
+  /// on every frame leaked one per rebuild and snapped the player's pan
+  /// position back to the start each time the board changed.
+  final TransformationController _zoomController =
+      TransformationController(Matrix4.identity()..scale(1.4));
+
   @override
   void dispose() {
+    _zoomController.dispose();
     _gameTimer?.cancel();
     _glitchTimer?.cancel();
     super.dispose();
+  }
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('queens', _levelIndex);
+
+  /// `ratchet` — undo is locked, a wrong star leaves a permanent mark, and the
+  /// second one loses the level.
+  bool get _ratchet => _isModActive('ratchet');
+  int _strikes = 0;
+
+  /// `r * n + c` for every cell a wrong star was placed on. The mark is a
+  /// scar, not a lock: the cell stays playable, because a star the rules
+  /// reject here may still belong here once the star it clashed with moves.
+  /// Sealing it would let one mistake quietly make the board unsolvable.
+  final Set<int> _crackedCells = {};
+  String _lossReason = 'You ran out of time!';
+
+  /// Whether a star dropped on (r, c) breaks the rules against the stars
+  /// already on the board: touching another star, or overfilling a row,
+  /// column or region.
+  bool _starBreaksRules(int r, int c) {
+    final n = _level.n;
+    final int perGroup = _useTwoStars ? 2 : 1;
+    int rowCount = 0, colCount = 0, regCount = 0;
+    final int reg = _level.regions[r][c];
+    for (int rr = 0; rr < n; rr++) {
+      for (int cc = 0; cc < n; cc++) {
+        if (_cells[rr][cc] != 2) continue;
+        if (rr == r && cc == c) continue;
+        if ((rr - r).abs() <= 1 && (cc - c).abs() <= 1) return true;
+        if (rr == r) rowCount++;
+        if (cc == c) colCount++;
+        if (_level.regions[rr][cc] == reg) regCount++;
+      }
+    }
+    return rowCount >= perGroup || colCount >= perGroup || regCount >= perGroup;
+  }
+
+  /// Called the moment a star lands, so the punishment is instant. This is
+  /// exactly why `ratchet` and `silence` must never share a pool: one defers
+  /// every judgement to a Submit, the other judges on the spot.
+  void _registerRatchetMistake(int r, int c) {
+    _strikes++;
+    _crackedCells.add(r * _level.n + c);
+    AudioManager.playFail();
+    if (_strikes >= 2) {
+      _gameTimer?.cancel();
+      _lossReason = 'Two broken placements — no way back.';
+      _gameOver = true;
+    } else {
+      _error = 'That star breaks the rules. One mistake left.';
+    }
   }
 
   @override
@@ -402,14 +524,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _level = generateProceduralLevel(5, Random(8734));
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
     _initLevel();
-  }
-
-  bool get _useTwoStars {
-    if (_playDailyMode) return false;
-    if (_levelIndex >= 30) {
-      return _activeModifiers.contains('twoStarMode');
-    }
-    return false;
   }
 
   double _computeContortionScore(List<List<int>> grid, int n) {
@@ -441,12 +555,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
   QueensLevel generateProceduralLevel(int n, Random rand) {
     double minScore = 0.0;
-    if (!_playDailyMode && _levelIndex >= 30) {
-      if (_activeModifiers.contains('regionContortion')) {
-        minScore = 2.2;
-      } else {
-        minScore = 1.5;
-      }
+    if (_isModActive('regionContortion')) {
+      minScore = 2.2;
+    } else if (!_playDailyMode && _levelIndex >= 30) { // not-a-modifier-gate
+      minScore = 1.5;
     }
 
     int outerAttempts = 0;
@@ -716,7 +828,10 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   }
 
   void _undo() {
-    if (_history.isEmpty || _won) return;
+    // `ratchet` locks the way back. The button is greyed with a padlock too,
+    // so this is a guard rather than the player's only signal.
+    if (_ratchet) return;
+    if (_history.isEmpty || _won || _gameOver) return;
     setState(() {
       _cells = _history.removeLast();
       _error = '';
@@ -846,20 +961,43 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   }
 
   Future<void> _savePersistedLevel(int lvl) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(PrefsKeys.gameLevel('queens'), lvl);
-    final earned = await HintManager.onLevelCleared('queens');
+    // A daily challenge borrows the level slot, so saving here would leak the
+    // challenge's level into real progress. Registering the clear would also
+    // double-count it: the daily already grants its own reward, and counting it
+    // again inflates global clears, points, achievements and trail unlocks.
+    if (_playDailyMode || widget.dailyLevelIndex != null) return;
+    await ProgressGuard.saveLevel('queens', lvl, isDaily: false);
+    await HintManager.onLevelCleared(
+      'queens',
+      // Speed Demon: cleared a hard-timer level with more than half the
+      // clock still left. _initialTime is 0 unless the timer modifier ran.
+      isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+    );
     final newCount = await HintManager.getHints('queens');
+    if (!mounted) return;
     setState(() {
       _hintCount = newCount;
     });
-    
+
     await _clearNormalState();
   }
 
-  List<(int, int)>? _solveQueens(QueensLevel level) {
+  /// Solves the board.
+  ///
+  /// When [required] is given, only a solution containing every one of those
+  /// stars counts. That lets a hint tell "you found a different valid layout"
+  /// apart from "you placed a star no solution can use". The generator never
+  /// checks that a board has only one answer, so without this a player who
+  /// found an alternate arrangement had their stars rubbed out.
+  List<(int, int)>? _solveQueens(QueensLevel level, {Set<(int, int)>? required}) {
     final n = level.n;
     final List<(int, int)> queens = [];
+
+    bool satisfiesRequired() {
+      if (required == null || required.isEmpty) return true;
+      final placed = queens.toSet();
+      return required.every(placed.contains);
+    }
 
     if (_useTwoStars) {
       final colCounts = List.filled(n, 0);
@@ -879,7 +1017,8 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       bool backtrack2(int r, int starsPlacedInRow) {
         if (r == n) {
           return colCounts.every((count) => count == 2) &&
-                 regCounts.every((count) => count == 2);
+                 regCounts.every((count) => count == 2) &&
+                 satisfiesRequired();
         }
 
         if (starsPlacedInRow == 2) {
@@ -924,8 +1063,12 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     }
 
     bool backtrack(int row) {
-      if (row == n) return true;
+      if (row == n) return satisfiesRequired();
+      // A row the player has already starred is fixed: try only that column,
+      // so the search looks for a solution built on their work.
+      final fixed = required?.where((q) => q.$1 == row).toList() ?? const [];
       for (int col = 0; col < n; col++) {
+        if (fixed.isNotEmpty && fixed.first.$2 != col) continue;
         if (isSafe(row, col)) {
           queens.add((row, col));
           if (backtrack(row + 1)) return true;
@@ -956,7 +1099,23 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       return;
     }
 
-    final solution = _solveQueens(_level);
+    // Stars the player has already placed.
+    final placed = <(int, int)>{};
+    for (int r = 0; r < _level.n; r++) {
+      for (int c = 0; c < _level.n; c++) {
+        if (_cells[r][c] == 2) placed.add((r, c));
+      }
+    }
+
+    // Prefer a solution that keeps their stars. If one exists they are on a
+    // valid layout, so the hint should build on it rather than rub it out.
+    var solution = placed.isEmpty
+        ? _solveQueens(_level)
+        : _solveQueens(_level, required: placed);
+    var playerIsConsistent = solution != null;
+
+    if (solution == null) solution = _solveQueens(_level);
+
     if (solution == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -967,34 +1126,52 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       return;
     }
 
-    // 1. Look for incorrect stars placed by the player.
+    // Only when no solution can keep the player's stars is one of them
+    // genuinely wrong -- and only then does a hint take something away.
     (int, int)? incorrectCell;
-    final Set<(int, int)> solSet = Set.from(solution);
-    for (int r = 0; r < _level.n; r++) {
-      for (int c = 0; c < _level.n; c++) {
-        if (_cells[r][c] == 2 && !solSet.contains((r, c))) {
-          incorrectCell = (r, c);
-          break;
+    if (!playerIsConsistent) {
+      final Set<(int, int)> solSet = Set.from(solution);
+      for (int r = 0; r < _level.n && incorrectCell == null; r++) {
+        for (int c = 0; c < _level.n; c++) {
+          if (_cells[r][c] == 2 && !solSet.contains((r, c))) {
+            incorrectCell = (r, c);
+            break;
+          }
         }
       }
-      if (incorrectCell != null) break;
+    }
+
+    // Nothing to add and nothing wrong to remove: don't charge for a hint that
+    // cannot do anything.
+    final hasSomethingToPlace =
+        solution.any((cell) => _cells[cell.$1][cell.$2] != 2);
+    if (incorrectCell == null && !hasSomethingToPlace) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Every star is already placed correctly.', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.amber.shade800,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
     }
 
     await HintManager.useHint('queens');
     final newCount = await HintManager.getHints('queens');
+    if (!mounted) return;
     AudioManager.playClick();
     settingsNotifier.hapticTap();
 
     setState(() {
       _hintCount = newCount;
       if (incorrectCell != null) {
-        // Erase incorrect star
-        _cells[incorrectCell!.$1][incorrectCell!.$2] = 0;
+        // Erase a star that no solution can accommodate.
+        _cells[incorrectCell.$1][incorrectCell.$2] = 0;
         _error = '';
       } else {
         // Place next correct star
         (int, int)? targetCell;
-        for (final cell in solution) {
+        for (final cell in solution!) {
           if (_cells[cell.$1][cell.$2] != 2) {
             targetCell = cell;
             break;
@@ -1011,7 +1188,9 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          incorrectCell != null ? 'Hint: Removed an incorrect star!' : 'Hint: Placed a correct star!',
+          incorrectCell != null
+              ? 'That star cannot be part of any solution - removed it.'
+              : 'Hint: Placed a correct star!',
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
         ),
         duration: const Duration(seconds: 2),
@@ -1020,25 +1199,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     );
 
     _tryAutoCheck();
-  }
-
-  String _getModifierDescription(String mod) {
-    switch (mod) {
-      case 'regionContortion':
-        return 'Region Contortion: regions are extremely twisted & snake-like';
-      case 'timer':
-        return 'Timer: clear the board before time runs out';
-      case 'glitch':
-        return 'Glitch: board boundaries vibrate erratically';
-      case 'zoom':
-        return 'Zoom: enables scroll/zoom modes';
-      case 'mirror':
-        return 'Mirror: regions are mirrored horizontally';
-      case 'twoStarMode':
-        return 'Two Stars: place 2 stars in each row/column/region';
-      default:
-        return '';
-    }
   }
 
   void _loadLevel() {
@@ -1056,15 +1216,17 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       if (_dailyModifierType.isNotEmpty) {
         _activeModifiers.add(_dailyModifierType);
       }
-    } else if (!_playDailyMode && _levelIndex >= 30) {
-      if (_levelIndex >= 30 && _levelIndex < 60) {
+    } else if (!_playDailyMode && _levelIndex >= 30) { // not-a-modifier-gate
+      if (_levelIndex >= 30 && _levelIndex < 60) { // not-a-modifier-gate
         n = 8;
       } else if (_levelIndex >= 60 && _levelIndex < 90) {
         n = 9;
       } else {
         n = 10;
       }
-      final pool = ['regionContortion', 'timer', 'glitch', 'zoom', 'mirror'];
+      // `silence` must never join this list: `ratchet` judges a star the
+      // instant it lands, `silence` defers every judgement to a Submit.
+      final pool = List<String>.from(kStarBattleModifierPool);
       if (n > 7) {
         pool.add('twoStarMode');
       }
@@ -1114,9 +1276,13 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
     _cells = List.generate(_level.n, (_) => List.filled(_level.n, 0));
     _history.clear();
     _error = ''; _won = false;
+    _strikes = 0;
+    _crackedCells.clear();
+    _lossReason = 'You ran out of time!';
 
     if (_isEndgame) {
       _timeLeft = 30 + (n * 15);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -1189,11 +1355,18 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
   void _reset() => setState(() => _loadLevel());
 
   void _tap(int r, int c) {
-    if (_won) return;
+    if (_won || _gameOver) return;
     AudioManager.playClick();
     _saveToHistory();
-    setState(() { _cells[r][c] = (_cells[r][c] + 1) % 3; _error = ''; });
+    setState(() {
+      _cells[r][c] = (_cells[r][c] + 1) % 3;
+      _error = '';
+      if (_ratchet && _cells[r][c] == 2 && _starBreaksRules(r, c)) {
+        _registerRatchetMistake(r, c);
+      }
+    });
     _saveNormalState();
+    if (_gameOver) return;
     _tryAutoCheck();
   }
 
@@ -1357,11 +1530,18 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The toolbar has room for Rules and Restart as their own buttons only
+    // while nothing else is competing for the row. The `timer` modifier adds a
+    // ~100px countdown chip, which is what pushed the actions past the right
+    // edge on the timed endgame levels, so the timer folds those two into the
+    // same overflow menu a narrow screen already uses.
+    final bool compactActions =
+        MediaQuery.of(context).size.width < 360 || _timeLeft >= 0;
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
         backgroundColor: context.bgDark, foregroundColor: context.textPrimary,
-        title: Text(_isTutorialMode ? 'Tutorial' : 'Star Battle', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        title: const GameTitle('Star Battle'),
         centerTitle: true,
         actions: [
           if (_shuffleActive && !_isTutorialMode)
@@ -1371,6 +1551,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'queens'),
             ),
           IconButton(
+            tooltip: 'Hint',
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -1407,11 +1588,52 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                 : null,
           ),
           IconButton(
-            icon: const Icon(Icons.undo, size: 20),
+            tooltip: _ratchet ? 'Undo locked by No Way Back' : 'Undo',
+            icon: Icon(_ratchet ? Icons.lock_outline : Icons.undo, size: 20),
             color: context.textMuted,
-            onPressed: _history.isNotEmpty && !_won && !_isTutorialMode ? _undo : null,
+            onPressed: (!_ratchet && _history.isNotEmpty && !_won && !_isTutorialMode)
+                ? _undo
+                : null,
           ),
-          if (MediaQuery.of(context).size.width < 360)
+          // Sits outside the compact/expanded branch below: the countdown is
+          // the only thing telling the player the `timer` modifier is running,
+          // so it has to survive on a narrow screen too.
+          if (_timeLeft >= 0)
+            // Flexible + scaleDown so the countdown is the thing that gives
+            // way when the toolbar runs out of room -- it shrinks instead of
+            // shoving the row past the edge, and stays on screen either way.
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Align(
+                  alignment: Alignment.center,
+                  widthFactor: 1,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.timer,
+                          color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$_timeLeft s',
+                          style: GoogleFonts.spaceGrotesk(
+                            color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (compactActions)
             PopupMenuButton<String>(
               icon: Icon(Icons.more_vert, color: context.textMuted),
               onSelected: (val) {
@@ -1445,69 +1667,24 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
               ],
             )
           else ...[
-            if (_timeLeft >= 0)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Center(
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.timer,
-                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$_timeLeft s',
-                        style: GoogleFonts.spaceGrotesk(
-                          color: _timeLeft <= 10 ? Colors.red : Colors.amber,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             IconButton(
+              tooltip: 'Rules',
               icon: const Icon(Icons.help_outline, size: 20),
               color: context.textMuted,
               onPressed: () => RulesHelper.showRulesBottomSheet(context, 'queens', 'Star Battle'),
             ),
             IconButton(
+              tooltip: 'Restart',
               icon: const Icon(Icons.refresh, size: 20),
               onPressed: _reset,
               color: context.textMuted,
             ),
           ],
-          GestureDetector(
-            onTap: _showJumpToLevelDialog,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _isTutorialMode
-                      ? Text(
-                          'Tutorial',
-                          style: GoogleFonts.outfit(
-                            color: AppTheme.queensOrange,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        )
-                      : AnimatedLevelIndicator(
-                          level: _levelIndex + 1,
-                          accentColor: AppTheme.queensOrange,
-                          label: MediaQuery.of(context).size.width < 360 ? 'L.' : 'Level',
-                        ),
-                  if (!_isTutorialMode && !_playDailyMode) ...[
-                    const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 12, color: AppTheme.queensOrange),
-                  ],
-                ],
-              ),
-            ),
+          GameLevelChip(
+            level: _levelIndex + 1,
+            modeLabel: _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Daily' : null),
+            accent: AppTheme.accentFor('queens'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -1573,11 +1750,11 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
-                      if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                      if (_modifierBannerText.isNotEmpty) ...[
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
                           child: Text(
-                            _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                            _modifierBannerText,
                             textAlign: TextAlign.center,
                             style: GoogleFonts.outfit(
                               fontSize: context.scale(12),
@@ -1587,9 +1764,53 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                           ),
                         ),
                       ],
+                      if (_ratchet) ...[
+                        Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: AppTheme.warmAmber.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: AppTheme.warmAmber
+                                      .withValues(alpha: 0.55)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.lock_outline,
+                                    size: 16, color: AppTheme.warmAmber),
+                                const SizedBox(width: 6),
+                                // Flexible, not a bare Text: the strike count
+                                // has to stay readable, so on a narrow screen
+                                // the label wraps onto a second line instead
+                                // of running off the right edge.
+                                Flexible(
+                                  child: Text(
+                                    'No Way Back  ·  mistakes $_strikes/2',
+                                    style: GoogleFonts.spaceGrotesk(
+                                      color: AppTheme.warmAmber,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: context.scale(12),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       if (_activeModifiers.contains('zoom')) ...[
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        // Wrap, not Row: the pair is wider than a small phone,
+                        // and both chips have to stay tappable for `zoom` to
+                        // be playable at all.
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 12,
+                          runSpacing: 8,
                           children: [
                             ChoiceChip(
                               label: Text('Draw Stars', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
@@ -1597,7 +1818,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                               onSelected: (val) => setState(() => _isPanMode = !val),
                               selectedColor: AppTheme.queensOrange.withOpacity(0.2),
                             ),
-                            const SizedBox(width: 12),
                             ChoiceChip(
                               label: Text('Scroll Grid', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
                               selected: _isPanMode,
@@ -1657,7 +1877,15 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                       children: List.generate(_level.n, (r) =>
                                         Row(mainAxisSize: MainAxisSize.min,
                                           children: List.generate(_level.n, (c) {
-                                            final col = _activeModifiers.contains('mirror') ? (_level.n - 1 - c) : c;
+                                            // The mirror modifier already flips
+                                            // the region data when the level
+                                            // loads. Remapping again here
+                                            // cancelled that out visually, and
+                                            // worse, the pan handler derives its
+                                            // column from the raw touch x, so
+                                            // every mark landed on the
+                                            // horizontally opposite cell.
+                                            final col = c;
                                             final regionId = _level.regions[r][col];
                                             final state = _cells[r][col];
 
@@ -1672,31 +1900,17 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                             }
 
                                             BorderSide getLeftBorder() {
-                                              if (_activeModifiers.contains('mirror')) {
-                                                if (col == _level.n - 1 || _level.regions[r][col + 1] != regionId) {
-                                                  return BorderSide(color: borderColor, width: 2.5);
-                                                }
-                                                return BorderSide(color: dividerColor, width: 0.8);
-                                              } else {
-                                                if (col == 0 || _level.regions[r][col - 1] != regionId) {
-                                                  return BorderSide(color: borderColor, width: 2.5);
-                                                }
-                                                return BorderSide(color: dividerColor, width: 0.8);
+                                              if (col == 0 || _level.regions[r][col - 1] != regionId) {
+                                                return BorderSide(color: borderColor, width: 2.5);
                                               }
+                                              return BorderSide(color: dividerColor, width: 0.8);
                                             }
 
                                             BorderSide getRightBorder() {
-                                              if (_activeModifiers.contains('mirror')) {
-                                                if (col == 0 || _level.regions[r][col - 1] != regionId) {
-                                                  return BorderSide(color: borderColor, width: 2.5);
-                                                }
-                                                return BorderSide(color: dividerColor, width: 0.8);
-                                              } else {
-                                                if (col == _level.n - 1 || _level.regions[r][col + 1] != regionId) {
-                                                  return BorderSide(color: borderColor, width: 2.5);
-                                                }
-                                                return BorderSide(color: dividerColor, width: 0.8);
+                                              if (col == _level.n - 1 || _level.regions[r][col + 1] != regionId) {
+                                                return BorderSide(color: borderColor, width: 2.5);
                                               }
+                                              return BorderSide(color: dividerColor, width: 0.8);
                                             }
 
                                             BorderSide getBottomBorder() {
@@ -1738,7 +1952,21 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                                         ? regionColorsDark[regionId % regionColorsDark.length]
                                                         : regionColorsLight[regionId % regionColorsLight.length]);
 
+                                                // `ratchet`: a cell a wrong
+                                                // star was dropped on keeps an
+                                                // amber scar for the rest of
+                                                // the level. One Set lookup,
+                                                // no extra work in the common
+                                                // case.
+                                                final bool isCracked =
+                                                    _crackedCells.isNotEmpty &&
+                                                        _crackedCells.contains(
+                                                            r * _level.n + col);
+
                                                 String cellLabel = 'Cell Row ${r + 1}, Column ${col + 1}, Region ${regionId + 1}';
+                                                if (isCracked) {
+                                                  cellLabel += ', marked by a broken placement';
+                                                }
                                                 if (state == 1) {
                                                   cellLabel += ', X mark';
                                                 } else if (state == 2) {
@@ -1752,7 +1980,12 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                                   child: Container(
                                                     width: cellSize, height: cellSize,
                                                     decoration: BoxDecoration(
-                                                      color: regionColor,
+                                                      color: isCracked
+                                                          ? Color.alphaBlend(
+                                                              AppTheme.warmAmber
+                                                                  .withValues(alpha: 0.45),
+                                                              regionColor)
+                                                          : regionColor,
                                                       border: Border(
                                                         top: getTopBorder(),
                                                         left: getLeftBorder(),
@@ -1825,7 +2058,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                   scaleEnabled: false,
                                   minScale: 1.4,
                                   maxScale: 1.4,
-                                  transformationController: TransformationController(Matrix4.identity()..scale(1.4)),
+                                  transformationController: _zoomController,
                                   child: boardWidget,
                                 ),
                               );
@@ -1873,7 +2106,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                     _loadLevel();
                   });
                 },
-                subtitle: 'You ran out of time!',
+                subtitle: _lossReason,
                 accentColor: AppTheme.queensOrange,
               ),
             ),

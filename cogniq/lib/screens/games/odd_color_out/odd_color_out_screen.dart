@@ -2,13 +2,13 @@ import 'package:flutter/foundation.dart';
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
-import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
@@ -30,37 +30,56 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   String? _forcedModifier;
   Set<String> _activeModifiers = {};
 
+  // COGNIQ-FIX:mod-active-helper
   bool _isModActive(String name) {
     if (_forcedModifier == name) return true;
     if (_isDailyMode) return _dailyModifierType == name;
-    return !_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains(name);
+    return _levelIndex >= RotationEngine.modifierStartLevel('oddcolor') &&
+        _activeModifiers.contains(name);
   }
 
+  // COGNIQ-FIX:mod-getters
+  bool get _isEndgame => _isModActive('timer');
+
+  // COGNIQ-FIX:mod-desc-copy
   String _getModifierDescription(String mod) {
     switch (mod) {
       case 'hueChannel':
-        return 'Hue Shift: odd tile differs by color, not brightness';
+        return 'The odd tile differs in tint rather than brightness.';
       case 'noise':
-        return 'Noise: colors jitter randomly';
+        return 'Tile shades jitter subtly across the grid.';
       case 'gradient':
-        return 'Gradient: background color varies across the grid';
+        return 'A color gradient flows across background tiles.';
       case 'timer':
-        return 'Timer: find the odd tile before time runs out';
+        return 'Find the odd tile before the countdown expires.';
       case 'monochrome':
-        return 'Monochrome: grid is grayscale';
+        return 'The entire grid is rendered in shades of grey.';
       case 'whisper':
-        return 'Whisper: ultra-subtle color difference';
+        return 'The color difference is exceptionally faint.';
       case 'prism':
-        return 'Prism: grid is split diagonally into two base colors';
+        return 'The grid is split across two alternating color palettes.';
       case 'eclipse':
-        return 'Eclipse: screen blackouts occur periodically';
+        return 'Brief periodic blackouts darken the screen.';
       case 'fog':
-        return 'Fog: overlay shadows obscure the grid';
+        return 'A dense fog obscures portions of the grid.';
       case 'retro':
-        return 'Retro: CRT-style scanline overlay';
+        return 'Retro CRT scanline styling is active.';
       default:
         return '';
     }
+  }
+
+  String get _modifierBannerText {
+    if (_isTutorialMode) return '';
+    if (_isDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
   int _levelIndex = 0;
   bool _shuffleActive = false;
@@ -72,6 +91,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   bool _isDailyMode = false;
   String _dailyModifierType = '';
   String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
   bool _isShadowed = false;
   Timer? _eclipseTimer;
   Timer? _chaosTimer;
@@ -94,6 +114,10 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
 
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_isDailyMode && RotationEngine.hasModifiers('oddcolorout', _levelIndex);
 
   @override
   void initState() {
@@ -131,7 +155,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     if (_levelIndex < 16) return 5; // 5x5
     if (_levelIndex < 23) return 6; // 6x6
     if (_levelIndex < 30) return 7; // 7x7
-    return 9; // 9x9 max from level 30 to 89
+    return 9; // 9x9 max from level 30 to 89 // not-a-modifier-gate
   }
 
   void _generateLevelColors({bool keepPosition = false, bool keepTimer = false}) {
@@ -141,9 +165,23 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       _timeBonusEarned = false;
     }
 
-    final rand = (_isDailyMode || _levelIndex < 90)
+    // Seeded, not random: the same (gameId, level) must produce the same board
+    // on every device and every replay, or hints, bug reports and shared levels
+    // stop being reproducible. (remember.md — the seeded-RNG law.)
+    //
+    // Free play used to fall back to `Random()` below level 90, which is the
+    // whole realistic play range, so every one of those boards was different on
+    // every device. The retry variation is a *separate salted stream* rather
+    // than `_levelIndex + _attempts`: adding the attempt count to the level made
+    // level N+1 attempt 0 draw exactly the board of level N attempt 1, and it
+    // meant replaying a level never gave the same puzzle back.
+    // The daily branch stays unseeded, as it is on every other screen.
+    final rand = _isDailyMode
         ? Random()
-        : RotationEngine.getDeterminism('oddcolorout', _levelIndex + _attempts);
+        : RotationEngine.getDeterminism(
+            _attempts == 0 ? 'oddcolorout' : 'oddcolorout_retry$_attempts',
+            _levelIndex,
+          );
     
     if (_isDailyMode && (_dailyModifierType == 'chaos' || _dailyModifierType == 'time_warp')) {
       if (_chaosIsFirstCall) {
@@ -169,7 +207,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     bool hasGradient = false;
 
     if (!_isDailyMode) {
-      if (_levelIndex >= 30) {
+      if (_modsOn) {
         var activeMods = RotationEngine.getActiveModifiers(
           gameId: 'oddcolorout',
           levelIndex: _levelIndex,
@@ -198,7 +236,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       final double oddHue = (baseHue + shift) % 360.0;
       _oddColor = HSLColor.fromAHSL(1.0, oddHue, saturation, lightness).toColor();
     } else {
-      if (!_isDailyMode && _levelIndex >= 30) {
+      if (!_isDailyMode && _levelIndex >= 30) { // not-a-modifier-gate
         delta = 0.04 * (30.0 / (30.0 + (_levelIndex - 30)));
         if (delta < 0.035) delta = 0.035;
       } else {
@@ -301,11 +339,17 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
             }
           }
           if (hasNoise) {
+            // Noise must stay well under the odd tile's own deviation,
+            // otherwise ordinary tiles drift further from the base colour than
+            // the target does and the puzzle becomes a coin flip. This bit
+            // hardest with 'whisper' (delta 0.015) whose signal was exactly the
+            // old noise range on lightness, and half it on hue.
             if (isHueChannel) {
-              double noiseHueMag = 15.0;
+              final double hueSignal = delta * 250.0;
+              final double noiseHueMag = min(15.0, hueSignal * 1.2);
               cellHue += (rand.nextDouble() - 0.5) * noiseHueMag;
             } else {
-              double noiseMag = 0.03;
+              final double noiseMag = min(0.03, delta * 1.2);
               cellLightness += (rand.nextDouble() - 0.5) * noiseMag;
             }
           }
@@ -340,26 +384,24 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       }
     });
 
-    if (!keepTimer && !_isDailyMode && _levelIndex >= 30) {
-      if (_activeModifiers.contains('timer')) {
-        _timeLeft = 25;
-        _timeBonusEarned = true;
-        _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (mounted) {
-            if (_timeLeft > 0) {
-              setState(() {
-                _timeLeft--;
-              });
-            } else {
-              _gameTimer?.cancel();
-              AudioManager.playFail();
-              setState(() {
-                _gameOver = true;
-              });
-            }
+    if (!keepTimer && _isEndgame) {
+      _timeLeft = 25;
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          if (_timeLeft > 0) {
+            setState(() {
+              _timeLeft--;
+            });
+          } else {
+            _gameTimer?.cancel();
+            AudioManager.playFail();
+            setState(() {
+              _gameOver = true;
+            });
           }
-        });
-      }
+        }
+      });
     }
 
     if (!keepPosition) {
@@ -433,9 +475,11 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     if (_isDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
       _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
     } else {
       _dailyModifierType = '';
       _dailyModifierName = '';
+      _dailyModifierDesc = '';
     }
     final savedLevel = prefs.getInt(PrefsKeys.gameLevel('oddcolor')) ?? 0;
     final active = await ShuffleManager.isActive();
@@ -690,10 +734,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
-        title: Text(
-          _isTutorialMode ? 'Tutorial' : 'Odd Color Out',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: context.scale(18)),
-        ),
+        title: const GameTitle('Odd Color Out'),
         actions: [
           if (_shuffleActive && !_isTutorialMode)
             IconButton(
@@ -702,6 +743,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'oddcolor'),
             ),
           IconButton(
+            tooltip: 'Hint',
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -762,8 +804,17 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
               ),
             ),
           IconButton(
+            tooltip: 'Rules',
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'oddcolor', 'Odd Color Out'),
+          ),
+          GameLevelChip(
+            level: _levelIndex + 1,
+            modeLabel: _isTutorialMode
+                ? 'Tutorial'
+                : (_isDailyMode ? 'Daily' : null),
+            accent: AppTheme.accentFor('oddcolor'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -863,41 +914,8 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (_isTutorialMode)
-                            Text(
-                              'Tutorial',
-                              style: GoogleFonts.outfit(
-                                fontWeight: FontWeight.bold,
-                                fontSize: context.scale(20),
-                                color: context.textPrimary,
-                              ),
-                            )
-                          else if (!_isDailyMode)
-                            GestureDetector(
-                              onTap: _showJumpToLevelDialog,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  AnimatedLevelIndicator(
-                                    level: _levelIndex + 1,
-                                    accentColor: context.textPrimary,
-                                    fontSize: context.scale(20),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Icon(Icons.edit, size: 14, color: context.textPrimary),
-                                ],
-                              ),
-                            )
-                          else
-                            Text(
-                              'Daily Challenge',
-                              style: GoogleFonts.outfit(
-                                fontWeight: FontWeight.bold,
-                                fontSize: context.scale(18),
-                                color: context.textPrimary,
-                              ),
-                            ),
+                          // The level lives in the app bar like every other
+                          // game; the body only carries board information.
                           Text(
                             'Grid: ${side}x${side}',
                             style: AppTheme.numberStyle(
@@ -913,11 +931,11 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                if (_modifierBannerText.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12.0),
                     child: Text(
-                      _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                      _modifierBannerText,
                       textAlign: TextAlign.center,
                       style: GoogleFonts.outfit(
                         fontSize: 13,

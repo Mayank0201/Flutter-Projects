@@ -7,11 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_keys.dart';
 import 'activity_tracker.dart';
 import 'daily_challenge_manager.dart';
+import 'streak_manager.dart';
 
 class NotificationManager {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
   static const int dailyChallengeNotificationId = 1001;
+  static const int streakReminderNotificationId = 1002;
   static const int inactivity3DaysNotificationId = 2003;
   static const int inactivity7DaysNotificationId = 2007;
   static const int installTestNotificationId = 9999;
@@ -223,6 +225,68 @@ class NotificationManager {
     } else {
       // If the 12-hour reminder point has already passed, cancel any old ones
       await _plugin.cancel(dailyChallengeNotificationId);
+    }
+  }
+
+  // Schedule the S1 active-day streak reminder.
+  //
+  // Fires inside the window the player can still act in: if today is not yet
+  // counted, it lands later today (StreakManager picks the slot and returns
+  // null when the day has no usable window left); if today is already counted,
+  // it lands tomorrow evening. Re-scheduling is idempotent — the previous
+  // reminder is always cancelled first — so this can be called on every launch.
+  static Future<void> updateStreakReminder() async {
+    if (!_isSupportedPlatform) return;
+    await _plugin.cancel(streakReminderNotificationId);
+
+    final state = await StreakManager.currentState();
+    final now = DateTime.now();
+    final when = StreakManager.nextReminderTime(
+      now: now,
+      playedToday: state.playedToday,
+    );
+    if (!when.isAfter(now)) return;
+
+    final String title;
+    final String body;
+    if (state.streak > 0) {
+      title = 'Keep your streak alive 🔥';
+      final days = state.streak == 1 ? 'day' : 'days';
+      body = state.skipAvailable
+          ? 'You are on a ${state.streak}-$days streak. Play any game today to keep it going.'
+          : 'You are on a ${state.streak}-$days streak and this month\'s free skip is used up. Play any game today.';
+    } else {
+      title = 'Start a streak today 🧠';
+      body = 'Play any game — Challenge or Zen — to begin a new streak.';
+    }
+
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'inactivity_channel',
+      'Brain Training Reminders',
+      channelDescription: 'Reminders when you haven\'t played in a few days',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails();
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    try {
+      final mode = await _getScheduleMode();
+      await _plugin.zonedSchedule(
+        streakReminderNotificationId,
+        title,
+        body,
+        tz.TZDateTime.from(when, tz.local),
+        platformDetails,
+        androidScheduleMode: mode,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } catch (e) {
+      debugPrint('Failed to schedule streak reminder: $e');
     }
   }
 

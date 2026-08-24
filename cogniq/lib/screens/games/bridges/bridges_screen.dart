@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:async';
 import '../../../utils/point_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
@@ -43,6 +45,9 @@ class _BridgesScreenState extends State<BridgesScreen> {
   String _dailyModifierType = '';
   double _dailyRadius = 1.5;
 
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
+
   late int _gridSize;
   late List<int> _islands;
   Map<String, int> _bridgeCounts = {}; // Key: "min-max" (endpoint indices), Value: 0, 1, 2
@@ -61,37 +66,72 @@ class _BridgesScreenState extends State<BridgesScreen> {
   Set<String> _activeModifiers = {};
   bool _isPanMode = false;
 
-  bool get _isEndgame {
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _currentLevel >= RotationEngine.modifierStartLevel('bridges') &&
+        _activeModifiers.contains(name);
+  }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isEndgame => _isModActive('timer');
+  bool get _isHiddenIslandsActive => _isModActive('hiddenIslands');
+  bool get _isFogActive => _isModActive('fog');
+  bool get _isZoomActive => _isModActive('zoom');
+
+  // COGNIQ-FIX:mod-desc-copy
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'hiddenIslands':
+        return 'Some island requirements are hidden until connected.';
+      case 'timer':
+        return 'A countdown timer is active for this board.';
+      case 'zoom':
+        return 'The grid is magnified. Pan to explore the full board.';
+      case 'fog':
+        return 'Fog obscures distant islands until connected.';
+      default:
+        return '';
+    }
+  }
+
+  String get _modifierBannerText {
     if (_playDailyMode) {
-      return _dailyModifierType == 'timer';
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
     }
-    if (_currentLevel >= 30) {
-      return _activeModifiers.contains('timer');
-    }
-    return false;
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
-  bool get _isHiddenIslandsActive {
-    if (_playDailyMode) return false;
-    if (_currentLevel >= 30) {
-      return _activeModifiers.contains('hiddenIslands');
-    }
-    return false;
-  }
-  bool get _isFogActive {
-    if (_forcedModifier == 'fog') return true;
-    if (_playDailyMode) return _dailyModifierType == 'fog';
-    return !_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('fog');
-  }
+
   final Set<int> _hiddenIslands = {};
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
+
+  /// Held in state rather than rebuilt inside build(): a fresh controller
+  /// on every frame leaked one per rebuild and snapped the player's pan
+  /// position back to the start each time the board changed.
+  final TransformationController _zoomController =
+      TransformationController(Matrix4.identity()..scale(1.4));
 
   @override
   void dispose() {
+    _zoomController.dispose();
     _gameTimer?.cancel();
     super.dispose();
   }
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('bridges', _currentLevel);
 
   @override
   void initState() {
@@ -105,6 +145,8 @@ class _BridgesScreenState extends State<BridgesScreen> {
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
@@ -116,6 +158,8 @@ class _BridgesScreenState extends State<BridgesScreen> {
       }
     } else {
       _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
     }
 
     int level = prefs.getInt(PrefsKeys.gameLevel('bridges')) ?? 0;
@@ -205,19 +249,30 @@ class _BridgesScreenState extends State<BridgesScreen> {
     );
   }
 
+
+
   void _setupLevel() {
     HintManager.startLevel('bridges');
     final level = kBridgesLevels[_currentLevel % kBridgesLevels.length];
     _gridSize = level.gridSize;
 
-    if (!_playDailyMode && _currentLevel >= 30) {
+    if (_modsOn) {
+      // Zoom fixes the board at 1.4x and lets the player scroll, which is a
+      // fair challenge on a big grid but simply hides half a small one -- on a
+      // 4x4 only about two islands stay on screen. Offer it once the board is
+      // large enough to be worth scrolling.
+      final pool = <String>[
+        'hiddenIslands',
+        'timer',
+        'fog',
+        if (_gridSize >= 7) 'zoom',
+      ];
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'bridges',
         levelIndex: _currentLevel,
-        pool: ['hiddenIslands', 'timer', 'zoom', 'fog'],
+        pool: pool,
         minActive: 1,
         maxActive: 2,
-        smallGrid: _gridSize <= 6,
       );
       if (_forcedModifier != null) {
         _activeModifiers = {_forcedModifier!};
@@ -249,8 +304,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
           islandIndices.add(i);
         }
       }
-      double hideRatio = 0.35 + (_currentLevel - 30) * 0.005;
-      if (hideRatio > 0.8) hideRatio = 0.8;
+      double hideRatio = (0.35 + max(0, _currentLevel - 30) * 0.005).clamp(0.35, 0.8);
 
       final int countToHide = (islandIndices.length * hideRatio).round();
       if (countToHide > 0) {
@@ -266,6 +320,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
     _timeBonusEarned = false;
     if (_isEndgame) {
       _timeLeft = 45 + (_gridSize * 10);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -602,7 +657,12 @@ class _BridgesScreenState extends State<BridgesScreen> {
       if (_currentLevel + 1 > highest) {
         await prefs.setInt('beta_level_bridges', _currentLevel + 1);
       }
-      await HintManager.onLevelCleared('bridges');
+      await HintManager.onLevelCleared(
+        'bridges',
+        // Speed Demon: cleared a hard-timer level with more than half the
+        // clock still left. _initialTime is 0 unless the timer modifier ran.
+        isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+      );
     }
     if (_timeLeft > 0 && _timeBonusEarned) {
       await PointManager.addPoints(5);
@@ -635,7 +695,15 @@ class _BridgesScreenState extends State<BridgesScreen> {
 
 
 
-  Map<String, int>? _solveBridges() {
+  /// Solves the board.
+  ///
+  /// When [respectPlayer] is true the bridges already on the board are locked
+  /// in and the solver looks for a solution that contains them. That is what
+  /// makes a hint safe: if such a solution exists the player is on a valid
+  /// line -- possibly a different one from the puzzle's canonical answer -- and
+  /// the hint should only add. If none exists, their board genuinely cannot be
+  /// completed, and removing an offending bridge is the helpful thing to do.
+  Map<String, int>? _solveBridges({bool respectPlayer = false}) {
     final solverIslands = <_SolverIsland>[];
     final islandIdxMap = <int, int>{};
     for (int i = 0; i < _islands.length; i++) {
@@ -747,7 +815,28 @@ class _BridgesScreenState extends State<BridgesScreen> {
     Map<String, int>? solution;
     final currentBridges = List.filled(adjList.length, 0);
 
+    // This search runs synchronously on the UI thread. Without a budget a
+    // large board can explore an enormous tree and freeze the app outright,
+    // so give up rather than hang -- the caller already handles a null result
+    // by telling the player it could not find a hint.
+    const int maxSteps = 200000;
+    int steps = 0;
+
     bool solve(int connIdx) {
+      if (++steps > maxSteps) return false;
+      // Honour what the player has already built: that connection is fixed, so
+      // move straight past it instead of exploring other counts for it.
+      if (respectPlayer && connIdx < adjList.length) {
+        final placed = _bridgeCounts[connKeys[connIdx]] ?? 0;
+        if (placed > 0) {
+          if (crossesAny(connIdx, currentBridges)) return false;
+          currentBridges[connIdx] = placed;
+          final ok = solve(connIdx + 1);
+          if (ok) return true;
+          currentBridges[connIdx] = 0;
+          return false;
+        }
+      }
       if (connIdx == adjList.length) {
         if (validate(currentBridges)) {
           solution = {};
@@ -791,55 +880,65 @@ class _BridgesScreenState extends State<BridgesScreen> {
     return solution;
   }
 
-  void _showHint() {
-    final solution = _solveBridges();
+  /// Returns true only when the hint actually helped, so the caller knows
+  /// whether to spend one.
+  bool _showHint() {
+    // First ask whether the player's own bridges can still lead somewhere. If
+    // they can, extend that line rather than the puzzle's canonical answer --
+    // otherwise a player who found a different valid arrangement would have
+    // their work torn down.
+    var solution = _solveBridges(respectPlayer: true);
+
     if (solution == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Cannot find solution from here. Try clearing some bridges!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.red.shade800,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-      return;
-    }
-
-    // 1. Look for incorrect bridges that user placed (not in solution or too many)
-    String? incorrectKey;
-    _bridgeCounts.forEach((key, count) {
-      if (count > 0) {
-        int solCount = solution[key] ?? 0;
-        if (count > solCount) {
-          incorrectKey = key;
-        }
+      // No solution contains what they have built, so something on the board is
+      // genuinely wrong. Now removing a bridge is the helpful move, and this is
+      // the only case where a hint takes something away.
+      final canonical = _solveBridges();
+      if (canonical == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cannot find a solution for this board.', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.red.shade800,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        return false;
       }
-    });
 
-    if (incorrectKey != null) {
-      final parts = incorrectKey!.split('-');
-      int u = int.parse(parts[0]);
-      setState(() {
-        _bridgeCounts[incorrectKey!] = _bridgeCounts[incorrectKey!]! - 1;
-        if (_bridgeCounts[incorrectKey!] == 0) {
-          _bridgeCounts.remove(incorrectKey);
-        }
-        _hintIdx = u;
-        _isHintShowing = true;
+      String? offending;
+      _bridgeCounts.forEach((key, count) {
+        if (count > 0 && count > (canonical[key] ?? 0)) offending = key;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Removed an incorrect bridge!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.amber.shade800,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _isHintShowing = false);
-      });
-      return;
+
+      if (offending != null) {
+        final u = int.parse(offending!.split('-')[0]);
+        setState(() {
+          final left = _bridgeCounts[offending!]! - 1;
+          if (left == 0) {
+            _bridgeCounts.remove(offending);
+          } else {
+            _bridgeCounts[offending!] = left;
+          }
+          _hintIdx = u;
+          _isHintShowing = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('That bridge cannot be part of any solution - removed it.', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.amber.shade800,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _isHintShowing = false);
+        });
+        return true;
+      }
+
+      solution = canonical;
     }
 
-    // 2. Otherwise, find a missing bridge and add it
+    // Find a missing bridge and add it
     String? missingKey;
     solution.forEach((key, solCount) {
       int userCount = _bridgeCounts[key] ?? 0;
@@ -867,7 +966,23 @@ class _BridgesScreenState extends State<BridgesScreen> {
         if (mounted) setState(() => _isHintShowing = false);
       });
       _tryAutoCheck();
+      return true;
     }
+
+    // Every bridge the known solution needs is already there, so the board
+    // must also carry extras. Say so rather than doing nothing silently, and
+    // do not spend the hint.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Every bridge the solution needs is already placed, but some extras are in the way. Try removing one.',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.amber.shade800,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+    return false;
   }
 
   @override
@@ -890,7 +1005,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
       return Scaffold(
         backgroundColor: context.bgDark,
         appBar: AppBar(
-          title: Text('Bridges', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+          title: const GameTitle('Bridges'),
         ),
         body: Center(
           child: Container(
@@ -977,6 +1092,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
         title: Text('Bridges', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           IconButton(
+            tooltip: 'Hint',
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -998,9 +1114,13 @@ class _BridgesScreenState extends State<BridgesScreen> {
             onPressed: !_isSuccess && !_isHintShowing
                 ? () async {
                     if (_hintCount > 0) {
-                      _showHint();
-                      setState(() => _hintCount--);
-                      HintManager.useHint('bridges');
+                      // Only spend a hint when it actually placed a bridge.
+                      // It used to be charged even when the solver gave up or
+                      // there was nothing left to add.
+                      if (_showHint()) {
+                        setState(() => _hintCount--);
+                        await HintManager.useHint('bridges');
+                      }
                     } else {
                       await BuyHintsDialog.show(
                         context,
@@ -1039,29 +1159,15 @@ class _BridgesScreenState extends State<BridgesScreen> {
               ),
             ),
           IconButton(
+            tooltip: 'Rules',
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'bridges', 'Bridges'),
           ),
-          GestureDetector(
-            onTap: _showJumpToLevelDialog,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16, left: 8),
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                      style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    if (!_playDailyMode) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          GameLevelChip(
+            level: _currentLevel + 1,
+            modeLabel: _playDailyMode ? 'Daily' : null,
+            accent: AppTheme.accentFor('bridges'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -1088,6 +1194,21 @@ class _BridgesScreenState extends State<BridgesScreen> {
                             textAlign: TextAlign.center,
                           ),
                         ),
+                        // Bridges announced no modifiers at all, so a board
+                        // could arrive fogged, zoomed or with hidden island
+                        // numbers and the player had no idea why.
+                        if (_modifierBannerText.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            _modifierBannerText,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.accentFor('bridges').withOpacity(0.9),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         if (_activeModifiers.contains('zoom')) ...[
                           Row(
@@ -1162,7 +1283,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                                   scaleEnabled: false,
                                   minScale: 1.4,
                                   maxScale: 1.4,
-                                  transformationController: TransformationController(Matrix4.identity()..scale(1.4)),
+                                  transformationController: _zoomController,
                                   child: boardWidget,
                                 ),
                               );

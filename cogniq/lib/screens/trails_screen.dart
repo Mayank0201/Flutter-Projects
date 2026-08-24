@@ -5,6 +5,8 @@ import '../theme/app_theme.dart';
 import '../widgets/swipe_trail_overlay.dart';
 import '../utils/prefs_keys.dart';
 import '../utils/point_manager.dart';
+import '../utils/trail_catalog.dart';
+import '../utils/zen_mode.dart';
 
 class TrailStyle {
   final String id;
@@ -79,7 +81,62 @@ const List<TrailStyle> kAllTrails = [
     emoji: '🔥',
     previewColors: [Color(0xFFFF0000), Color(0xFFFF6600), Color(0xFFFFCC00)],
   ),
+  TrailStyle(
+    id: 'zen',
+    name: 'Zen Ripple',
+    description: 'Slow jade ripples that spread and settle. Earned in Zen Mode.',
+    emoji: '🌿',
+    previewColors: [Color(0xFF7FB77E), Color(0xFFB7D3B0), Color(0xFFE3EFE0)],
+  ),
+
+  // ── Star trails ─────────────────────────────────────────────────────────
+  // Unlocked by daily-challenge stars or a long lifetime clear count, never
+  // by points. See TrailCatalog for the thresholds; the rules live there so
+  // this screen and the overlay cannot drift apart again.
+  TrailStyle(
+    id: 'morning_mist',
+    name: 'Morning Mist',
+    description:
+        'A pale grey-blue vapour that widens and thins as it fades, like breath on cold glass. The quietest trail in the set.',
+    emoji: '🌫️',
+    previewColors: [Color(0xFFCFD8DC), Color(0xFFECEFF1), Color(0xFFB0BEC5)],
+  ),
+  TrailStyle(
+    id: 'tide_line',
+    name: 'Tide Line',
+    description:
+        'A shallow wave that runs along the swipe and leaves a foam edge dissolving behind it. Two-tone with a bright leading rim.',
+    emoji: '🌊',
+    previewColors: [Color(0xFF4FC3F7), Color(0xFF81D4FA), Color(0xFFE1F5FE)],
+  ),
 ];
+
+/// Colour used for each star tier's progress text on a locked card.
+Color kStarTierColor(StarTier tier) {
+  switch (tier) {
+    case StarTier.bronze:
+      return const Color(0xFFCD7F32);
+    case StarTier.silver:
+      return const Color(0xFF9AA7B0);
+    case StarTier.gold:
+      return const Color(0xFFE0A800);
+    case StarTier.diamond:
+      return const Color(0xFF4FC3F7);
+  }
+}
+
+String kStarTierName(StarTier tier) {
+  switch (tier) {
+    case StarTier.bronze:
+      return 'bronze';
+    case StarTier.silver:
+      return 'silver';
+    case StarTier.gold:
+      return 'gold';
+    case StarTier.diamond:
+      return 'diamond';
+  }
+}
 
 class TrailsScreen extends StatefulWidget {
   final String? highlightId;
@@ -93,8 +150,10 @@ class _TrailsScreenState extends State<TrailsScreen> {
   String _activeStyle = 'none';
   bool _loading = true;
   int _globalClears = 0;
+  int _zenClears = 0;
   int _userPoints = 0;
   String? _customColorHex;
+  StarCounts _stars = const StarCounts();
   List<String> _claimedStyles = ['none'];
   final ScrollController _scrollController = ScrollController();
 
@@ -120,31 +179,9 @@ class _TrailsScreenState extends State<TrailsScreen> {
     super.dispose();
   }
 
-  int getRequiredClears(String styleId) {
-    switch (styleId) {
-      case 'none':       return 0;
-      case 'accent':     return 30;
-      case 'sparkle':    return 100;
-      case 'pastel':     return 250;
-      case 'neon_glow':  return 999999; // Points only
-      case 'rainbow':    return 999999; // Points only
-      case 'fire':       return 999999; // Points only
-      default:           return 999999;
-    }
-  }
+  int getRequiredClears(String styleId) => TrailCatalog.requiredClears(styleId);
 
-  int trailPrice(String styleId) {
-    switch (styleId) {
-      case 'none':       return 0;
-      case 'accent':     return 300;
-      case 'sparkle':    return 1500;
-      case 'pastel':     return 4000;
-      case 'neon_glow':  return 9000;
-      case 'rainbow':    return 16000;
-      case 'fire':       return 25000;
-      default:           return 999999;
-    }
-  }
+  int trailPrice(String styleId) => TrailCatalog.price(styleId);
 
   Future<void> _loadState() async {
     final prefs = await SharedPreferences.getInstance();
@@ -152,10 +189,14 @@ class _TrailsScreenState extends State<TrailsScreen> {
     final style = prefs.getString(PrefsKeys.swipeTrailStyle) ?? 'none';
     final hex = prefs.getString(PrefsKeys.swipeTrailCustomColor);
     final claimed = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+    final zenClears = prefs.getInt(ZenMode.zenClearedCountKey) ?? 0;
+    final stars = StarCounts.fromPrefs(prefs);
     final points = await PointManager.getPoints();
- 
+
     if (mounted) {
       setState(() {
+        _stars = stars;
+        _zenClears = zenClears;
         _globalClears = clears;
         _activeStyle = style;
         _customColorHex = hex;
@@ -181,10 +222,16 @@ class _TrailsScreenState extends State<TrailsScreen> {
   }
 
   Future<void> _selectStyle(String styleId) async {
-    final reqClears = getRequiredClears(styleId);
-    final isClaimed = _claimedStyles.contains(styleId);
-    if (_globalClears < reqClears && !isClaimed) return;
- 
+    if (!TrailCatalog.isAvailable(
+      styleId: styleId,
+      clears: _globalClears,
+      claimed: _claimedStyles,
+      zenClears: _zenClears,
+      stars: _stars,
+    )) {
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(PrefsKeys.swipeTrailStyle, styleId);
     await prefs.setBool('swipe_trail_unlocked', true);
@@ -205,11 +252,10 @@ class _TrailsScreenState extends State<TrailsScreen> {
       claimed.add(styleId);
       await prefs.setStringList(PrefsKeys.claimedTrailStyles, claimed);
     }
-    if (mounted) {
-      setState(() {
-        _claimedStyles = claimed;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _claimedStyles = claimed;
+    });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -222,6 +268,10 @@ class _TrailsScreenState extends State<TrailsScreen> {
   }
 
   Future<void> _buyStyle(String styleId) async {
+    // Star trails have no price at any balance. The catalog already returns a
+    // sentinel for them, but refusing here too means a stray call site can
+    // never turn a star trail into a purchase.
+    if (!TrailCatalog.isPurchasable(styleId)) return;
     final price = trailPrice(styleId);
     if (_userPoints < price) return;
 
@@ -234,12 +284,11 @@ class _TrailsScreenState extends State<TrailsScreen> {
         await prefs.setStringList(PrefsKeys.claimedTrailStyles, claimed);
       }
       final points = await PointManager.getPoints();
-      if (mounted) {
-        setState(() {
-          _claimedStyles = claimed;
-          _userPoints = points;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _claimedStyles = claimed;
+        _userPoints = points;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -281,6 +330,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
           ),
         ),
         leading: IconButton(
+          tooltip: 'Back',
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           color: context.textPrimary,
           onPressed: () => Navigator.pop(context),
@@ -316,7 +366,7 @@ class _TrailsScreenState extends State<TrailsScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Clear levels or use points to unlock trails.',
+                                  'Clear levels, spend points, or earn daily stars.',
                                   style: GoogleFonts.outfit(
                                     fontSize: 12,
                                     color: context.textSecondary,
@@ -395,13 +445,86 @@ class _TrailsScreenState extends State<TrailsScreen> {
     );
   }
 
+  /// Progress toward a star trail's routes: `4 / 7 bronze · 0 / 1 silver ·
+  /// 312 / 400 clears`.
+  ///
+  /// Meeting any ONE route unlocks the trail, so the route the player is
+  /// closest to finishing is shown first and the rest trail after it. Each
+  /// segment carries its tier's colour, and the whole thing wraps rather than
+  /// growing the row, so it cannot overflow a narrow card.
+  Widget _buildStarProgress(BuildContext context, StarTrailRules rules) {
+    final routes = <({String label, Color color, int have, int need})>[
+      for (final route in rules.starRoutes)
+        (
+          label: kStarTierName(route.tier),
+          color: kStarTierColor(route.tier),
+          have: _stars.of(route.tier),
+          need: route.count,
+        ),
+      (
+        label: 'clears',
+        color: AppTheme.softSage,
+        have: _globalClears,
+        need: rules.clears,
+      ),
+    ];
+
+    // Closest route first; ties keep the declared order so the text does not
+    // reshuffle itself between rebuilds.
+    final order = List<int>.generate(routes.length, (i) => i);
+    order.sort((a, b) {
+      final ra = routes[a].have / routes[a].need;
+      final rb = routes[b].have / routes[b].need;
+      final cmp = rb.compareTo(ra);
+      return cmp != 0 ? cmp : a.compareTo(b);
+    });
+
+    final spans = <InlineSpan>[];
+    for (var i = 0; i < order.length; i++) {
+      final r = routes[order[i]];
+      if (i > 0) {
+        spans.add(TextSpan(
+          text: '  ·  ',
+          style: GoogleFonts.outfit(fontSize: 11, color: context.textMuted),
+        ));
+      }
+      spans.add(TextSpan(
+        text: '${r.have.clamp(0, r.need)} / ${r.need} ${r.label}',
+        style: GoogleFonts.spaceGrotesk(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: r.color,
+        ),
+      ));
+    }
+
+    return Text.rich(
+      TextSpan(children: spans),
+      style: GoogleFonts.outfit(fontSize: 11, height: 1.3),
+    );
+  }
+
   Widget _buildTrailCard(TrailStyle trail) {
     final reqClears = getRequiredClears(trail.id);
-    final isUnlocked = _globalClears >= reqClears;
     final isClaimed = _claimedStyles.contains(trail.id);
+    final isZenTrail = TrailCatalog.isZenTrail(trail.id);
+    final starRules = TrailCatalog.starRules(trail.id);
+    // Earned for free -- this is what offers the "Claim" button. The catalog
+    // owns every route (clears, Zen, stars) so this screen and the overlay
+    // cannot answer differently.
+    final earnedByClears = TrailCatalog.isEarnedFree(
+      styleId: trail.id,
+      clears: _globalClears,
+      zenClears: _zenClears,
+      stars: _stars,
+    );
+    // Owned by any route (bought with points OR earned). A bought trail must
+    // never render as locked just because the level count is low.
+    final isUnlocked = earnedByClears || isClaimed;
     final isActive = isClaimed && _activeStyle == trail.id;
     final price = trailPrice(trail.id);
-    final canAfford = _userPoints >= price;
+    final canBuy = TrailCatalog.isPurchasable(trail.id);
+    final canAfford = canBuy && _userPoints >= price;
     final isHighlight = widget.highlightId == trail.id;
 
     return Padding(
@@ -467,12 +590,20 @@ class _TrailsScreenState extends State<TrailsScreen> {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            trail.name,
-                            style: GoogleFonts.outfit(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: context.textPrimary,
+                          // Flexible, not a bare Text: the name sits beside a
+                          // Buy button in a fixed-width card, and a long name
+                          // ("Rainbow Neon", "Constellation") overflowed the
+                          // row on a narrow phone or at a large font scale.
+                          Flexible(
+                            child: Text(
+                              trail.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: context.textPrimary,
+                              ),
                             ),
                           ),
                           if (isActive) ...[
@@ -497,18 +628,29 @@ class _TrailsScreenState extends State<TrailsScreen> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        isUnlocked 
-                            ? trail.description 
-                            : (reqClears >= 999999 
-                                ? 'Exclusive: Buy with points' 
-                                : 'Locked: Requires $reqClears levels cleared (Current: $_globalClears)'),
-                        style: GoogleFonts.outfit(
-                          fontSize: 11,
-                          color: isUnlocked ? context.textSecondary : Colors.redAccent.withOpacity(0.8),
-                          height: 1.3,
+                      if (!isUnlocked && starRules != null)
+                        // The third card state: progress toward every route,
+                        // closest first, each in its tier's colour. There is
+                        // deliberately no Buy button below -- that absence is
+                        // the message.
+                        _buildStarProgress(context, starRules)
+                      else
+                        Text(
+                          isUnlocked
+                              ? trail.description
+                              : (isZenTrail
+                                  ? 'Zen only: Clear $kZenTrailRequiredClears Zen levels (Current: $_zenClears)'
+                                  : (reqClears >= TrailCatalog.pointsOnly
+                                      ? 'Exclusive: Buy with points'
+                                      : 'Locked: Requires $reqClears levels cleared (Current: $_globalClears)')),
+                          style: GoogleFonts.outfit(
+                            fontSize: 11,
+                            color: isUnlocked
+                                ? context.textSecondary
+                                : Colors.redAccent.withValues(alpha: 0.8),
+                            height: 1.3,
+                          ),
                         ),
-                      ),
                       if (trail.id == 'accent' && isActive) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -579,10 +721,10 @@ class _TrailsScreenState extends State<TrailsScreen> {
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
                   child: isClaimed
-                      ? (isActive 
+                      ? (isActive
                           ? const Icon(Icons.check_circle_rounded, color: AppTheme.softSage, size: 20)
                           : const SizedBox.shrink())
-                      : (isUnlocked
+                      : (earnedByClears
                           ? ElevatedButton(
                               onPressed: () => _claimStyle(trail.id),
                               style: ElevatedButton.styleFrom(
@@ -604,6 +746,12 @@ class _TrailsScreenState extends State<TrailsScreen> {
                                 ),
                               ),
                             )
+                          : !canBuy
+                          // The Zen trail is earned through Zen play only and
+                          // star trails are earned by stars or a long grind,
+                          // so neither ever offers a Buy button.
+                          ? Icon(Icons.lock_outline_rounded,
+                              color: context.textMuted, size: 18)
                           : ElevatedButton(
                               onPressed: canAfford ? () => _buyStyle(trail.id) : null,
                               style: ElevatedButton.styleFrom(

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +13,11 @@ import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/point_manager.dart';
+import '../../../utils/progress_guard.dart';
+import '../../../utils/rotation_engine.dart';
+import '../../../widgets/game_level_chip.dart';
+import 'hitori_logic.dart';
 
 class HitoriScreen extends StatefulWidget {
   const HitoriScreen({super.key});
@@ -24,6 +31,19 @@ class _HitoriScreenState extends State<HitoriScreen> {
   bool _isSuccess = false;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
+  String? _forcedModifier;
+  Set<String> _activeModifiers = {};
+
+  /// The `timer` modifier. This was pooled from 2.0 with **no implementation at
+  /// all** — no Timer, no countdown, nothing — so roughly a third of Hitori's
+  /// modifier slots silently did nothing and difficulty did not rise on those
+  /// levels. That shipped in 2.0.0+52 and 2.1.0+53. It is the exact breach the
+  /// `_isModActive` helper below was added to prevent, and its own comment says
+  /// so, which is what makes it worth writing down.
+  Timer? _gameTimer;
+  int _timeLeft = -1;
   double _dailyRadius = 1.5;
   int _gridSize = 4; // 4, 6, or 8 based on level
 
@@ -45,6 +65,8 @@ class _HitoriScreenState extends State<HitoriScreen> {
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
@@ -62,6 +84,8 @@ class _HitoriScreenState extends State<HitoriScreen> {
       }
     } else {
       _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
       _dailyRadius = 1.5;
     }
 
@@ -75,76 +99,169 @@ class _HitoriScreenState extends State<HitoriScreen> {
     }
   }
 
-  void _generatePuzzle() {
-    if (_currentLevel < 5) {
-      _gridSize = 4;
-    } else if (_currentLevel < 12) {
-      _gridSize = 6;
-    } else {
-      _gridSize = 8;
+  /// Debug-only level jump. `GameLevelChip` only wires this up when `kDebugMode`
+  /// is true, so it compiles out of release builds.
+  void _showJumpToLevelDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        int target = _currentLevel + 1;
+        return AlertDialog(
+          backgroundColor: context.bgCard,
+          title: Text('Jump to Level',
+              style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold, color: context.textPrimary)),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            style: GoogleFonts.outfit(color: context.textPrimary),
+            decoration: InputDecoration(
+              labelText: 'Level Number (1+)',
+              labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+            ),
+            onChanged: (val) => target = int.tryParse(val) ?? target,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: context.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                if (target > 0) {
+                  setState(() {
+                    _currentLevel = target - 1;
+                    _isLoading = true;
+                  });
+                  _generatePuzzle();
+                }
+              },
+              child: Text('Jump',
+                  style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _currentLevel >= RotationEngine.modifierStartLevel('hitori') &&
+        _activeModifiers.contains(name);
+  }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isEndgame => _isModActive('timer');
+  bool get _isFogActive => _isModActive('fog');
+  bool get _isZoomActive => _isModActive('zoom');
+
+  // COGNIQ-FIX:mod-desc-copy
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'timer':
+        return 'Eliminate duplicates before time runs out.';
+      case 'fog':
+        return 'A dense fog obscures portions of the grid.';
+      case 'zoom':
+        return 'Grid is magnified with pan-and-scan navigation.';
+      default:
+        return '';
     }
+  }
 
-    final totalCells = _gridSize * _gridSize;
-    final rand = Random();
-    bool generated = false;
+  String get _modifierBannerText {
+    if (_isSuccess) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
+  }
 
-    for (int attempt = 0; attempt < 100; attempt++) {
-      // 1. Generate a valid solution mask (shaded positions)
-      List<bool> solMask = _generateValidSolutionMask(rand);
+  bool get _modsOn =>
+      !_playDailyMode && RotationEngine.hasModifiers('hitori', _currentLevel);
 
-      // 2. Populate cell values based on the mask
-      List<int> board = _populateBoardValues(solMask, rand);
+  @override
+  void dispose() {
+    // Without this the countdown keeps calling setState on a disposed widget
+    // once a second for the rest of the session.
+    _gameTimer?.cancel();
+    super.dispose();
+  }
 
-      // 3. Verify that Hitori rules yield a unique solution
-      if (_hasUniqueSolution(board, solMask)) {
-        _grid = board;
-        _solution = solMask;
-        _shaded = List.filled(totalCells, false);
-        _markedWhite = List.filled(totalCells, false);
-        generated = true;
-        break;
+  void _generatePuzzle() {
+    if (_modsOn) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'hitori',
+        levelIndex: _currentLevel,
+        pool: const ['timer', 'fog', 'zoom'],
+        minActive: 1,
+        maxActive: 2,
+        smallGrid: _gridSize <= 4,
+      );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
+    } else {
+      _activeModifiers = {};
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
       }
     }
 
-    if (!generated) {
-      // Fallback puzzle if generator timed out
-      _gridSize = 4;
-      _grid = [1, 3, 2, 2, 3, 2, 1, 2, 1, 3, 2, 4, 4, 2, 1, 3];
-      _solution = [
-        false, true, false, false,
-        true, false, false, true,
-        false, false, true, false,
-        false, true, false, false
-      ];
-      _shaded = List.filled(16, false);
-      _markedWhite = List.filled(16, false);
-    }
+    final board = HitoriLogic.generate(
+      RotationEngine.getDeterminism('hitori', _currentLevel),
+      _currentLevel,
+    );
+
+    _gridSize = board.size;
+    _grid = board.values;
+    _solution = board.solution;
+    _shaded = List.filled(board.values.length, false);
+    _markedWhite = List.filled(board.values.length, false);
 
     setState(() {
       _isSuccess = false;
       _isLoading = false;
     });
-  }
 
-  List<bool> _generateValidSolutionMask(Random rand) {
-    final totalCells = _gridSize * _gridSize;
-    List<bool> mask = List.filled(totalCells, false);
-
-    // Randomly select some cells to shade, keeping adjacency and connectivity intact
-    for (int i = 0; i < totalCells; i++) {
-      if (rand.nextDouble() < 0.25) {
-        // Check if shading violates adjacency rule
-        if (_hasAdjacentShaded(mask, i)) continue;
-
-        mask[i] = true;
-        // Check if connectivity is broken
-        if (!_isFullyConnected(mask)) {
-          mask[i] = false; // rollback
+    _gameTimer?.cancel();
+    if (_isEndgame) {
+      // Pure time pressure: it cannot make a board unsolvable, and on expiry the
+      // level restarts rather than being lost, matching Slitherlink and Untangle.
+      _timeLeft = 60 + _gridSize * _gridSize * 2;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) {
+          t.cancel();
+          return;
         }
-      }
+        setState(() {
+          if (_timeLeft > 0) {
+            _timeLeft--;
+          } else {
+            t.cancel();
+            _shaded = List.filled(_grid.length, false);
+            _markedWhite = List.filled(_grid.length, false);
+            _timeLeft = 60 + _gridSize * _gridSize * 2;
+            _gameTimer = null;
+          }
+        });
+        if (_timeLeft == 0) _generatePuzzle();
+      });
+    } else {
+      _timeLeft = -1;
     }
-    return mask;
   }
+
 
   bool _hasAdjacentShaded(List<bool> mask, int idx) {
     int r = idx ~/ _gridSize;
@@ -202,90 +319,7 @@ class _HitoriScreenState extends State<HitoriScreen> {
     return count == totalUnshaded;
   }
 
-  List<int> _populateBoardValues(List<bool> mask, Random rand) {
-    final totalCells = mask.length;
-    List<int> board = List.filled(totalCells, 0);
 
-    // Fill row-by-row
-    for (int r = 0; r < _gridSize; r++) {
-      List<int> available = List.generate(_gridSize, (i) => i + 1)..shuffle(rand);
-      for (int c = 0; c < _gridSize; c++) {
-        int idx = r * _gridSize + c;
-        if (!mask[idx]) {
-          board[idx] = available.removeLast();
-        }
-      }
-    }
-
-    // For shaded cells, place duplicate values in row or col
-    for (int idx = 0; idx < totalCells; idx++) {
-      if (mask[idx]) {
-        int r = idx ~/ _gridSize;
-        int c = idx % _gridSize;
-
-        // Choose to duplicate row or column value
-        bool duplicateRow = rand.nextBool();
-        List<int> candidates = [];
-
-        if (duplicateRow) {
-          // Find unshaded values in row
-          for (int x = 0; x < _gridSize; x++) {
-            int targetIdx = r * _gridSize + x;
-            if (!mask[targetIdx] && board[targetIdx] > 0) {
-              candidates.add(board[targetIdx]);
-            }
-          }
-        } else {
-          // Find unshaded values in col
-          for (int y = 0; y < _gridSize; y++) {
-            int targetIdx = y * _gridSize + c;
-            if (!mask[targetIdx] && board[targetIdx] > 0) {
-              candidates.add(board[targetIdx]);
-            }
-          }
-        }
-
-        if (candidates.isEmpty) {
-          board[idx] = rand.nextInt(_gridSize) + 1;
-        } else {
-          board[idx] = candidates[rand.nextInt(candidates.length)];
-        }
-      }
-    }
-    return board;
-  }
-
-  bool _hasUniqueSolution(List<int> board, List<bool> solMask) {
-    // A simplified unique-checker: backtracks to find all solutions.
-    int solutionsCount = 0;
-
-    void solve(List<bool> mask, int idx) {
-      if (solutionsCount > 1) return;
-      if (idx >= mask.length) {
-        if (_checkHitoriRules(board, mask)) {
-          solutionsCount++;
-        }
-        return;
-      }
-
-      // Option A: Keep cell unshaded
-      mask[idx] = false;
-      solve(mask, idx + 1);
-
-      // Option B: Shade cell (if valid)
-      if (!_hasAdjacentShaded(mask, idx)) {
-        mask[idx] = true;
-        // incremental check
-        if (_isFullyConnected(mask)) {
-          solve(mask, idx + 1);
-        }
-        mask[idx] = false;
-      }
-    }
-
-    solve(List.filled(board.length, false), 0);
-    return solutionsCount == 1;
-  }
 
   bool _checkHitoriRules(List<int> board, List<bool> mask) {
     // 1. Shaded adjacency check
@@ -339,20 +373,17 @@ class _HitoriScreenState extends State<HitoriScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    // Routed through the shared managers instead of hand-written prefs writes.
+    // The old code kept a private `beta_level_hitori` key and incremented
+    // `globalLevelClearedCount` itself, which bypasses the Zen split inside
+    // HintManager.onLevelCleared — letting Zen clears farm Challenge-side trails
+    // and achievements.
     if (!_playDailyMode) {
-      final prefs = await SharedPreferences.getInstance();
-      int highest = prefs.getInt('beta_level_hitori') ?? 0;
-      if (_currentLevel + 1 > highest) {
-        await prefs.setInt('beta_level_hitori', _currentLevel + 1);
-      }
-      await prefs.setInt(PrefsKeys.gameLevel('hitori'), _currentLevel + 1);
-      
-      // Track stats
-      int currentClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
-      await prefs.setInt(PrefsKeys.globalLevelClearedCount, currentClears + 1);
+      await ProgressGuard.saveLevel('hitori', _currentLevel + 1, isDaily: false);
+      await HintManager.onLevelCleared('hitori');
     }
 
-    setState(() => _isSuccess = true);
+    if (mounted) setState(() => _isSuccess = true);
   }
 
   void _nextLevel() {
@@ -447,13 +478,11 @@ class _HitoriScreenState extends State<HitoriScreen> {
       );
     }
 
-    final double boardSize = MediaQuery.of(context).size.width * 0.85;
-
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
-        title: Text('Hitori', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        title: const GameTitle('Hitori'),
+        leading: IconButton(tooltip: 'Back', icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
@@ -465,18 +494,13 @@ class _HitoriScreenState extends State<HitoriScreen> {
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+          // Standard level indicator, last in actions. Nothing else on screen
+          // may show the level (remember.md E2 section 7).
+          GameLevelChip(
+            level: _currentLevel + 1,
+            modeLabel: _playDailyMode ? 'Daily' : null,
+            accent: AppTheme.accentFor('hitori'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -487,141 +511,246 @@ class _HitoriScreenState extends State<HitoriScreen> {
             child: Column(
               children: [
                 Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Eliminate duplicates. Tap to cycle: Normal ➔ Shaded ➔ Circle.',
-                          style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        RepaintBoundary(
-                          child: Container(
-                            width: boardSize,
-                            height: boardSize,
-                            decoration: BoxDecoration(
-                              color: context.bgCard,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: context.textMuted.withAlpha(40)),
-                            ),
-                            child: FogOverlay(
-                              enabled: _playDailyMode && _dailyModifierType == 'fog',
-                              radius: (boardSize / _gridSize) * _dailyRadius,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: GridView.builder(
-                                physics: const NeverScrollableScrollPhysics(),
-                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: _gridSize,
-                                ),
-                                itemCount: _gridSize * _gridSize,
-                                itemBuilder: (context, idx) {
-                                  final cellVal = _grid[idx];
-                                  final isShaded = _shaded[idx];
-                                  final isMarked = _markedWhite[idx];
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      // Size the board from the box this column is ACTUALLY
+                      // handed — the app bar, the 16px padding and the button
+                      // row are already subtracted from it — rather than
+                      // re-deriving it from MediaQuery. Two bugs came out of
+                      // guessing at that arithmetic:
+                      //
+                      //  * `width * 0.85` alone (shipped in 2.0) overflowed a
+                      //    wide-short window by 908px: a square sized off a
+                      //    1568px width cannot fit in a 696px height.
+                      //  * The `height - 320` reserve that replaced it still
+                      //    overflowed by 106px at 320x568, because the chrome
+                      //    is not a constant. Measured: at 320 wide the hint
+                      //    line wraps to 4 rows (80px) and the tap-cycle card
+                      //    to 9 rows (162px), so board + gaps + text needs
+                      //    538px of the 432px available; at 412 wide the same
+                      //    two shrink to 60px and ~110px. No single pixel
+                      //    reserve is right for both, and a running modifier
+                      //    only adds more chrome.
+                      //
+                      // So: cap the square at a *fraction* of the height it can
+                      // actually see (a ratio scales with the viewport, a pixel
+                      // reserve does not), and let the column scroll when the
+                      // text below it does not fit. The scroll view is what
+                      // makes an overflow structurally impossible here; the
+                      // ratio only decides how much of the guide card is
+                      // readable before you scroll. Board sizes come out at
+                      // 288 / 380 / 448 / 392 across the four tested viewports,
+                      // every one of them larger than before, so nothing got
+                      // less legible to buy the fix.
+                      final double boardSize =
+                          min(box.maxWidth, box.maxHeight * 0.7);
 
-                                  return Semantics(
-                                    label: 'Cell row ${idx ~/ _gridSize + 1}, column ${idx % _gridSize + 1}. '
-                                        'Value $cellVal. '
-                                        '${isShaded ? "Shaded/Black" : isMarked ? "Marked to keep white" : "Unshaded"}.',
-                                    child: GestureDetector(
-                                      onTap: () => _toggleCellState(idx),
-                                      child: AnimatedContainer(
-                                        duration: const Duration(milliseconds: 150),
-                                        decoration: BoxDecoration(
-                                          color: isShaded ? Colors.grey[900] : context.bgCard,
-                                          border: Border.all(
-                                            color: context.textMuted.withAlpha(40),
-                                            width: 1,
-                                          ),
+                      return SingleChildScrollView(
+                        child: ConstrainedBox(
+                          // Centred while it fits, scrollable once it does not.
+                          constraints: BoxConstraints(minHeight: box.maxHeight),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (_modifierBannerText.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 12.0),
+                                  child: Text(
+                                    _modifierBannerText,
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.dustyMauve.withOpacity(0.9),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (_timeLeft >= 0) ...[
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: (_timeLeft <= 10
+                                                ? AppTheme.terracotta
+                                                : AppTheme.accentFor('hitori'))
+                                            .withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color: (_timeLeft <= 10
+                                                  ? AppTheme.terracotta
+                                                  : AppTheme.accentFor('hitori'))
+                                              .withValues(alpha: 0.35),
                                         ),
-                                        child: Center(
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              if (isMarked)
-                                                Container(
-                                                  width: boardSize / (_gridSize * 1.5),
-                                                  height: boardSize / (_gridSize * 1.5),
-                                                  decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    border: Border.all(
-                                                      color: AppTheme.dustyMauve.withAlpha(160),
-                                                      width: 2,
-                                                    ),
-                                                  ),
-                                                ),
-                                              Text(
-                                                "$cellVal",
-                                                style: GoogleFonts.spaceGrotesk(
-                                                  fontSize: _gridSize == 4 ? 24 : 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: isShaded
-                                                      ? Colors.white30
-                                                      : context.textPrimary,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                      ),
+                                      child: Text(
+                                        'Timer ${_timeLeft}s',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: _timeLeft <= 10
+                                              ? AppTheme.terracotta
+                                              : AppTheme.accentFor('hitori'),
                                         ),
                                       ),
                                     ),
-                                  );
-                                },
+                                  ],
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              // `zoom`: pan/zoom the board. Earns its place at
+                              // 8x8, where cells and their numbers get small.
+                              // Wrapping rather than replacing keeps every tap
+                              // handler intact.
+                              _ZoomWrap(
+                                enabled: _isModActive('zoom'),
+                                child: RepaintBoundary(
+                                  child: Container(
+                                    width: boardSize,
+                                    height: boardSize,
+                                    decoration: BoxDecoration(
+                                      color: context.bgCard,
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: context.textMuted.withAlpha(40)),
+                                    ),
+                                    child: FogOverlay(
+                                      enabled: _isModActive('fog'),
+                                      radius: (boardSize / _gridSize) * _dailyRadius,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: GridView.builder(
+                                          physics: const NeverScrollableScrollPhysics(),
+                                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: _gridSize,
+                                          ),
+                                          itemCount: _gridSize * _gridSize,
+                                          itemBuilder: (context, idx) {
+                                            final cellVal = _grid[idx];
+                                            final isShaded = _shaded[idx];
+                                            final isMarked = _markedWhite[idx];
+
+                                            return Semantics(
+                                              label: 'Cell row ${idx ~/ _gridSize + 1}, column ${idx % _gridSize + 1}. '
+                                                  'Value $cellVal. '
+                                                  '${isShaded ? "Shaded/Black" : isMarked ? "Marked to keep white" : "Unshaded"}.',
+                                              child: GestureDetector(
+                                                onTap: () => _toggleCellState(idx),
+                                                child: AnimatedContainer(
+                                                  duration: const Duration(milliseconds: 150),
+                                                  decoration: BoxDecoration(
+                                                    color: isShaded ? Colors.grey[900] : context.bgCard,
+                                                    border: Border.all(
+                                                      color: context.textMuted.withAlpha(40),
+                                                      width: 1,
+                                                    ),
+                                                  ),
+                                                  child: Center(
+                                                    child: Stack(
+                                                      alignment: Alignment.center,
+                                                      children: [
+                                                        if (isMarked)
+                                                          Container(
+                                                            width: boardSize / (_gridSize * 1.5),
+                                                            height: boardSize / (_gridSize * 1.5),
+                                                            decoration: BoxDecoration(
+                                                              shape: BoxShape.circle,
+                                                              border: Border.all(
+                                                                color: AppTheme.dustyMauve.withAlpha(160),
+                                                                width: 2,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        Text(
+                                                          "$cellVal",
+                                                          style: GoogleFonts.spaceGrotesk(
+                                                            fontSize: _gridSize == 4 ? 24 : 18,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: isShaded
+                                                                ? Colors.white30
+                                                                : context.textPrimary,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
+                              const SizedBox(height: 24),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: context.bgCard,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: context.textMuted.withAlpha(20)),
+                                ),
+                                child: Text(
+                                  '💡 Tap cycle guide:\n'
+                                  '• First Tap: Shades the cell black.\n'
+                                  '• Second Tap: Draws a circle helper (locks cell white).\n'
+                                  '• Third Tap: Returns to default.',
+                                  style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 24),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: context.bgCard,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: context.textMuted.withAlpha(20)),
-                          ),
-                          child: Text(
-                            '💡 Tap cycle guide:\n'
-                            '• First Tap: Shades the cell black.\n'
-                            '• Second Tap: Draws a circle helper (locks cell white).\n'
-                            '• Third Tap: Returns to default.',
-                            style: GoogleFonts.outfit(fontSize: 12, color: context.textSecondary),
-                          ),
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ),
+                // Two 144.5px buttons need 289px; a 320px phone leaves 288px
+                // between the paddings, which is where the 1px right overflow
+                // came from — a striped bar in debug, a silent clip in release.
+                // `Flexible` caps each button at its share of the row so it can
+                // never push past the edge, and the narrower horizontal padding
+                // means it does not have to: natural width drops to 128.5px, so
+                // both still render at full size with room to spare at 320.
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: context.bgCard,
-                        foregroundColor: context.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.bgCard,
+                          foregroundColor: context.textPrimary,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _shaded = List.filled(_gridSize * _gridSize, false);
+                            _markedWhite = List.filled(_gridSize * _gridSize, false);
+                          });
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Reset', overflow: TextOverflow.ellipsis),
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _shaded = List.filled(_gridSize * _gridSize, false);
-                          _markedWhite = List.filled(_gridSize * _gridSize, false);
-                        });
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reset'),
                     ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.dustyMauve,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.dustyMauve,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        ),
+                        onPressed: _checkSolution,
+                        icon: const Icon(Icons.check),
+                        label: const Text('Check', overflow: TextOverflow.ellipsis),
                       ),
-                      onPressed: _checkSolution,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Check'),
                     ),
                   ],
                 ),
@@ -631,7 +760,7 @@ class _HitoriScreenState extends State<HitoriScreen> {
           if (_isSuccess)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withOpacity(0.6),
+                color: Colors.black.withValues(alpha: 0.6),
                 child: Center(
                   child: _playDailyMode
                       ? ChallengeClearedOverlay(
@@ -669,6 +798,27 @@ class _HitoriScreenState extends State<HitoriScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+
+/// Wraps the board in an [InteractiveViewer] only while the `zoom` modifier is
+/// active, so the ordinary path carries no extra layers.
+class _ZoomWrap extends StatelessWidget {
+  final bool enabled;
+  final Widget child;
+
+  const _ZoomWrap({required this.enabled, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return InteractiveViewer(
+      minScale: 1.0,
+      maxScale: 3.0,
+      clipBehavior: Clip.hardEdge,
+      child: child,
     );
   }
 }

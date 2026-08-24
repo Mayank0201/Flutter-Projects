@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +13,6 @@ import '../../../utils/hint_manager.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../widgets/auto_next_countdown.dart';
-import '../../../widgets/animated_level_indicator.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
@@ -27,6 +28,20 @@ class ZipLevel {
   int get totalCells => rows * cols;
   int get totalCellsToVisit => rows * cols - wallCount;
 }
+/// The free-play modifier pool. Mirrored by `pools['zip']` in
+/// test/difficulty_curve_test.dart — keep the two in step.
+///
+/// `silence` must never be added here: it defers judgement to a Submit, while
+/// `ratchet` punishes an out-of-order number the instant it is touched.
+const List<String> kGridPathModifierPool = [
+  'waypointSparsity',
+  'nonRectShape',
+  'timer',
+  'retro',
+  'minimal',
+  'ratchet',
+];
+
 class GridPathScreen extends StatefulWidget {
   const GridPathScreen({super.key});
   @override
@@ -50,6 +65,8 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   bool _dragActive = false;
   bool _isDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
   List<(int, int)>? _solution;
   bool _shuffleActive = false;
   Set<String> _activeModifiers = {};
@@ -58,6 +75,9 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   Timer? _blindStepsTimer;
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
   bool _gameOver = false;
   bool _isMemorizingPhase = false;
@@ -70,6 +90,47 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     _gameTimer?.cancel();
     _memorizeTimer?.cancel();
     super.dispose();
+  }
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_isDailyMode && RotationEngine.hasModifiers('zip', _levelIndex);
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_isDailyMode) return _dailyModifierType == name;
+    return _levelIndex >= RotationEngine.modifierStartLevel('zip') &&
+        _activeModifiers.contains(name);
+  }
+
+  /// `ratchet` — the path cannot be retraced. Backing a step out is this
+  /// game's undo, so locking it is what "No Way Back" means here; Restart
+  /// stays available, because a player who paints themselves into a corner
+  /// needs a way out that is not a softlock.
+  bool get _ratchet => _isModActive('ratchet');
+  int _strikes = 0;
+
+  /// `r * cols + c` for each waypoint reached out of order. Deduplicated by
+  /// cell so brushing the same number twice during one drag cannot spend both
+  /// mistakes at once.
+  final Set<int> _crackedCells = {};
+  String _lossReason = 'You ran out of time!';
+
+  void _registerRatchetMistake(int r, int c) {
+    final key = r * _level.cols + c;
+    if (_crackedCells.contains(key)) return;
+    setState(() {
+      _crackedCells.add(key);
+      _strikes++;
+      if (_strikes >= 2) {
+        _gameTimer?.cancel();
+        _lossReason = 'Two numbers taken out of order — no way back.';
+        _gameOver = true;
+      } else {
+        _msg = 'Out of order. One mistake left.';
+      }
+    });
   }
 
   @override
@@ -86,6 +147,12 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     _isDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_isDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
+    } else {
+      _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
     }
     int savedLevel = prefs.getInt(PrefsKeys.gameLevel('zip')) ?? 0;
     final active = await ShuffleManager.isActive();
@@ -116,7 +183,12 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     if (_isDailyMode) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(PrefsKeys.gameLevel('zip'), lvl);
-    final earned = await HintManager.onLevelCleared('zip');
+    final earned = await HintManager.onLevelCleared(
+      'zip',
+      // Speed Demon: cleared a hard-timer level with more than half the
+      // clock still left. _initialTime is 0 unless the timer modifier ran.
+      isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+    );
     final newCount = await HintManager.getHints('zip');
     if (!mounted) return;
     setState(() {
@@ -340,7 +412,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     Set<String> activeMods = {};
     bool isSmallGrid = false;
 
-    if (!_isDailyMode && levelIndex >= 30) {
+    if (!_isDailyMode && levelIndex >= 30) { // not-a-modifier-gate
       if (levelIndex >= 75) {
         gridSize = 8 + ((levelIndex - 75) % 2);
       } else if (levelIndex >= 50) {
@@ -352,7 +424,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       activeMods = RotationEngine.getActiveModifiers(
         gameId: 'zip',
         levelIndex: levelIndex,
-        pool: ['waypointSparsity', 'nonRectShape', 'timer', 'retro', 'minimal'],
+        pool: kGridPathModifierPool,
         minActive: 2,
         maxActive: 3,
         smallGrid: isSmallGrid,
@@ -361,7 +433,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       gridSize = 3;
     } else if (levelIndex < 15) {
       gridSize = 4;
-    } else if (levelIndex < 30) {
+    } else if (levelIndex < 30) { // not-a-modifier-gate
       gridSize = 5;
     } else {
       gridSize = 6;
@@ -383,16 +455,18 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     int waypointCount;
     int minWaypoints = gridSize + 2;
 
-    if (!_isDailyMode && levelIndex >= 30) {
-      if (levelIndex >= 75) {
-        waypointCount = 6 + (levelIndex % 4);
-      } else if (levelIndex >= 50) {
-        waypointCount = 5 + (levelIndex % 3);
-      } else {
-        waypointCount = 4 + (levelIndex % 2);
-      }
+    // COGNIQ-FIX:gridpath-floor
+    if (!_isDailyMode && levelIndex >= 30) { // not-a-modifier-gate
+      // Start above minWaypoints (8) and climb, so these values actually survive the
+      // floor below. The old 4/5/6-based branches were silently discarded: every
+      // level from 30 to 74 resolved to a flat 8. // not-a-modifier-gate
+      final int band = levelIndex >= 75 ? 2 : (levelIndex >= 50 ? 1 : 0);
+      waypointCount = minWaypoints + band + (levelIndex % 2); // 8-9, 9-10, 10-11
+
       if (activeMods.contains('waypointSparsity')) {
-        waypointCount = minWaypoints;
+        // Sparse must be strictly sparser than the level's own baseline, and must
+        // still respect the floor -- otherwise it is a no-op.
+        waypointCount = (waypointCount - 2).clamp(minWaypoints, waypointCount);
       }
     } else if (levelIndex < 5) {
       waypointCount = 2 + (levelIndex ~/ 2);
@@ -521,21 +595,37 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     return ZipLevel(rows: rows, cols: cols, waypoints: waypoints);
   }
 
+  // COGNIQ-FIX:mod-desc-copy
   String _getModifierDescription(String mod) {
     switch (mod) {
       case 'waypointSparsity':
-        return 'Sparse: fewer waypoints shown';
+        return 'Fewer waypoints are numbered. Deduce the path between them.';
       case 'nonRectShape':
-        return 'Non-Rect Grid: custom grid borders';
+        return 'The grid has irregular borders and obstacles.';
       case 'timer':
-        return 'Timer: clear before time runs out';
+        return 'Complete the entire path before the timer runs out.';
       case 'retro':
-        return 'Retro: visual path styling';
+        return 'Classic retro styling active for the grid path.';
       case 'minimal':
-        return 'Minimal: waypoints disappear after 10s';
+        return 'Numbered waypoints fade away after 10 seconds.';
+      case 'ratchet':
+        return 'The path cannot be retraced once drawn.';
       default:
         return '';
     }
+  }
+
+  String get _modifierBannerText {
+    if (_isTutorialMode) return '';
+    if (_isDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
 
   void _loadLevel([SharedPreferences? prefs]) {
@@ -547,6 +637,9 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     _level = _getDynamicLevel(_levelIndex);
     _solution = _solveZip(_level);
     _path.clear();
+    _strikes = 0;
+    _crackedCells.clear();
+    _lossReason = 'You ran out of time!';
     _nextWaypoint = _isReversePath ? _level.maxWaypoint : 1;
     _won = false;
     _msg = _isReversePath
@@ -592,7 +685,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
 
     final bool isMinimal = _forcedModifier == 'minimal' ||
         (_isDailyMode && _dailyModifierType == 'minimal') ||
-        (!_isDailyMode && _levelIndex >= 30 && _activeModifiers.contains('minimal'));
+        (!_isDailyMode && _modsOn && _activeModifiers.contains('minimal'));
     if (isMinimal) {
       _isMemorizingPhase = true;
       _memorizeTimeLeft = 10;
@@ -615,6 +708,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
         (!_isDailyMode && _activeModifiers.contains('timer'));
     if (startTimer) {
       _timeLeft = 20 + (_level.rows * 12);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -640,7 +734,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       builder: (context) {
         int target = _levelIndex + 1;
         String? selectedMod = _forcedModifier;
-        final pool = ['waypointSparsity', 'nonRectShape', 'timer', 'retro', 'minimal'];
+        const pool = kGridPathModifierPool;
         
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -720,6 +814,9 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   bool _isAdjacent((int,int) a, (int,int) b) => (a.$1-b.$1).abs() + (a.$2-b.$2).abs() == 1;
 
   void _truncatePathTo((int, int) cell) {
+    // Retracing is this game's undo, so `ratchet` locks it. The chip above the
+    // board says so, and Restart is still there.
+    if (_ratchet) return;
     final idx = _path.indexOf(cell);
     if (idx == -1 || idx == _path.length - 1) return;
     setState(() {
@@ -740,7 +837,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
   }
 
   void _addCell(int r, int c) {
-    if (_won) return;
+    if (_won || _gameOver) return;
     if (r < 0 || r >= _level.rows || c < 0 || c >= _level.cols) return;
 
     final wp = _level.waypoints[r][c];
@@ -764,6 +861,10 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     if (!isCorrectWaypoint) {
       AudioManager.playFail();
       settingsNotifier.hapticSuccess(); // mediumImpact feedback
+      if (_ratchet) {
+        _registerRatchetMistake(r, c);
+        return;
+      }
       setState(() {
         _msg = 'Go in number order';
       });
@@ -880,7 +981,9 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       backgroundColor: context.bgDark,
       appBar: AppBar(
         backgroundColor: context.bgDark, foregroundColor: context.textPrimary,
-        title: Text(_isTutorialMode ? 'Tutorial' : 'Grid Path', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary)),
+        // Flexible with ellipsis so a three-digit level never pushes the app
+        // bar past the screen edge.
+        title: const GameTitle('Grid Path'),
         centerTitle: true,
         actions: [
           if (_shuffleActive && !_isTutorialMode)
@@ -890,6 +993,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'zip'),
             ),
           IconButton(
+            tooltip: 'Hint',
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -950,34 +1054,17 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
               ),
             ),
           IconButton(
+            tooltip: 'Rules',
             icon: const Icon(Icons.help_outline, size: 20),
             color: context.textMuted,
             onPressed: () => RulesHelper.showRulesBottomSheet(context, 'zip', 'Grid Path'),
           ),
-          IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
-          InkWell(
-            onTap: _showJumpToLevelDialog,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _isTutorialMode
-                      ? Text('Tutorial', style: GoogleFonts.outfit(color: AppTheme.zipPink, fontSize: 14, fontWeight: FontWeight.bold))
-                      : _isDailyMode
-                          ? Text('Daily Challenge', style: GoogleFonts.outfit(color: AppTheme.zipPink, fontSize: 14, fontWeight: FontWeight.bold))
-                          : AnimatedLevelIndicator(
-                              level: _levelIndex + 1,
-                              accentColor: AppTheme.zipPink,
-                            ),
-                  if (!_isTutorialMode && !_isDailyMode) ...[
-                    const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 14, color: AppTheme.zipPink),
-                  ],
-                ],
-              ),
-            ),
+          IconButton(tooltip: 'Restart', icon: const Icon(Icons.refresh, size: 20), onPressed: _reset, color: context.textMuted),
+          GameLevelChip(
+            level: _levelIndex + 1,
+            modeLabel: _isTutorialMode ? 'Tutorial' : (_isDailyMode ? 'Daily' : null),
+            accent: AppTheme.accentFor('zip'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -1046,11 +1133,51 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                     child: Text(_msg, style: GoogleFonts.outfit(color: _won ? AppTheme.zipPink : context.textSecondary, fontSize: context.scale(13)), textAlign: TextAlign.center),
                   ),
                    const SizedBox(height: 12),
-                   if (!_isTutorialMode && _activeModifiers.isNotEmpty) ...[
+                   if (_ratchet) ...[
+                     Container(
+                       margin: const EdgeInsets.only(bottom: 10),
+                       padding: const EdgeInsets.symmetric(
+                           horizontal: 14, vertical: 7),
+                       decoration: BoxDecoration(
+                         color: AppTheme.warmAmber.withValues(alpha: 0.18),
+                         borderRadius: BorderRadius.circular(10),
+                         border: Border.all(
+                             color: AppTheme.warmAmber.withValues(alpha: 0.55)),
+                       ),
+                       // The label is long enough to out-measure a phone
+                       // width on its own, so the Text must be Flexible and
+                       // allowed to wrap. It must never be clipped or
+                       // dropped: a modifier that runs has to stay readable,
+                       // strike count included.
+                       child: Row(
+                         mainAxisSize: MainAxisSize.min,
+                         crossAxisAlignment: CrossAxisAlignment.center,
+                         children: [
+                           const Icon(Icons.lock_outline,
+                               size: 16, color: AppTheme.warmAmber),
+                           const SizedBox(width: 6),
+                           Flexible(
+                             child: Text(
+                               'No Way Back  ·  retrace locked  ·  mistakes $_strikes/2',
+                               textAlign: TextAlign.center,
+                               softWrap: true,
+                               style: GoogleFonts.spaceGrotesk(
+                                 color: AppTheme.warmAmber,
+                                 fontWeight: FontWeight.bold,
+                                 fontSize: context.scale(11),
+                                 height: 1.3,
+                               ),
+                             ),
+                           ),
+                         ],
+                       ),
+                     ),
+                   ],
+                   if (_modifierBannerText.isNotEmpty) ...[
                      Padding(
                        padding: const EdgeInsets.only(bottom: 8.0),
                        child: Text(
-                         _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                         _modifierBannerText,
                          textAlign: TextAlign.center,
                          style: GoogleFonts.outfit(
                            fontSize: 13,
@@ -1196,6 +1323,8 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                                          modifierType: _forcedModifier ?? (_isDailyMode ? _dailyModifierType : (_activeModifiers.contains('retro') ? 'retro' : '')),
                                          hideWaypoints: _hideGridPathElements,
                                          isDarkMode: Theme.of(context).brightness == Brightness.dark,
+                                         crackedCells: _crackedCells,
+                                         crackColor: AppTheme.warmAmber.withValues(alpha: 0.45),
                                        ),
                                    ),
                                  ),
@@ -1276,7 +1405,7 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
                 _loadLevel();
               });
             },
-            subtitle: 'You ran out of time!',
+            subtitle: _lossReason,
             accentColor: AppTheme.zipPink,
           ),
         ),
@@ -1301,6 +1430,12 @@ class _ZipPainter extends CustomPainter {
   final bool hideWaypoints;
   final bool isDarkMode;
 
+  /// `ratchet` scars, keyed `r * cols + c`. At most one exists before the
+  /// level ends, and the set is empty on every other level, so drawing them is
+  /// a loop over an empty collection rather than a per-cell test.
+  final Set<int> crackedCells;
+  final Color crackColor;
+
   _ZipPainter({
     required this.level,
     required this.path,
@@ -1316,6 +1451,8 @@ class _ZipPainter extends CustomPainter {
     required this.modifierType,
     required this.hideWaypoints,
     required this.isDarkMode,
+    required this.crackedCells,
+    required this.crackColor,
   }) : super();
 
   Offset _ctr(int r, int c) => Offset(c * cellW + cellW / 2, r * cellH + cellH / 2);
@@ -1382,6 +1519,19 @@ class _ZipPainter extends CustomPainter {
         }
       }
     }
+    for (final key in crackedCells) {
+      final r = key ~/ level.cols;
+      final c = key % level.cols;
+      if (r < 0 || r >= level.rows || c < 0 || c >= level.cols) continue;
+      final rect = Rect.fromLTWH(c * cellW + 3, r * cellH + 3, cellW - 6, cellH - 6);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+        Paint()
+          ..color = crackColor
+          ..style = PaintingStyle.fill,
+      );
+    }
+
     if (path.length > 1) {
       final lp = Path()..moveTo(_ctr(path[0].$1, path[0].$2).dx, _ctr(path[0].$1, path[0].$2).dy);
       for (int i = 1; i < path.length; i++) {
@@ -1446,5 +1596,6 @@ class _ZipPainter extends CustomPainter {
       old.pathColor != pathColor ||
       old.visitedWpColor != visitedWpColor ||
       old.modifierType != modifierType ||
-      old.hideWaypoints != hideWaypoints;
+      old.hideWaypoints != hideWaypoints ||
+      old.crackedCells.length != crackedCells.length;
 }

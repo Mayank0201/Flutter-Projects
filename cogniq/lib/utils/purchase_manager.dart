@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/settings_manager.dart';
 import 'point_manager.dart';
 import 'prefs_keys.dart';
 import 'iap_catalog.dart';
 import 'iap_backend.dart';
+import 'purchase_signature.dart';
 
 enum PurchaseState { idle, pending, success, error, canceled }
 
@@ -174,9 +176,52 @@ class PurchaseManager {
         }
       } else if (purchaseDetails.status == PurchaseStatus.purchased ||
                  purchaseDetails.status == PurchaseStatus.restored) {
-        _grant(purchaseDetails);
+        // Check Google actually signed this before granting anything. Until
+        // 2.4 this line called _grant directly, so the app believed whatever
+        // the billing layer told it — a repackaged APK could claim any
+        // purchase. See purchase_signature.dart for what this does and does
+        // not defend against.
+        if (_isSignatureAcceptable(purchaseDetails)) {
+          _grant(purchaseDetails);
+        } else {
+          debugPrint('PurchaseManager: REJECTED unsigned/forged purchase '
+              '${purchaseDetails.productID}');
+          purchaseStateNotifier.value = PurchaseState.error;
+          if (purchaseDetails.pendingCompletePurchase) {
+            _iap.completePurchase(purchaseDetails);
+          }
+        }
       }
     }
+  }
+
+  /// Whether this receipt carries a valid Google signature.
+  ///
+  /// **Fails OPEN in three cases, deliberately**, because rejecting a genuine
+  /// purchase costs a real customer real money and is a far worse failure than
+  /// letting a determined attacker through a check they could delete anyway:
+  ///
+  ///  * not Android — iOS receipts are a different format entirely;
+  ///  * no key configured — a misconfiguration must not lock out paying users;
+  ///  * the platform gave us no signature to check.
+  ///
+  /// It fails CLOSED only when a signature is present and does not verify,
+  /// which is the forgery case.
+  static bool _isSignatureAcceptable(PurchaseDetails d) {
+    if (d is! GooglePlayPurchaseDetails) return true;
+    if (!PurchaseSignature.isConfigured) {
+      debugPrint('PurchaseManager: no licensing key configured, skipping check');
+      return true;
+    }
+
+    final String signedData = d.billingClientPurchase.originalJson;
+    final String signature = d.billingClientPurchase.signature;
+    if (signedData.isEmpty || signature.isEmpty) {
+      debugPrint('PurchaseManager: no signature supplied, allowing');
+      return true;
+    }
+
+    return PurchaseSignature.verify(signedData, signature);
   }
 
   static Future<void> _grant(PurchaseDetails d) async {

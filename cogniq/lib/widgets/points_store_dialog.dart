@@ -63,7 +63,7 @@ class _PointsStoreDialogState extends State<PointsStoreDialog> {
     });
 
     if (state == PurchaseState.success) {
-      _showSnackBar('Purchase completed successfully!', AppTheme.wordleGreen);
+      _showSnackBar('Purchase completed successfully!', AppTheme.positiveGreen);
       _loadBalance();
       if (widget.onPurchaseComplete != null) {
         widget.onPurchaseComplete!();

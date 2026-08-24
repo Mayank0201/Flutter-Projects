@@ -1,8 +1,12 @@
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/game_info.dart';
 import 'point_manager.dart';
 import 'prefs_keys.dart';
+import 'streak_manager.dart';
+import 'zen_mode.dart';
+import 'trail_catalog.dart';
 
 class Achievement {
   final String id;
@@ -31,6 +35,52 @@ class AchievementManager {
 
   static const List<Achievement> allAchievements = [
     // Milestones
+    // Zen Mode — scored against zen clears only. Rewards are deliberately
+    // modest because zen levels carry no modifiers.
+    Achievement(
+      id: 'zen_first_breath',
+      name: 'First Breath',
+      description: 'Clear 1 level in Zen Mode',
+      icon: '🌱',
+      category: 'zen',
+      rewardPoints: 25,
+    ),
+    Achievement(
+      id: 'zen_stillness',
+      name: 'Stillness',
+      description: 'Clear 25 levels in Zen Mode',
+      icon: '🍃',
+      category: 'zen',
+      rewardPoints: 100,
+    ),
+    Achievement(
+      id: 'zen_ripple',
+      name: 'Ripple',
+      description: 'Clear 50 levels in Zen Mode — unlocks the Zen Ripple trail',
+      icon: '🌿',
+      category: 'zen',
+      rewardPoints: 200,
+    ),
+    Achievement(
+      id: 'zen_deep_calm',
+      name: 'Deep Calm',
+      description: 'Clear 150 levels in Zen Mode',
+      icon: '🧘',
+      category: 'zen',
+      rewardPoints: 400,
+    ),
+    Achievement(
+      id: 'zen_master',
+      name: 'Still Mind',
+      // 'Zen Master' is already the title granted by the 30-day streak
+      // achievement, so this one carries its own.
+      description: 'Clear 400 levels in Zen Mode',
+      icon: '☯️',
+      category: 'zen',
+      rewardPoints: 800,
+      rewardTitle: 'Still Mind',
+    ),
+
     Achievement(
       id: 'first_step',
       name: 'First Step',
@@ -127,7 +177,11 @@ class AchievementManager {
     Achievement(
       id: 'completionist',
       name: 'Completionist',
-      description: 'Play all 16 active games',
+      // Deliberately not a number. The unlock condition is relative
+      // (`playedGamesCount >= activeGames.length`), so any hardcoded count goes
+      // stale the moment a game is added — it said 15 when there were 12, and 16
+      // when Kakuro made it 17.
+      description: 'Play every active game',
       icon: '🎒',
       category: 'exploration',
       rewardPoints: 750,
@@ -181,6 +235,43 @@ class AchievementManager {
       rewardTitle: 'Deep Diver',
     ),
 
+    // Seasonal events (S3, release 2.1). Unlocked by SeasonalEventManager and
+    // claimed through the normal manual-claim flow. `category: 'seasonal'` is
+    // new, and this id deliberately matches no `case` in checkAndUnlock — the
+    // event manager owns the unlock condition, so it must never auto-fire here.
+    Achievement(
+      id: 'event_spring_thaw',
+      name: 'Spring Thaw',
+      description: 'Clear 5 levels during the Spring Thaw event',
+      icon: '🌱',
+      category: 'seasonal',
+      rewardPoints: 200,
+    ),
+    Achievement(
+      id: 'event_summer_light',
+      name: 'Long Light',
+      description: 'Clear 5 levels during the Long Light event',
+      icon: '☀️',
+      category: 'seasonal',
+      rewardPoints: 200,
+    ),
+    Achievement(
+      id: 'event_autumn_harvest',
+      name: 'Gathering In',
+      description: 'Clear 5 levels during the Gathering In event',
+      icon: '🍂',
+      category: 'seasonal',
+      rewardPoints: 200,
+    ),
+    Achievement(
+      id: 'event_winter_lights',
+      name: 'Winter Lights',
+      description: 'Clear 5 levels during the Winter Lights event',
+      icon: '❄️',
+      category: 'seasonal',
+      rewardPoints: 200,
+    ),
+
     // Streak
     Achievement(
       id: 'consistent',
@@ -216,6 +307,36 @@ class AchievementManager {
       category: 'streak',
       rewardPoints: 2500,
       rewardTitle: 'Unbroken',
+    ),
+
+    // Active-day streak (S1). Scored against StreakManager's parallel
+    // "played anything today" streak — Zen counts, so does a daily challenge —
+    // rather than the daily-challenge-only streak the four above use.
+    Achievement(
+      id: 'streak_active_7',
+      name: 'In Rhythm',
+      description: 'Play something 7 days in a row',
+      icon: '📆',
+      category: 'streak',
+      rewardPoints: 250,
+    ),
+    Achievement(
+      id: 'streak_active_30',
+      name: 'Month in Motion',
+      description: 'Play something 30 days in a row',
+      icon: '🌗',
+      category: 'streak',
+      rewardPoints: 750,
+      rewardTitle: 'Devoted',
+    ),
+    Achievement(
+      id: 'streak_active_100',
+      name: 'Hundred Days',
+      description: 'Play something 100 days in a row',
+      icon: '💯',
+      category: 'streak',
+      rewardPoints: 2500,
+      rewardTitle: 'Relentless',
     ),
 
     // Special
@@ -277,14 +398,27 @@ class AchievementManager {
       category: 'special',
       rewardPoints: 250,
     ),
+    // Trail Collector is tiered so that the early rungs stay reachable now
+    // that star trails exist. Tier I keeps the original `trail_collector` id
+    // *and* its original six-trail requirement, so every player who already
+    // earned it keeps it and nobody's progress is quietly reset.
     Achievement(
       id: 'trail_collector',
-      name: 'Trail Collector',
-      description: 'Own all 6 swipe trail styles',
+      name: 'Trail Collector I',
+      description: 'Own all 6 buyable swipe trail styles',
       icon: '🎨',
       category: 'special',
       rewardPoints: 1000,
       rewardTitle: 'Stylist',
+    ),
+    Achievement(
+      id: 'trail_collector_ii',
+      name: 'Trail Collector II',
+      description: 'Add the star trails Morning Mist and Tide Line',
+      icon: '🖌️',
+      category: 'special',
+      rewardPoints: 2000,
+      rewardTitle: 'Trailblazer',
     ),
     Achievement(
       id: 'welcome_back',
@@ -295,6 +429,18 @@ class AchievementManager {
       rewardPoints: 200,
     ),
   ];
+
+  /// The trail ids a Trail Collector tier requires. Nested by design: II is
+  /// I plus two, III is II plus five, so the tiers can only ever be earned in
+  /// order. The lists themselves live in [TrailCatalog] with the unlock rules.
+  static List<String> _collectorTier(String achievementId) {
+    switch (achievementId) {
+      case 'trail_collector_ii':
+        return TrailCatalog.collectorTierII;
+      default:
+        return TrailCatalog.collectorTierI;
+    }
+  }
 
   static Future<void> resetClearStreak() async {
     final prefs = await SharedPreferences.getInstance();
@@ -343,16 +489,29 @@ class AchievementManager {
 
     // Read current stats
     final globalClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
-    final dailyStreak = prefs.getInt(PrefsKeys.dailyStreak) ?? 0;
+    // The live daily system writes dailyV2Streak; dailyStreak is the V1 key
+    // and is now only ever read. Using it alone made every streak
+    // achievement impossible to unlock. Take whichever is higher so
+    // pre-migration progress still counts.
+    final dailyStreak = max(
+      prefs.getInt(PrefsKeys.dailyV2Streak) ?? 0,
+      prefs.getInt(PrefsKeys.dailyStreak) ?? 0,
+    );
     final shuffleClears = prefs.getInt(PrefsKeys.shuffleClears) ?? 0;
+    // S1's parallel active-day streak. Kept separate from dailyStreak above so
+    // that "played anything today" can never satisfy a daily-challenge badge.
+    final activeStreak = prefs.getInt(StreakManager.activeStreakKey) ?? 0;
 
     // Get per-game stats
     final activeGames = kAllGames.where((g) => !g.isStashed).toList();
     int playedGamesCount = 0;
     int maxLevelReached = 0;
 
+    // Challenge achievements must measure Challenge progress explicitly. The
+    // plain gameLevel() key follows whichever mode is active, so reading it
+    // here would score zen progress against these achievements.
     for (final game in activeGames) {
-      final level = prefs.getInt(PrefsKeys.gameLevel(game.id)) ?? 0;
+      final level = prefs.getInt(PrefsKeys.normalGameLevel(game.id)) ?? 0;
       if (level > 0) {
         playedGamesCount++;
       }
@@ -361,10 +520,12 @@ class AchievementManager {
       }
     }
 
-    final levelChimp = prefs.getInt(PrefsKeys.gameLevel('chimp')) ?? 0;
+    final levelChimp = prefs.getInt(PrefsKeys.normalGameLevel('chimp')) ?? 0;
 
     for (final a in allAchievements) {
       if (unlocked.contains(a.id)) continue;
+      // Zen achievements are scored against zen clears in checkAndUnlockZen.
+      if (a.category == 'zen') continue;
 
       bool conditionMet = false;
 
@@ -439,6 +600,15 @@ class AchievementManager {
         case 'unbroken':
           conditionMet = dailyStreak >= 100;
           break;
+        case 'streak_active_7':
+          conditionMet = activeStreak >= 7;
+          break;
+        case 'streak_active_30':
+          conditionMet = activeStreak >= 30;
+          break;
+        case 'streak_active_100':
+          conditionMet = activeStreak >= 100;
+          break;
 
         // Special
         case 'shuffle_master':
@@ -466,12 +636,60 @@ class AchievementManager {
           conditionMet = tac >= 50;
           break;
         case 'trail_collector':
-          final claimedTrails = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
-          final trailIds = ['accent', 'pastel', 'sparkle', 'neon_glow', 'rainbow', 'fire'];
-          conditionMet = trailIds.every((id) => claimedTrails.contains(id));
+        case 'trail_collector_ii':
+        case 'trail_collector_iii':
+          final claimedTrails =
+              prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+          conditionMet = _collectorTier(a.id)
+              .every((id) => claimedTrails.contains(id));
           break;
         case 'welcome_back':
           conditionMet = prefs.getBool('welcome_back_earned') ?? false;
+          break;
+      }
+
+      if (conditionMet) {
+        unlocked.add(a.id);
+        newlyUnlocked.add(a);
+      }
+    }
+
+    if (newlyUnlocked.isNotEmpty) {
+      await prefs.setStringList(PrefsKeys.unlockedAchievements, unlocked);
+    }
+
+    return newlyUnlocked;
+  }
+
+  /// Zen-only achievements, scored against the separate zen clear tally.
+  ///
+  /// Kept apart from [checkAndUnlock] so that Challenge achievements can never
+  /// be satisfied by zen play, which has no modifiers and is therefore easier.
+  static Future<List<Achievement>> checkAndUnlockZen(int zenClears) async {
+    final prefs = await SharedPreferences.getInstance();
+    final unlocked = prefs.getStringList(PrefsKeys.unlockedAchievements) ?? [];
+    final newlyUnlocked = <Achievement>[];
+
+    for (final a in allAchievements) {
+      if (a.category != 'zen') continue;
+      if (unlocked.contains(a.id)) continue;
+
+      bool conditionMet = false;
+      switch (a.id) {
+        case 'zen_first_breath':
+          conditionMet = zenClears >= 1;
+          break;
+        case 'zen_stillness':
+          conditionMet = zenClears >= 25;
+          break;
+        case 'zen_ripple':
+          conditionMet = zenClears >= kZenTrailRequiredClears;
+          break;
+        case 'zen_deep_calm':
+          conditionMet = zenClears >= 150;
+          break;
+        case 'zen_master':
+          conditionMet = zenClears >= 400;
           break;
       }
 
@@ -538,20 +756,45 @@ class AchievementManager {
   static Future<double> getProgress(Achievement a) async {
     final prefs = await SharedPreferences.getInstance();
     final globalClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
-    final dailyStreak = prefs.getInt(PrefsKeys.dailyStreak) ?? 0;
+    // The live daily system writes dailyV2Streak; dailyStreak is the V1 key
+    // and is now only ever read. Using it alone made every streak
+    // achievement impossible to unlock. Take whichever is higher so
+    // pre-migration progress still counts.
+    final dailyStreak = max(
+      prefs.getInt(PrefsKeys.dailyV2Streak) ?? 0,
+      prefs.getInt(PrefsKeys.dailyStreak) ?? 0,
+    );
     final shuffleClears = prefs.getInt(PrefsKeys.shuffleClears) ?? 0;
+    final activeStreak = prefs.getInt(StreakManager.activeStreakKey) ?? 0;
 
     final activeGames = kAllGames.where((g) => !g.isStashed).toList();
     int playedGamesCount = 0;
     int maxLevelReached = 0;
 
     for (final game in activeGames) {
-      final level = prefs.getInt(PrefsKeys.gameLevel(game.id)) ?? 0;
+      final level = prefs.getInt(PrefsKeys.normalGameLevel(game.id)) ?? 0;
       if (level > 0) playedGamesCount++;
       if (level > maxLevelReached) maxLevelReached = level;
     }
 
-    final levelChimp = prefs.getInt(PrefsKeys.gameLevel('chimp')) ?? 0;
+    final levelChimp = prefs.getInt(PrefsKeys.normalGameLevel('chimp')) ?? 0;
+
+    if (a.category == 'zen') {
+      final zenClears = prefs.getInt(ZenMode.zenClearedCountKey) ?? 0;
+      switch (a.id) {
+        case 'zen_first_breath':
+          return (zenClears / 1.0).clamp(0.0, 1.0);
+        case 'zen_stillness':
+          return (zenClears / 25.0).clamp(0.0, 1.0);
+        case 'zen_ripple':
+          return (zenClears / kZenTrailRequiredClears).clamp(0.0, 1.0);
+        case 'zen_deep_calm':
+          return (zenClears / 150.0).clamp(0.0, 1.0);
+        case 'zen_master':
+          return (zenClears / 400.0).clamp(0.0, 1.0);
+      }
+      return 0.0;
+    }
 
     switch (a.id) {
       // Milestones
@@ -603,6 +846,12 @@ class AchievementManager {
         return (dailyStreak / 30.0).clamp(0.0, 1.0);
       case 'unbroken':
         return (dailyStreak / 100.0).clamp(0.0, 1.0);
+      case 'streak_active_7':
+        return (activeStreak / 7.0).clamp(0.0, 1.0);
+      case 'streak_active_30':
+        return (activeStreak / 30.0).clamp(0.0, 1.0);
+      case 'streak_active_100':
+        return (activeStreak / 100.0).clamp(0.0, 1.0);
 
       // Special
       case 'shuffle_master':
@@ -623,10 +872,13 @@ class AchievementManager {
         final tac = prefs.getInt(PrefsKeys.trailActiveClears) ?? 0;
         return (tac / 50.0).clamp(0.0, 1.0);
       case 'trail_collector':
-        final claimedTrails = prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
-        final trailIds = ['accent', 'pastel', 'sparkle', 'neon_glow', 'rainbow', 'fire'];
-        final count = trailIds.where((id) => claimedTrails.contains(id)).length;
-        return (count / 6.0).clamp(0.0, 1.0);
+      case 'trail_collector_ii':
+      case 'trail_collector_iii':
+        final claimedTrails =
+            prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+        final tier = _collectorTier(a.id);
+        final count = tier.where((t) => claimedTrails.contains(t)).length;
+        return (count / tier.length).clamp(0.0, 1.0);
       case 'welcome_back':
         return (prefs.getBool('welcome_back_earned') ?? false) ? 1.0 : 0.0;
       default:

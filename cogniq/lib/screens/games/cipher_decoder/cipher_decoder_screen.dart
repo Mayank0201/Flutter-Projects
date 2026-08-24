@@ -1,5 +1,7 @@
 import 'dart:math';
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,8 +11,48 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_level_chip.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/point_manager.dart';
+import '../../../utils/progress_guard.dart';
+import '../../../utils/audio_manager.dart';
+import '../../../utils/rotation_engine.dart';
+import 'cipher_decoder_logic.dart';
+
+/// Cipher Decoder's free-play modifier pool.
+///
+/// This game had **no pool at all** before 2.3 — its only modifier hook was a
+/// `fog` overlay that nothing ever scheduled, because the game was stashed. All
+/// five entries below are implemented in this file and each one is announced to
+/// the player in the banner under the rule line, which is what `md/remember.md`
+/// §8 requires: a pooled modifier that is not implemented, or is implemented but
+/// invisible, is a defect.
+///
+///  * `timer`   — countdown in the app bar; expiry restarts the level.
+///  * `fog`     — the phrase is dark except around the pointer.
+///  * `whisper` — the small cipher letters under each tile are hidden. Costs
+///                information but not solvability: the decoded letters and the
+///                dial reading are both still on screen.
+///  * `quota`   — a dial-turn budget, sized by
+///                [CipherLogic.fairTurnBudget] from the board itself so it is
+///                always enough for a full scan of every unknown plus the
+///                clicks to set the remaining dials. A budget a perfect player
+///                cannot meet is a broken level, not a hard one.
+///  * `retro`   — green-on-black terminal skin.
+///
+/// Deliberately NOT included: `zoom`. The board here is a short column of word
+/// cards, not a dense grid, and an InteractiveViewer would fight the vertical
+/// scroll the long six-word phrases need.
+const List<String> kCipherDecoderModifierPool = [
+  'timer',
+  'fog',
+  'whisper',
+  'quota',
+  'retro',
+];
+
+const String _kGameId = 'cipherdecoder';
 
 class CipherDecoderScreen extends StatefulWidget {
   const CipherDecoderScreen({super.key});
@@ -24,42 +66,48 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
   bool _isSuccess = false;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
+  String? _forcedModifier;
   double _dailyRadius = 1.5;
-
-  String _phrase = ""; // Original target phrase (e.g., "HELLO WORLD")
-  String _encoded = ""; // Encrypted phrase (e.g., "IFMMP XQSME")
-  
-  // Maps the encrypted character ('A'-'Z') to the player's guessed character ('A'-'Z')
-  Map<String, String> _mappings = {};
-
-  int _selectedIdx = -1; // Index in the phrase string
   bool _isLoading = true;
 
-  static const List<String> _kSingleWords = [
-    "LOGIC", "BRAIN", "CIPHER", "DECODE", "MYSTERY", "SECRET", "SOLVER", "PUZZLE", "MATRIX"
-  ];
-  static const List<String> _kTwoWords = [
-    "THINK FAST", "KEEP FOCUS", "SOLVE THIS", "CODE BREAKER", "MIND SHIFT", "SHARP BRAIN", "DEEP THINK"
-  ];
-  static const List<String> _kThreeWords = [
-    "DREAM WORK FOCUS", "LOGIC LEADS WAY", "SOLVE THE CODE", "KNOWLEDGE IS POWER", "NEVER GIVE UP"
-  ];
-  static const List<String> _kPhrases = [
-    "LOGIC IS THE BEGINNING OF WISDOM",
-    "NEVER TRUST A COMPUTER YOU CANNOT THROW",
-    "TO BE OR NOT TO BE THAT IS THE QUESTION",
-    "DO OR DO NOT THERE IS NO TRY",
-    "STAY HUNGRY STAY FOOLISH ALWAYS",
-    "SIMPLICITY IS THE ULTIMATE SOPHISTICATION",
-    "I THINK THEREFORE I AM ALIVE",
-    "INNOVATION DISTINGUISHES LEADERS FROM FOLLOWERS",
-    "THE ONLY WAY TO DO GREAT WORK IS TO LOVE IT",
-    "PRACTICE MAKES PERFECT IN EVERY WAY",
-    "CREATIVITY IS INTELLIGENCE HAVING FUN",
-    "DETERMINATION LEADS TO GRAND SUCCESS",
-    "FOCUS ON THE JOURNEY NOT THE DESTINATION",
-    "DREAM BIG WORK HARD STAY FOCUSED",
-  ];
+  CipherBoard? _board;
+
+  /// One dial per word, 0–25. All start at 0, which shows the raw ciphertext —
+  /// generation guarantees no word's answer is 0, so nothing is pre-solved.
+  List<int> _dials = [];
+
+  /// Words whose dial a hint has already given away.
+  final Set<int> _revealed = {};
+
+  Set<String> _activeModifiers = {};
+  Timer? _gameTimer;
+  int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
+  bool _timeBonusEarned = false;
+
+  /// `quota`: turns left, and the budget to restore on reset. -1 when inactive.
+  int _turnsLeft = -1;
+  int _turnBudget = -1;
+
+  Color get _accent => AppTheme.accentFor(_kGameId);
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _currentLevel >= RotationEngine.modifierStartLevel(_kGameId) &&
+        _activeModifiers.contains(name);
+  }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isEndgame => _isModActive('timer');
+
+  bool get _modsOn =>
+      !_playDailyMode && RotationEngine.hasModifiers(_kGameId, _currentLevel);
 
   @override
   void initState() {
@@ -67,15 +115,25 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
     _loadProgressAndGenerate();
   }
 
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadProgressAndGenerate() async {
     final prefs = await SharedPreferences.getInstance();
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
-      final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
+      final extraParamsStr =
+          prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
-          final extraParams = jsonDecode(extraParamsStr) as Map<String, dynamic>;
+          final extraParams =
+              jsonDecode(extraParamsStr) as Map<String, dynamic>;
           if (extraParams.containsKey('radius')) {
             _dailyRadius = (extraParams['radius'] as num).toDouble();
           } else {
@@ -89,10 +147,12 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
       }
     } else {
       _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
       _dailyRadius = 1.5;
     }
 
-    int level = prefs.getInt(PrefsKeys.gameLevel('cipherdecoder')) ?? 0;
+    final level = prefs.getInt(PrefsKeys.gameLevel(_kGameId)) ?? 0;
     if (mounted) {
       setState(() {
         _currentLevel = level;
@@ -102,149 +162,267 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
     }
   }
 
-  bool _isLetter(String c) {
-    if (c.isEmpty) return false;
-    int code = c.codeUnitAt(0);
-    return code >= 65 && code <= 90;
-  }
-
-  bool _isVowel(String c) {
-    return c == 'A' || c == 'E' || c == 'I' || c == 'O' || c == 'U';
+  /// Debug-only level jump. `GameLevelChip` only wires this up when `kDebugMode`
+  /// is true, so it is compiled out of release builds.
+  void _showJumpToLevelDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        int target = _currentLevel + 1;
+        return AlertDialog(
+          backgroundColor: context.bgCard,
+          title: Text('Jump to Level',
+              style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold, color: context.textPrimary)),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            style: GoogleFonts.outfit(color: context.textPrimary),
+            decoration: InputDecoration(
+              labelText: 'Level Number (1+)',
+              labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+            ),
+            onChanged: (val) => target = int.tryParse(val) ?? target,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: context.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                if (target > 0) {
+                  setState(() {
+                    _currentLevel = target - 1;
+                    _isLoading = true;
+                  });
+                  _generatePuzzle();
+                }
+              },
+              child: Text('Jump', style: GoogleFonts.outfit(color: _accent)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _generatePuzzle() {
-    final rand = Random();
-    
-    // 1. Pick a phrase based on progressive level difficulty
-    if (_currentLevel < 3) {
-      _phrase = _kSingleWords[_currentLevel % _kSingleWords.length].toUpperCase();
-    } else if (_currentLevel < 6) {
-      _phrase = _kTwoWords[(_currentLevel - 3) % _kTwoWords.length].toUpperCase();
-    } else if (_currentLevel < 9) {
-      _phrase = _kThreeWords[(_currentLevel - 6) % _kThreeWords.length].toUpperCase();
+    _gameTimer?.cancel();
+    _timeLeft = -1;
+    _timeBonusEarned = false;
+    _turnsLeft = -1;
+    _turnBudget = -1;
+    _revealed.clear();
+
+    if (_modsOn) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: _kGameId,
+        levelIndex: _currentLevel,
+        pool: kCipherDecoderModifierPool,
+        minActive: 1,
+        maxActive: 2,
+      );
     } else {
-      _phrase = _kPhrases[(_currentLevel - 9) % _kPhrases.length].toUpperCase();
+      _activeModifiers = {};
     }
 
-    // 2. Encrypt based on level difficulty scaling
-    _mappings.clear();
+    // Seeded, not random: the same (gameId, level) must produce the same board
+    // on every device and every replay, or hints, daily challenges and bug
+    // reports stop being reproducible (remember.md — the seeded-RNG law). The
+    // stashed build used a bare `Random()` and never imported RotationEngine at
+    // all. Generation itself lives in cipher_decoder_logic.dart, gated on a
+    // brute-force dial solver — see CipherLogic.verify.
+    final board = CipherLogic.generate(
+      _currentLevel,
+      RotationEngine.getDeterminism(_kGameId, _currentLevel),
+    );
+    _board = board;
+    _dials = List<int>.filled(board.wordCount, 0);
 
-    if (_currentLevel < 5) {
-      // Easy: Uniform Shift
-      int shift = rand.nextInt(25) + 1;
-      _encoded = _encryptUniform(_phrase, shift);
-    } else if (_currentLevel < 12) {
-      // Medium: Vowel vs Consonant Shift
-      int vShift = rand.nextInt(25) + 1;
-      int cShift = rand.nextInt(25) + 1;
-      while (vShift == cShift) {
-        cShift = rand.nextInt(25) + 1;
-      }
-      _encoded = _encryptVowelConsonant(_phrase, vShift, cShift);
-    } else {
-      // Hard: Progressive Word Shift
-      int baseShift = rand.nextInt(25) + 1;
-      _encoded = _encryptProgressive(_phrase, baseShift);
+    if (_isModActive('quota')) {
+      _turnBudget = CipherLogic.fairTurnBudget(board);
+      _turnsLeft = _turnBudget;
     }
+
+    // The one place per level load that resets the no-hint-used flag.
+    unawaited(HintManager.startLevel(_kGameId));
 
     setState(() {
       _isSuccess = false;
-      _selectedIdx = -1;
       _isLoading = false;
+    });
+
+    if (_isModActive('timer')) {
+      _timeLeft = 45 + board.wordCount * 20;
+      _initialTime = _timeLeft;
+      _timeBonusEarned = true;
+      _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          if (_timeLeft > 0) {
+            _timeLeft--;
+          } else {
+            _timeLeft = 0;
+            _timeBonusEarned = false;
+            _gameTimer?.cancel();
+            AudioManager.playFail();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Time is up! Restarting level...'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+            _generatePuzzle();
+          }
+        });
+      });
+    }
+  }
+
+  // ------------------------------------------------------------------- dials
+
+  void _turn(int wordIndex, int delta) {
+    if (_isSuccess || _board == null) return;
+    if (_turnsLeft == 0) return;
+
+    settingsNotifier.hapticTap();
+    setState(() {
+      _dials[wordIndex] = (_dials[wordIndex] + delta) % 26;
+      if (_dials[wordIndex] < 0) _dials[wordIndex] += 26;
+      if (_turnsLeft > 0) _turnsLeft--;
+    });
+
+    if (_isWon()) {
+      settingsNotifier.hapticSuccess();
+      _onLevelCleared();
+      return;
+    }
+
+    // `quota`: the budget is sized so a full scan of every unknown fits, so
+    // running out means the turns were spent elsewhere. Restart rather than
+    // strand the player on a board they can no longer touch.
+    if (_turnsLeft == 0) {
+      AudioManager.playFail();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Out of turns! Restarting level...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      _generatePuzzle();
+    }
+  }
+
+  bool _isWon() {
+    final board = _board;
+    if (board == null) return false;
+    final want = board.solutionDials;
+    for (var w = 0; w < want.length; w++) {
+      if (_dials[w] != want[w]) return false;
+    }
+    return true;
+  }
+
+  /// Reset means "zero all dials" — the board itself is untouched, so the
+  /// `quota` budget deliberately keeps running.
+  void _resetDials() {
+    if (_isSuccess || _board == null) return;
+    settingsNotifier.hapticTap();
+    setState(() {
+      _dials = List<int>.filled(_board!.wordCount, 0);
     });
   }
 
-  String _encryptUniform(String phrase, int shift) {
-    final buffer = StringBuffer();
-    for (int i = 0; i < phrase.length; i++) {
-      String char = phrase[i];
-      if (_isLetter(char)) {
-        int code = ((char.codeUnitAt(0) - 65 + shift) % 26) + 65;
-        buffer.write(String.fromCharCode(code));
-      } else {
-        buffer.write(char);
-      }
-    }
-    return buffer.toString();
-  }
+  // ------------------------------------------------------------------- hints
 
-  String _encryptVowelConsonant(String phrase, int vShift, int cShift) {
-    final buffer = StringBuffer();
-    for (int i = 0; i < phrase.length; i++) {
-      String char = phrase[i];
-      if (_isLetter(char)) {
-        int shift = _isVowel(char) ? vShift : cShift;
-        int code = ((char.codeUnitAt(0) - 65 + shift) % 26) + 65;
-        buffer.write(String.fromCharCode(code));
-      } else {
-        buffer.write(char);
-      }
-    }
-    return buffer.toString();
-  }
+  /// Reveals one word's dial.
+  ///
+  /// The stashed build spent a hint (and `BuyHintsDialog` sold more) on boards
+  /// that were mathematically impossible, then wrote a mapping that broke
+  /// another position. Two guards now stand between a hint and the player's
+  /// balance: the board must pass the solver, and there must be a word left to
+  /// reveal. After the redesign no board is unsolvable at all — asserted in
+  /// test/cipher_decoder_logic_test.dart — so the first guard should never
+  /// fire, which is exactly why it is cheap to keep.
+  Future<void> _showHint() async {
+    final board = _board;
+    if (board == null || _isSuccess) return;
 
-  String _encryptProgressive(String phrase, int baseShift) {
-    final words = phrase.split(" ");
-    final encryptedWords = <String>[];
-
-    for (int w = 0; w < words.length; w++) {
-      final word = words[w];
-      final wordShift = (baseShift + w) % 26;
-      final buffer = StringBuffer();
-      for (int i = 0; i < word.length; i++) {
-        String char = word[i];
-        if (_isLetter(char)) {
-          int code = ((char.codeUnitAt(0) - 65 + wordShift) % 26) + 65;
-          buffer.write(String.fromCharCode(code));
-        } else {
-          buffer.write(char);
-        }
-      }
-      encryptedWords.add(buffer.toString());
-    }
-
-    return encryptedWords.join(" ");
-  }
-
-  void _checkSolution() {
-    bool isSolved = true;
-    for (int i = 0; i < _phrase.length; i++) {
-      String origChar = _phrase[i];
-      if (_isLetter(origChar)) {
-        String encChar = _encoded[i];
-        String guess = _mappings[encChar] ?? "";
-        if (guess != origChar) {
-          isSolved = false;
-          break;
-        }
-      }
-    }
-
-    if (isSolved) {
-      settingsNotifier.hapticSuccess();
-      _onLevelCleared();
-    } else {
-      settingsNotifier.hapticError();
+    if (!CipherLogic.analyze(board).solvable) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Incorrect translation! Keep decoding the cipher shift.')),
+        const SnackBar(content: Text('This board cannot be hinted.')),
       );
+      return;
+    }
+
+    final want = board.solutionDials;
+    int target = -1;
+    for (var w = 0; w < want.length; w++) {
+      if (_dials[w] != want[w]) {
+        target = w;
+        break;
+      }
+    }
+    if (target == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Every dial is already set.')),
+      );
+      return;
+    }
+
+    final hints = await HintManager.getHints(_kGameId);
+    if (!mounted) return;
+    if (hints > 0) {
+      await HintManager.useHint(_kGameId);
+      if (!mounted) return;
+      setState(() {
+        _dials[target] = want[target];
+        _revealed.add(target);
+      });
+      if (_isWon()) {
+        settingsNotifier.hapticSuccess();
+        _onLevelCleared();
+      }
+    } else {
+      BuyHintsDialog.show(context, initialGameId: _kGameId,
+          onPurchaseComplete: () {
+        setState(() {});
+      });
     }
   }
+
+  // ----------------------------------------------------------- level clearing
 
   Future<void> _onLevelCleared() async {
-    if (!_playDailyMode) {
-      final prefs = await SharedPreferences.getInstance();
-      int highest = prefs.getInt('beta_level_cipherdecoder') ?? 0;
-      if (_currentLevel + 1 > highest) {
-        await prefs.setInt('beta_level_cipherdecoder', _currentLevel + 1);
-      }
-      await prefs.setInt(PrefsKeys.gameLevel('cipherdecoder'), _currentLevel + 1);
+    _gameTimer?.cancel();
 
-      int currentClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
-      await prefs.setInt(PrefsKeys.globalLevelClearedCount, currentClears + 1);
+    // Routed through the shared managers. The stashed build wrote its own
+    // `beta_level_cipherdecoder` key and bumped `globalLevelClearedCount` by
+    // hand, which bypasses the Zen/Challenge split HintManager.onLevelCleared
+    // owns and lets a daily run overwrite free-play progress.
+    if (!_playDailyMode) {
+      await ProgressGuard.saveLevel(_kGameId, _currentLevel + 1, isDaily: false);
+      await HintManager.onLevelCleared(
+        _kGameId,
+        // Speed Demon: cleared a hard-timer level with more than half the
+        // clock still left. _initialTime is 0 unless the timer modifier ran.
+        isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+      );
+      // The base award is HintManager.onLevelCleared's own 10 points — do NOT
+      // add another flat amount on top. The extra 5 is a SPEED BONUS, gated on
+      // beating the timer, not a per-clear payment.
+      if (_timeLeft > 0 && _timeBonusEarned) {
+        await PointManager.addPoints(5);
+      }
     }
 
-    setState(() => _isSuccess = true);
+    if (mounted) setState(() => _isSuccess = true);
   }
 
   void _nextLevel() {
@@ -255,52 +433,60 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
     _generatePuzzle();
   }
 
-  void _showHint() async {
-    if (_selectedIdx == -1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a letter slot first!')),
-      );
-      return;
-    }
+  // --------------------------------------------------------------- modifiers
 
-    String encChar = _encoded[_selectedIdx];
-    if (!_isLetter(encChar)) return;
-
-    final hints = await HintManager.getHints('cipherdecoder');
-    if (hints > 0) {
-      await HintManager.useHint('cipherdecoder');
-      String targetChar = _phrase[_selectedIdx];
-      setState(() {
-        _mappings[encChar] = targetChar;
-      });
-    } else {
-      BuyHintsDialog.show(context, initialGameId: 'cipherdecoder', onPurchaseComplete: () {
-        setState(() {});
-      });
+  // COGNIQ-FIX:mod-desc-copy
+  String _getModifierDescription(String id) {
+    switch (id) {
+      case 'timer':
+        return 'Decode the phrase before time expires.';
+      case 'fog':
+        return 'A dense fog obscures portions of the grid.';
+      case 'whisper':
+        return 'The small cipher hints below tiles are hidden.';
+      case 'quota':
+        return 'Limited turns available to rotate dials.';
+      case 'retro':
+        return 'Terminal monochrome visual theme.';
+      default:
+        return '';
     }
   }
 
-  void _onKeyboardTap(String key) {
-    if (_selectedIdx == -1) return;
-    String encChar = _encoded[_selectedIdx];
-    if (!_isLetter(encChar)) return;
-
-    settingsNotifier.hapticTap();
-    setState(() {
-      _mappings[encChar] = key;
-    });
+  String get _modifierBannerText {
+    if (_isSuccess) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
 
-  void _clearMapping() {
-    if (_selectedIdx == -1) return;
-    String encChar = _encoded[_selectedIdx];
-    if (!_isLetter(encChar)) return;
-
-    settingsNotifier.hapticTap();
-    setState(() {
-      _mappings.remove(encChar);
-    });
+  List<String> get _visibleModifiers {
+    if (_playDailyMode) {
+      return kCipherDecoderModifierPool.contains(_dailyModifierType)
+          ? [_dailyModifierType]
+          : const [];
+    }
+    if (!_modsOn) return const [];
+    return kCipherDecoderModifierPool
+        .where(_activeModifiers.contains)
+        .toList();
   }
+
+  // ----------------------------------------------------------------- theming
+
+  bool get _retro => _isModActive('retro');
+  Color _cardColor(BuildContext ctx) =>
+      _retro ? const Color(0xFF04170A) : ctx.bgCard;
+  Color _inkColor(BuildContext ctx) =>
+      _retro ? const Color(0xFF7CFC9B) : ctx.textPrimary;
+  Color _mutedColor(BuildContext ctx) =>
+      _retro ? const Color(0xFF3E8B57) : ctx.textMuted;
 
   void _showInstructions() {
     showDialog(
@@ -309,13 +495,22 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
         backgroundColor: context.bgCard,
         title: Text(
           'How to Play Cipher Decoder',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: context.textPrimary),
+          style: GoogleFonts.outfit(
+              fontWeight: FontWeight.bold, color: context.textPrimary),
         ),
         content: Text(
-          '1. Decode the secret encrypted sentence.\n\n'
-          '2. Select any letter block and type a letter on the keyboard to map it.\n\n'
-          '3. Assigning a letter updates all matching cipher letters across the screen.\n\n'
-          '4. Easy ciphers use a single shift. Harder levels use multi-pattern or word-by-word progressive shifts.',
+          '1. Every word sits on its own dial, like the wheels of a '
+          'combination lock.\n\n'
+          '2. Turn a dial and that word\'s letters rotate through the '
+          'alphabet with it.\n\n'
+          '3. Set every dial so the whole phrase reads as plain English. '
+          'The level clears the moment it does.\n\n'
+          '4. Read the rule at the top: early on all the words share one '
+          'shift, later each word steps on from the one before it, and later '
+          'still that step is yours to work out. Crack a single word and the '
+          'rule hands you the rest.\n\n'
+          '5. A hint reveals one word\'s dial. Reset returns every dial to '
+          'zero.',
           style: GoogleFonts.outfit(color: context.textSecondary),
         ),
         actions: [
@@ -323,7 +518,8 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
             onPressed: () => Navigator.pop(context),
             child: Text(
               'Got it',
-              style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold),
+              style:
+                  GoogleFonts.outfit(color: _accent, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -331,164 +527,187 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
     );
   }
 
+  // ------------------------------------------------------------------- build
+
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    final board = _board;
+    if (_isLoading || board == null) {
       return Scaffold(
         backgroundColor: context.bgDark,
-        body: const Center(child: CircularProgressIndicator(color: AppTheme.dustyMauve)),
+        body: Center(child: CircularProgressIndicator(color: _accent)),
       );
     }
 
-    // Split phrase into words for clean wrapped rendering
-    final List<String> encWords = _encoded.split(" ");
-    int globalCharOffset = 0;
-
-    final double screenW = MediaQuery.of(context).size.width;
-    final double keyWidth = min(36.0, (screenW - 68) / 10);
+    final mods = _visibleModifiers;
 
     return Scaffold(
-      backgroundColor: context.bgDark,
+      backgroundColor: _retro ? const Color(0xFF020A05) : context.bgDark,
       appBar: AppBar(
-        title: Text('Cipher Decoder', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        title: const GameTitle('Cipher Decoder'),
+        leading: IconButton(
+          tooltip: 'Back',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+        // Back + info + hint + countdown + level chip is more than a 320px bar
+        // can hold at default icon metrics, so the two action icons are compact
+        // and the countdown carries no padding of its own.
+        actionsIconTheme: const IconThemeData(size: 20),
         actions: [
           IconButton(
-            icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+            icon: Icon(Icons.info_outline, color: _accent),
             tooltip: 'Instructions',
             onPressed: _showInstructions,
           ),
           IconButton(
-            icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+            icon: Icon(Icons.lightbulb_outline, color: _accent),
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
+          if (_timeLeft >= 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.timer,
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        size: 16),
+                    const SizedBox(width: 2),
+                    Text(
+                      '${_timeLeft}s',
+                      style: GoogleFonts.spaceGrotesk(
+                        color: _timeLeft <= 10 ? Colors.red : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
+          // The standard level indicator — must be the LAST action, and nothing
+          // else on the screen may show the level. See remember.md E2 §7.
+          GameLevelChip(
+            level: _currentLevel + 1,
+            modeLabel: _playDailyMode ? 'Daily' : null,
+            accent: _accent,
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
       body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        Text(
-                          _currentLevel < 5
-                              ? 'Difficulty: Easy (Uniform Caesar Shift)'
-                              : _currentLevel < 12
-                                  ? 'Difficulty: Medium (Dual-Pattern Shift)'
-                                  : 'Difficulty: Hard (Progressive Word Shift)',
-                          style: GoogleFonts.outfit(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.dustyMauve,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        // Encrypted Phrase wraps words
-                        FogOverlay(
-                          enabled: _playDailyMode && _dailyModifierType == 'fog',
-                          radius: 120.0 * _dailyRadius,
-                          child: Wrap(
-                            spacing: 12,
-                            runSpacing: 16,
-                            alignment: WrapAlignment.center,
-                            children: [
-                              for (int w = 0; w < encWords.length; w++)
-                                _buildWordRow(encWords[w], w, globalCharOffset += (w > 0 ? encWords[w - 1].length + 1 : 0)),
-                            ],
-                          ),
-                        ),
-                      ],
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    CipherLogic.ruleLabel(board),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _accent,
                     ),
                   ),
-                ),
-                // Virtual Keyboard
-                Container(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildKeyboardRow(["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"], keyWidth),
-                      const SizedBox(height: 6),
-                      _buildKeyboardRow(["A", "S", "D", "F", "G", "H", "J", "K", "L"], keyWidth),
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildKeyboardKey("CLR", keyWidth, onPressed: _clearMapping),
-                          const SizedBox(width: 4),
-                          ...List.generate(7 * 2 - 1, (index) {
-                            if (index.isOdd) return const SizedBox(width: 4);
-                            final key = ["Z", "X", "C", "V", "B", "N", "M"][index ~/ 2];
-                            return _buildKeyboardKey(key, keyWidth, onPressed: () => _onKeyboardTap(key));
-                          }),
-                        ],
+                  if (_modifierBannerText.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        _modifierBannerText,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.outfit(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.warmAmber,
+                        ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: context.bgCard,
-                        foregroundColor: context.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                  if (_turnsLeft >= 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        'Turns left: $_turnsLeft / $_turnBudget',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _turnsLeft <= 5 ? Colors.red : Colors.amber,
+                        ),
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _mappings.clear();
-                          _selectedIdx = -1;
-                        });
+                    ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // Sized from BOTH axes. Width alone put a six-word
+                        // phrase off the bottom of a 320x568 phone; height
+                        // alone made a 1568x696 landscape board absurd.
+                        var longest = 1;
+                        for (final w in board.plainWords) {
+                          longest = max(longest, w.length);
+                        }
+                        final byWidth =
+                            (constraints.maxWidth - 40) / longest;
+                        final byHeight = constraints.maxHeight /
+                            (board.wordCount * 3.6 + 1);
+                        final tile =
+                            min(byWidth, byHeight).clamp(15.0, 34.0).toDouble();
+
+                        return FogOverlay(
+                          enabled: _isModActive('fog'),
+                          radius: max(80.0, tile * 3.5) * _dailyRadius,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              children: [
+                                for (var w = 0; w < board.wordCount; w++)
+                                  _buildWordCard(board, w, tile),
+                              ],
+                            ),
+                          ),
+                        );
                       },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reset'),
                     ),
-                    ElevatedButton.icon(
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.center,
+                    child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.dustyMauve,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        backgroundColor: _cardColor(context),
+                        foregroundColor: _inkColor(context),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 22, vertical: 10),
                       ),
-                      onPressed: _checkSolution,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Check'),
+                      onPressed: _resetDials,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Reset dials'),
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
           if (_isSuccess)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withOpacity(0.6),
+                color: Colors.black.withAlpha(153),
                 child: Center(
                   child: _playDailyMode
                       ? ChallengeClearedOverlay(
-                          accentColor: AppTheme.dustyMauve,
-                          onComplete: () {
-                            Navigator.pop(context, true);
-                          },
+                          accentColor: _accent,
+                          onComplete: () => Navigator.pop(context, true),
                         )
                       : Container(
                           margin: const EdgeInsets.symmetric(horizontal: 32),
@@ -500,17 +719,25 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.emoji_events, color: Colors.amber, size: 64),
-                              const SizedBox(height: 16),
+                              const Icon(Icons.emoji_events,
+                                  color: Colors.amber, size: 56),
+                              const SizedBox(height: 12),
                               Text(
                                 'Level ${_currentLevel + 1} Cleared!',
-                                style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 20, fontWeight: FontWeight.bold),
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 6),
+                              Text(
+                                board.plainPhrase,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 13, color: context.textSecondary),
+                              ),
+                              const SizedBox(height: 12),
                               AutoNextCountdown(
-                                onNext: _nextLevel,
-                                accentColor: AppTheme.dustyMauve,
-                              ),
+                                  onNext: _nextLevel, accentColor: _accent),
                             ],
                           ),
                         ),
@@ -522,124 +749,148 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
     );
   }
 
-  Widget _buildWordRow(String word, int wordIdx, int charOffset) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (int i = 0; i < word.length; i++) ...[
-          _buildLetterCard(word[i], charOffset + i),
-          if (i < word.length - 1) const SizedBox(width: 4),
-        ]
-      ],
-    );
-  }
+  Widget _buildWordCard(CipherBoard board, int w, double tile) {
+    final dial = _dials[w];
+    final shown = board.wordAt(w, dial);
+    final cipher = board.cipherWords[w];
+    final revealed = _revealed.contains(w);
+    final hideCipher = _isModActive('whisper');
 
-  Widget _buildLetterCard(String encChar, int globalIdx) {
-    if (!_isLetter(encChar)) {
-      // Punctuation slot
-      return Container(
-        width: 32,
-        height: 52,
-        alignment: Alignment.bottomCenter,
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          encChar,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: context.textPrimary,
-          ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: _cardColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: revealed ? _accent : _mutedColor(context).withAlpha(60),
+          width: revealed ? 2 : 1,
         ),
-      );
-    }
-
-    final isSelected = _selectedIdx == globalIdx;
-    final guess = _mappings[encChar] ?? "";
-
-    return Semantics(
-      label: 'Character index $globalIdx. Cipher letter $encChar. '
-          '${guess.isEmpty ? "Not translated" : "Guess is $guess"}. '
-          '${isSelected ? "Selected" : ""}',
-      child: GestureDetector(
-        onTap: () {
-          settingsNotifier.hapticTap();
-          setState(() {
-            _selectedIdx = globalIdx;
-          });
-        },
-        child: Container(
-          width: 32,
-          height: 52,
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.dustyMauve.withAlpha(40) : context.bgCard,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isSelected ? AppTheme.dustyMauve : context.textMuted.withAlpha(40),
-              width: isSelected ? 2 : 1,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // A horizontal drag spins the wheel, which is what a suitcase lock
+          // feels like; the buttons below are the accessible path to the same
+          // thing.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: (details) {
+              final v = details.primaryVelocity ?? 0;
+              if (v > 100) {
+                _turn(w, 1);
+              } else if (v < -100) {
+                _turn(w, -1);
+              }
+            },
+            child: Semantics(
+              label: 'Word ${w + 1}, dial $dial, currently reads $shown',
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 2,
+                runSpacing: 2,
+                children: [
+                  for (var i = 0; i < shown.length; i++)
+                    SizedBox(
+                      width: tile,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            shown[i],
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: tile * 0.62,
+                              fontWeight: FontWeight.bold,
+                              color: _inkColor(context),
+                            ),
+                          ),
+                          if (!hideCipher)
+                            Text(
+                              cipher[i],
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: tile * 0.36,
+                                color: _mutedColor(context),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
-          child: Column(
+          const SizedBox(height: 4),
+          Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Player Guess Letter
-              Text(
-                guess,
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.dustyMauve,
+              _DialButton(
+                icon: Icons.remove,
+                accent: _accent,
+                tooltip: 'Turn word ${w + 1} back',
+                onPressed: () => _turn(w, -1),
+              ),
+              Container(
+                width: 54,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                decoration: BoxDecoration(
+                  color: _accent.withAlpha(36),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _accent.withAlpha(110)),
+                ),
+                child: Text(
+                  dial.toString().padLeft(2, '0'),
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: _accent,
+                  ),
                 ),
               ),
-              const Divider(height: 6, thickness: 1, indent: 4, endIndent: 4),
-              // Encrypted Cipher Letter
-              Text(
-                encChar,
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: context.textMuted,
-                ),
+              _DialButton(
+                icon: Icons.add,
+                accent: _accent,
+                tooltip: 'Turn word ${w + 1} forward',
+                onPressed: () => _turn(w, 1),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildKeyboardRow(List<String> keys, double keyWidth) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(keys.length * 2 - 1, (index) {
-        if (index.isOdd) return const SizedBox(width: 4);
-        final key = keys[index ~/ 2];
-        return _buildKeyboardKey(key, keyWidth, onPressed: () => _onKeyboardTap(key));
-      }),
-    );
-  }
+class _DialButton extends StatelessWidget {
+  final IconData icon;
+  final Color accent;
+  final String tooltip;
+  final VoidCallback onPressed;
 
-  Widget _buildKeyboardKey(String text, double keyWidth, {required VoidCallback onPressed}) {
-    final isClear = text == "CLR";
-    final double width = isClear ? keyWidth * 1.5 : keyWidth;
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        height: 42,
-        width: width,
-        decoration: BoxDecoration(
-          color: isClear ? Colors.red.shade900 : context.bgCard,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: context.textMuted.withAlpha(30)),
-        ),
-        child: Center(
-          child: Text(
-            text,
-            style: GoogleFonts.outfit(
-              fontSize: isClear ? 12 : 16,
-              fontWeight: FontWeight.bold,
-              color: isClear ? Colors.white : context.textPrimary,
-            ),
+  const _DialButton({
+    required this.icon,
+    required this.accent,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 38,
+          height: 30,
+          decoration: BoxDecoration(
+            color: accent.withAlpha(30),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: accent.withAlpha(90)),
           ),
+          child: Icon(icon, size: 18, color: accent),
         ),
       ),
     );

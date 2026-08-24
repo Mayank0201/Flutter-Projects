@@ -5,37 +5,43 @@ import '../theme/app_theme.dart';
 import 'daily_challenge_manager.dart';
 
 class ChallengeReminderHelper {
-  static Future<void> checkAndShowReminder(BuildContext context) async {
+  /// Shows the "time is running out" reminder when it applies.
+  ///
+  /// Returns true when the dialog was actually shown (and only resolves once
+  /// the player has dismissed it), false on every early exit. Callers use the
+  /// result to serialise launch popups: when the reminder shows, the deferred
+  /// daily-challenge intro popup must wait for another launch.
+  static Future<bool> checkAndShowReminder(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
 
     final startTimeStr = prefs.getString('daily_challenge_start_time') ?? '';
-    if (startTimeStr.isEmpty) return;
+    if (startTimeStr.isEmpty) return false;
 
     final now = DateTime.now().toUtc();
     final startTime = DateTime.parse(startTimeStr);
     final target = startTime.add(const Duration(hours: 24));
 
-    if (now.isAfter(target)) return; // expired, next cycle hasn't updated progress day yet
+    if (now.isAfter(target)) return false; // expired, next cycle hasn't updated progress day yet
 
     final diff = target.difference(now);
-    if (diff.inHours >= 12 || diff.isNegative) return; // more than 12 hours left
+    if (diff.inHours >= 12 || diff.isNegative) return false; // more than 12 hours left
 
     // Check completion status for today
     final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
     final completedCount = await DailyChallengeManager.getCompletedCountForDate(dateStr);
 
-    if (completedCount == 3) return; // already completed all 3
+    if (completedCount == 3) return false; // already completed all 3
 
     // Only show once per challenge cycle
     final lastShown = prefs.getString('daily_challenge_reminder_shown_time') ?? '';
-    if (lastShown == startTimeStr) return; // already shown for this cycle
+    if (lastShown == startTimeStr) return false; // already shown for this cycle
 
     // Mark as shown
     await prefs.setString('daily_challenge_reminder_shown_time', startTimeStr);
 
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
 
-    showDialog(
+    await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.bgCard,
@@ -71,5 +77,6 @@ class ChallengeReminderHelper {
         ],
       ),
     );
+    return true;
   }
 }

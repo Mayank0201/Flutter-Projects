@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:convert';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,10 +11,38 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
+import '../../../widgets/game_level_chip.dart';
 import '../../../utils/prefs_keys.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/point_manager.dart';
+import '../../../utils/progress_guard.dart';
 import '../../../utils/audio_manager.dart';
 import '../../../utils/rotation_engine.dart';
+import '../../../widgets/decaying_clue.dart';
+import 'kakuro_logic.dart';
+
+/// Kakuro's free-play modifier pool.
+///
+/// Exported so test/modifier_batch2_test.dart checks the pool the screen really
+/// uses rather than a copy that can drift.
+///
+/// Deliberately NOT included: `clueThinning`. In Sudoku it removes givens, but a
+/// Kakuro run with no clue is completely unconstrained — that is precisely the
+/// unheaded-run bug fixed in KakuroLogic.normalizeLayout, and adding it here
+/// would reintroduce unsolvable boards on purpose.
+///
+/// `decay` is the opposite of that trap and is why it belongs here: it never
+/// removes or alters a clue, it only makes the ink faint, and any clue can be
+/// brought back by tapping it. The run stays fully constrained and the board
+/// stays solvable at every instant. It is also what lifts this pool from three
+/// entries to four — with three, the pairs tier has only three combinations to
+/// spread across 35 levels.
+const List<String> kKakuroModifierPool = [
+  'timer',
+  'fog',
+  'zoom',
+  'decay',
+];
 
 class KakuroScreen extends StatefulWidget {
   const KakuroScreen({super.key});
@@ -27,6 +56,9 @@ class _KakuroScreenState extends State<KakuroScreen> {
   bool _isSuccess = false;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
+  String? _forcedModifier;
   double _dailyRadius = 1.5;
   int _gridSize = 4; // 4, 6, or 8 based on difficulty/level
 
@@ -44,7 +76,63 @@ class _KakuroScreenState extends State<KakuroScreen> {
   Set<String> _activeModifiers = {};
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _currentLevel >= RotationEngine.modifierStartLevel('kakuro') &&
+        _activeModifiers.contains(name);
+  }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isEndgame => _isModActive('timer');
+  bool get _isFogActive => _isModActive('fog');
+  bool get _isZoomActive => _isModActive('zoom');
+  bool get _isDecayActive => _isModActive('decay');
+
+  // COGNIQ-FIX:mod-desc-copy
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'timer':
+        return 'Solve before the timer runs out.';
+      case 'fog':
+        return 'A dense fog obscures portions of the grid.';
+      case 'zoom':
+        return 'Grid is magnified with pan-and-scan navigation.';
+      case 'decay':
+        return 'Clues fade over time. Tap to reveal.';
+      default:
+        return '';
+    }
+  }
+
+  String get _modifierBannerText {
+    if (_isSuccess) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
+  }
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('kakuro', _currentLevel);
+
+  /// `decay`: the fade clock for the level on screen. Started only when the
+  /// modifier is active, so a normal level never creates the timer.
+  late final DecayController _decay = DecayController(onChanged: () {
+    if (mounted) setState(() {});
+  });
 
   @override
   void initState() {
@@ -55,7 +143,24 @@ class _KakuroScreenState extends State<KakuroScreen> {
   @override
   void dispose() {
     _gameTimer?.cancel();
+    _decay.dispose();
     super.dispose();
+  }
+
+  /// `decay`: bring a faded clue back for a few seconds.
+  ///
+  /// Costs no points — see the note in widgets/decaying_clue.dart on why the
+  /// handbook's 5-point charge is an unbounded sink. On a timed level it costs
+  /// two seconds instead, which is a cost the game can actually meter.
+  void _tapClue(int idx) {
+    if (!_isDecayActive) return;
+    if (!_decay.reveal(idx)) return;
+    settingsNotifier.hapticTap();
+    if (_timeLeft > 0) {
+      setState(() {
+        _timeLeft = max(0, _timeLeft - kDecayRevealTimeCostSeconds);
+      });
+    }
   }
 
   Future<void> _loadProgressAndGenerate() async {
@@ -63,6 +168,8 @@ class _KakuroScreenState extends State<KakuroScreen> {
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
@@ -80,6 +187,8 @@ class _KakuroScreenState extends State<KakuroScreen> {
       }
     } else {
       _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
       _dailyRadius = 1.5;
     }
 
@@ -93,101 +202,105 @@ class _KakuroScreenState extends State<KakuroScreen> {
     }
   }
 
-  // Predefined layouts for grid sizes
-  static const List<int> _kLayout4x4 = [
-    0, 2, 2, 0,
-    2, 1, 1, 0,
-    2, 1, 1, 2,
-    0, 0, 2, 0
-  ];
-
-  static const List<int> _kLayout6x6 = [
-    0, 2, 2, 2, 2, 0,
-    2, 1, 1, 1, 1, 2,
-    2, 1, 1, 0, 1, 1,
-    2, 1, 0, 2, 1, 1,
-    2, 1, 1, 1, 1, 0,
-    0, 0, 2, 2, 0, 0
-  ];
-
-  static const List<int> _kLayout8x8 = [
-    0, 2, 2, 2, 0, 2, 2, 2,
-    2, 1, 1, 1, 2, 1, 1, 1,
-    2, 1, 1, 1, 2, 1, 1, 1,
-    0, 2, 1, 1, 1, 1, 0, 0,
-    0, 0, 1, 1, 1, 1, 2, 0,
-    2, 1, 1, 1, 2, 1, 1, 1,
-    2, 1, 1, 1, 2, 1, 1, 1,
-    0, 0, 0, 0, 0, 0, 0, 0
-  ];
+  /// Debug-only level jump. `GameLevelChip` only wires this up when `kDebugMode`
+  /// is true, so it is compiled out of release builds.
+  void _showJumpToLevelDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        int target = _currentLevel + 1;
+        return AlertDialog(
+          backgroundColor: context.bgCard,
+          title: Text('Jump to Level',
+              style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold, color: context.textPrimary)),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            style: GoogleFonts.outfit(color: context.textPrimary),
+            decoration: InputDecoration(
+              labelText: 'Level Number (1+)',
+              labelStyle: GoogleFonts.outfit(color: context.textSecondary),
+            ),
+            onChanged: (val) => target = int.tryParse(val) ?? target,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: context.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                if (target > 0) {
+                  setState(() {
+                    _currentLevel = target - 1;
+                    _isLoading = true;
+                  });
+                  _generatePuzzle();
+                }
+              },
+              child: Text('Jump',
+                  style: GoogleFonts.outfit(color: AppTheme.dustyMauve)),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   void _generatePuzzle() {
     _gameTimer?.cancel();
     _timeLeft = -1;
     _timeBonusEarned = false;
 
-    if (!_playDailyMode && _currentLevel >= 30) {
+    if (_modsOn) {
+      // A one-entry pool meant every modifier level looked identical.
+      //
+      // remember.md E2 section 8: everything in a pool must actually change the
+      // level and be visible to the player. All four entries are implemented in
+      // this file and shown to the player. See kKakuroModifierPool for why
+      // `clueThinning` stays out and why `decay` is safe where it is not.
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'kakuro',
         levelIndex: _currentLevel,
-        pool: ['timer'],
+        pool: kKakuroModifierPool,
         minActive: 1,
-        maxActive: 1,
-        smallGrid: false,
+        maxActive: 2,
+        smallGrid: _gridSize <= 4,
       );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
     } else {
       _activeModifiers = {};
-    }
-
-    // Determine size based on level
-    if (_currentLevel < 5) {
-      _gridSize = 4;
-      _types = List.from(_kLayout4x4);
-    } else if (_currentLevel < 12) {
-      _gridSize = 6;
-      _types = List.from(_kLayout6x6);
-    } else {
-      _gridSize = 8;
-      _types = List.from(_kLayout8x8);
-    }
-
-    final totalCells = _gridSize * _gridSize;
-    _grid = List.filled(totalCells, 0);
-    _solution = List.filled(totalCells, 0);
-    _hClues = List.filled(totalCells, 0);
-    _vClues = List.filled(totalCells, 0);
-
-    final rand = Random();
-    bool generated = false;
-
-    // Retry loop to build a valid grid and ensure uniqueness
-    for (int retry = 0; retry < 50; retry++) {
-      _solution = List.filled(totalCells, 0);
-      _hClues = List.filled(totalCells, 0);
-      _vClues = List.filled(totalCells, 0);
-      if (_fillGridWithUniqueDigits(0, rand)) {
-        _computeClues();
-        final tempBoard = List.filled(totalCells, 0);
-        final numSolutions = _countSolutions(0, tempBoard, 2);
-        if (numSolutions == 1) {
-          _grid = List.filled(totalCells, 0);
-          generated = true;
-          break;
-        }
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
       }
     }
 
-    if (!generated) {
-      // Fallback fallback if generation is stuck
-      _currentLevel = 0; // reset scale
-      _gridSize = 4;
-      _types = List.from(_kLayout4x4);
-      _grid = List.filled(16, 0);
-      _solution = [0, 0, 0, 0, 0, 8, 7, 0, 0, 1, 5, 0, 0, 0, 0, 0];
-      _types = [0, 2, 2, 0, 2, 1, 1, 0, 2, 1, 1, 2, 0, 0, 2, 0];
-      _hClues = [0, 0, 0, 0, 15, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0];
-      _vClues = [0, 9, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    }
+    // Generation lives in kakuro_logic.dart so it can be unit-tested — see
+    // test/kakuro_logic_test.dart. Seeded, not random: the same (gameId, level)
+    // must produce the same board on every device and every replay, or hints,
+    // daily challenges and bug reports stop being reproducible.
+    // (remember.md — the seeded-RNG law.)
+    //
+    // KakuroLogic.generate never returns null and never touches the saved level.
+    // The old code reset `_currentLevel = 0` whenever generation failed, and it
+    // failed on every level from 5 up, so reaching level 5 wiped the player's
+    // progress on every single attempt.
+    final board = KakuroLogic.generate(
+      _currentLevel,
+      RotationEngine.getDeterminism('kakuro', _currentLevel),
+    );
+
+    _gridSize = board.size;
+    _types = board.types;
+    _solution = board.solution;
+    _hClues = board.hClues;
+    _vClues = board.vClues;
+    _grid = List.filled(board.size * board.size, 0);
 
     setState(() {
       _isSuccess = false;
@@ -196,8 +309,18 @@ class _KakuroScreenState extends State<KakuroScreen> {
       _isLoading = false;
     });
 
-    if (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('timer')) {
+    // `decay`: restart the fade clock for the new board, or make sure it is not
+    // running at all. stop() also clears the per-clue reveal times, so a clue
+    // re-revealed on the last level does not start this one already faded.
+    if (_isDecayActive) {
+      _decay.start();
+    } else {
+      _decay.stop();
+    }
+
+    if (_isEndgame) {
       _timeLeft = 60 + (_gridSize * 15);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -262,149 +385,11 @@ class _KakuroScreenState extends State<KakuroScreen> {
     return indices;
   }
 
-  bool _fillGridWithUniqueDigits(int cellIdx, Random rand) {
-    if (cellIdx >= _types.length) return true;
 
-    if (_types[cellIdx] != 1) {
-      return _fillGridWithUniqueDigits(cellIdx + 1, rand);
-    }
 
-    // Shuffled digits for variety
-    final digits = [1, 2, 3, 4, 5, 6, 7, 8, 9]..shuffle(rand);
 
-    for (final d in digits) {
-      if (_isValidDigitPlacement(cellIdx, d)) {
-        _solution[cellIdx] = d;
-        if (_fillGridWithUniqueDigits(cellIdx + 1, rand)) {
-          return true;
-        }
-        _solution[cellIdx] = 0;
-      }
-    }
-    return false;
-  }
 
-  bool _isValidDigitPlacement(int idx, int d) {
-    // Check horizontal run uniqueness
-    final rowIndices = _getRowSegmentIndices(idx);
-    for (final ri in rowIndices) {
-      if (ri != idx && _solution[ri] == d) return false;
-    }
 
-    // Check vertical run uniqueness
-    final colIndices = _getColSegmentIndices(idx);
-    for (final ci in colIndices) {
-      if (ci != idx && _solution[ci] == d) return false;
-    }
-
-    return true;
-  }
-
-  bool _isValidSolverPlacement(int idx, int d, List<int> tempBoard) {
-    final rowIndices = _getRowSegmentIndices(idx);
-    for (final ri in rowIndices) {
-      if (ri != idx && tempBoard[ri] == d) return false;
-    }
-    final colIndices = _getColSegmentIndices(idx);
-    for (final ci in colIndices) {
-      if (ci != idx && tempBoard[ci] == d) return false;
-    }
-    return true;
-  }
-
-  bool _isSegmentSumsValid(int idx, List<int> tempBoard) {
-    final rowIndices = _getRowSegmentIndices(idx);
-    int rowSum = 0;
-    bool rowComplete = true;
-    for (final ri in rowIndices) {
-      if (tempBoard[ri] == 0) {
-        rowComplete = false;
-      } else {
-        rowSum += tempBoard[ri];
-      }
-    }
-    int r = idx ~/ _gridSize;
-    int c = idx % _gridSize;
-    int startCol = c;
-    while (startCol >= 0 && _types[r * _gridSize + startCol] == 1) {
-      startCol--;
-    }
-    int hClueCell = r * _gridSize + startCol;
-    int hClue = _hClues[hClueCell];
-    if (rowComplete) {
-      if (rowSum != hClue) return false;
-    } else {
-      if (rowSum >= hClue) return false;
-    }
-
-    final colIndices = _getColSegmentIndices(idx);
-    int colSum = 0;
-    bool colComplete = true;
-    for (final ci in colIndices) {
-      if (tempBoard[ci] == 0) {
-        colComplete = false;
-      } else {
-        colSum += tempBoard[ci];
-      }
-    }
-    int startRow = r;
-    while (startRow >= 0 && _types[startRow * _gridSize + c] == 1) {
-      startRow--;
-    }
-    int vClueCell = startRow * _gridSize + c;
-    int vClue = _vClues[vClueCell];
-    if (colComplete) {
-      if (colSum != vClue) return false;
-    } else {
-      if (colSum >= vClue) return false;
-    }
-
-    return true;
-  }
-
-  int _countSolutions(int cellIdx, List<int> tempBoard, int maxSolutions) {
-    if (cellIdx >= _types.length) return 1;
-
-    if (_types[cellIdx] != 1) {
-      return _countSolutions(cellIdx + 1, tempBoard, maxSolutions);
-    }
-
-    int solutionsCount = 0;
-    for (int d = 1; d <= 9; d++) {
-      if (_isValidSolverPlacement(cellIdx, d, tempBoard)) {
-        tempBoard[cellIdx] = d;
-        if (_isSegmentSumsValid(cellIdx, tempBoard)) {
-          solutionsCount += _countSolutions(cellIdx + 1, tempBoard, maxSolutions);
-          if (solutionsCount >= maxSolutions) {
-            tempBoard[cellIdx] = 0;
-            return solutionsCount;
-          }
-        }
-        tempBoard[cellIdx] = 0;
-      }
-    }
-    return solutionsCount;
-  }
-
-  void _computeClues() {
-    for (int i = 0; i < _types.length; i++) {
-      if (_types[i] == 2) {
-        // Horizontal clue (sum of white run directly to the right)
-        int nextRight = i + 1;
-        if (nextRight < _types.length && (nextRight % _gridSize != 0) && _types[nextRight] == 1) {
-          final run = _getRowSegmentIndices(nextRight);
-          _hClues[i] = run.map((idx) => _solution[idx]).reduce((a, b) => a + b);
-        }
-
-        // Vertical clue (sum of white run directly below)
-        int nextDown = i + _gridSize;
-        if (nextDown < _types.length && _types[nextDown] == 1) {
-          final run = _getColSegmentIndices(nextDown);
-          _vClues[i] = run.map((idx) => _solution[idx]).reduce((a, b) => a + b);
-        }
-      }
-    }
-  }
 
   void _checkSolution() {
     bool isValid = true;
@@ -460,20 +445,36 @@ class _KakuroScreenState extends State<KakuroScreen> {
   }
 
   Future<void> _onLevelCleared() async {
+    // Routed through the shared managers rather than writing prefs by hand.
+    //
+    // This used to bump `globalLevelClearedCount` itself and save to a private
+    // `beta_level_kakuro` key. No live game does that any more: the four stashed
+    // games were the last holdouts. Doing it manually breaks Zen mode, because
+    // `HintManager.onLevelCleared` is what decides whether a clear counts against
+    // the Challenge tally or the Zen one — bypassing it let Zen clears (which have
+    // no modifiers and half points) farm Challenge-side trails and achievements.
+    //
+    // ProgressGuard.saveLevel is forward-only and refuses to write during a daily
+    // challenge, so a daily run can no longer overwrite free-play progress.
     if (!_playDailyMode) {
-      final prefs = await SharedPreferences.getInstance();
-      int highest = prefs.getInt('beta_level_kakuro') ?? 0;
-      if (_currentLevel + 1 > highest) {
-        await prefs.setInt('beta_level_kakuro', _currentLevel + 1);
+      await ProgressGuard.saveLevel('kakuro', _currentLevel + 1, isDaily: false);
+      await HintManager.onLevelCleared(
+        'kakuro',
+        // Speed Demon: cleared a hard-timer level with more than half the
+        // clock still left. _initialTime is 0 unless the timer modifier ran.
+        isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+      );
+      // The base award is HintManager.onLevelCleared's own 10 points — do not
+      // add another flat amount on top. The extra 5 that Grid Path, Star Battle
+      // and the rest grant is a SPEED BONUS, gated on beating the timer, not a
+      // per-clear payment. Granting it unconditionally would make every Kakuro
+      // clear worth more than the same clear in any other game.
+      if (_timeLeft > 0 && _timeBonusEarned) {
+        await PointManager.addPoints(5);
       }
-      await prefs.setInt(PrefsKeys.gameLevel('kakuro'), _currentLevel + 1);
-      
-      // Track stats
-      int currentClears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
-      await prefs.setInt(PrefsKeys.globalLevelClearedCount, currentClears + 1);
     }
 
-    setState(() => _isSuccess = true);
+    if (mounted) setState(() => _isSuccess = true);
   }
 
   void _nextLevel() {
@@ -548,33 +549,48 @@ class _KakuroScreenState extends State<KakuroScreen> {
     return Scaffold(
       backgroundColor: context.bgDark,
       appBar: AppBar(
-        title: Text('Kakuro', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        title: const GameTitle('Kakuro'),
+        leading: IconButton(icon: const Icon(Icons.arrow_back), tooltip: 'Back', onPressed: () => Navigator.pop(context)),
+        // With the `timer` modifier running, back + info + hint + countdown +
+        // level chip ran 21px off the right edge of a 320px phone. The layout
+        // test never caught it because it only booted level 0, where no timer
+        // is on screen. Two default-width IconButtons are 96px of a 320px bar,
+        // so they are compact here and the countdown carries no padding of its
+        // own. Nothing is hidden — remember.md E2 section 7 keeps the actions
+        // list short precisely so it does not come to this.
+        actionsIconTheme: const IconThemeData(size: 20),
         actions: [
           IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
             icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
             tooltip: 'Instructions',
             onPressed: _showInstructions,
           ),
           IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
             icon: const Icon(Icons.lightbulb_outline, color: AppTheme.dustyMauve),
             tooltip: 'Hint',
             onPressed: _showHint,
           ),
           if (_timeLeft >= 0)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.only(left: 6),
               child: Center(
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       Icons.timer,
                       color: _timeLeft <= 10 ? Colors.red : Colors.amber,
                       size: 16,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 2),
                     Text(
-                      '$_timeLeft s',
+                      '${_timeLeft}s',
                       style: GoogleFonts.spaceGrotesk(
                         color: _timeLeft <= 10 ? Colors.red : Colors.amber,
                         fontWeight: FontWeight.bold,
@@ -585,18 +601,13 @@ class _KakuroScreenState extends State<KakuroScreen> {
                 ),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                style: AppTheme.numberStyle(
-                  color: AppTheme.dustyMauve,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+          // The standard level indicator — must be the LAST action, and nothing
+          // else on the screen may show the level. See remember.md section E2 §7.
+          GameLevelChip(
+            level: _currentLevel + 1,
+            modeLabel: _playDailyMode ? 'Daily' : null,
+            accent: AppTheme.accentFor('kakuro'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -618,10 +629,29 @@ class _KakuroScreenState extends State<KakuroScreen> {
                       style: GoogleFonts.outfit(fontSize: 14, color: context.textSecondary),
                       textAlign: TextAlign.center,
                     ),
+                    if (_modifierBannerText.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          _modifierBannerText,
+                          style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.warmAmber,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     Expanded(
                       child: Center(
-                        child: RepaintBoundary(
+                        // `zoom`: the board becomes pan/zoomable. Genuinely useful
+                        // on an 8x8, where cells and their clue digits get small.
+                        // Wrapping rather than replacing keeps every gesture inside
+                        // the grid working unchanged.
+                        child: _ZoomWrap(
+                          enabled: _isModActive('zoom'),
+                          child: RepaintBoundary(
                           child: Container(
                             width: maxBoardSide,
                             height: maxBoardSide,
@@ -631,7 +661,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
                               border: Border.all(color: context.textMuted.withAlpha(40)),
                             ),
                             child: FogOverlay(
-                              enabled: _playDailyMode && _dailyModifierType == 'fog',
+                              enabled: _isModActive('fog'),
                               radius: (maxBoardSide / _gridSize) * _dailyRadius,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
@@ -656,13 +686,22 @@ class _KakuroScreenState extends State<KakuroScreen> {
                                     }
 
                                     if (type == 2) {
-                                      // Clue cell
-                                      return CustomPaint(
-                                        painter: _KakuroCluePainter(
-                                          rightSum: _hClues[idx],
-                                          downSum: _vClues[idx],
-                                          lineColor: AppTheme.dustyMauve,
-                                          textColor: Colors.white,
+                                      // Clue cell. Under `decay` the ink fades
+                                      // on a clock and a tap brings it back —
+                                      // the clue values themselves are never
+                                      // touched, so validation and the solver
+                                      // still see the true board.
+                                      return GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: () => _tapClue(idx),
+                                        child: CustomPaint(
+                                          painter: _KakuroCluePainter(
+                                            rightSum: _hClues[idx],
+                                            downSum: _vClues[idx],
+                                            lineColor: AppTheme.dustyMauve,
+                                            textColor: Colors.white,
+                                            clueOpacity: _decay.opacityFor(idx),
+                                          ),
                                         ),
                                       );
                                     }
@@ -717,6 +756,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
                                 ),
                               ),
                             ),
+                          ),
                           ),
                         ),
                       ),
@@ -907,11 +947,19 @@ class _KakuroCluePainter extends CustomPainter {
   final int downSum;  // vertical run clue (top-right triangle)
   final Color lineColor;
   final Color textColor;
+
+  /// `decay`: how readable this clue currently is, 1.0 down to
+  /// [kDecayFloorOpacity]. Only the ink fades — the wall behind it stays solid,
+  /// so a faded clue is still visibly a clue cell the player can find and tap.
+  /// The clue *values* are never touched.
+  final double clueOpacity;
+
   const _KakuroCluePainter({
     required this.rightSum,
     required this.downSum,
     required this.lineColor,
     required this.textColor,
+    this.clueOpacity = 1.0,
   });
 
   @override
@@ -923,6 +971,7 @@ class _KakuroCluePainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     final bool hasClues = rightSum > 0 || downSum > 0;
+    final Color ink = textColor.withValues(alpha: clueOpacity);
 
     if (hasClues) {
       // Draw slightly darker shading for the bottom-left triangle to give depth split
@@ -938,7 +987,7 @@ class _KakuroCluePainter extends CustomPainter {
 
       // Draw the diagonal divider line
       final Paint lp = Paint()
-        ..color = lineColor.withOpacity(0.6)
+        ..color = lineColor.withValues(alpha: 0.6 * clueOpacity)
         ..strokeWidth = 1.5
         ..isAntiAlias = true;
       canvas.drawLine(Offset.zero, Offset(size.width, size.height), lp);
@@ -953,7 +1002,7 @@ class _KakuroCluePainter extends CustomPainter {
             style: GoogleFonts.spaceGrotesk(
               fontSize: fontSize,
               fontWeight: FontWeight.bold,
-              color: textColor,
+              color: ink,
             ),
           ),
           textDirection: TextDirection.ltr,
@@ -971,7 +1020,7 @@ class _KakuroCluePainter extends CustomPainter {
             style: GoogleFonts.spaceGrotesk(
               fontSize: fontSize,
               fontWeight: FontWeight.bold,
-              color: textColor,
+              color: ink,
             ),
           ),
           textDirection: TextDirection.ltr,
@@ -995,5 +1044,27 @@ class _KakuroCluePainter extends CustomPainter {
       old.rightSum != rightSum ||
       old.downSum != downSum ||
       old.lineColor != lineColor ||
-      old.textColor != textColor;
+      old.textColor != textColor ||
+      old.clueOpacity != clueOpacity;
+}
+
+/// Wraps the board in an [InteractiveViewer] only when the `zoom` modifier is
+/// active. Kept as a separate widget so the non-zoom path has no extra layers.
+class _ZoomWrap extends StatelessWidget {
+  final bool enabled;
+  final Widget child;
+
+  const _ZoomWrap({required this.enabled, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return InteractiveViewer(
+      minScale: 1.0,
+      maxScale: 3.0,
+      // Clip so a zoomed board cannot paint over the keypad below it.
+      clipBehavior: Clip.hardEdge,
+      child: child,
+    );
+  }
 }

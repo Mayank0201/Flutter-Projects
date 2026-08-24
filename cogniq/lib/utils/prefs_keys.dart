@@ -1,3 +1,5 @@
+import 'zen_mode.dart';
+
 class PrefsKeys {
   PrefsKeys._(); // Private constructor to prevent instantiation
 
@@ -10,14 +12,12 @@ class PrefsKeys {
 
   // IQ & Profile
   static const String points = 'points';
-  static const String userIqPoints = 'user_iq_points';
   static const String unlockedTitles = 'user_titles';
   static const String activeTitle = 'active_title';
 
   // Achievements & Trail Styles
   static const String unlockedAchievements = 'unlocked_achievements';
   static const String claimedAchievements = 'claimed_achievements';
-  static const String unlockedTrailStyles = 'unlocked_trail_styles';
   static const String claimedTrailStyles = 'claimed_trail_styles';
   static const String swipeTrailStyle = 'swipe_trail_style';
   static const String swipeTrailCustomColor = 'swipe_trail_custom_color';
@@ -64,6 +64,20 @@ class PrefsKeys {
 
   // Game Progress & Stats
   static const String globalLevelClearedCount = 'global_level_cleared_count';
+
+  // ── S1: active-day streak (release 2.0) ──────────────────────────────────
+  // Deliberately parallel to the daily-challenge streak rather than replacing
+  // it: `dailyV2Streak`/`dailyStreak` still drive the original badges, and this
+  // counter tracks "played anything today" so free play sustains a streak too.
+  // Streak keys live in StreakManager (activeStreakKey, lastActiveDateKey,
+  // longestActiveStreakKey, skipMonthUsedKey) and analytics consent keys in
+  // Analytics (prefsKeyConsentGranted, prefsKeyConsentPromptSeen,
+  // prefsKeyInstallId). Mirrors of them used to sit here; nothing referenced
+  // the mirrors, and an unenforced duplicate of a key string is how data gets
+  // silently split across two keys one day (remember.md 9e). Read them from
+  // their owners.
+  static const String analyticsPendingEvents = 'analytics_pending_events';
+  static const String analyticsBufferSchemaVersion = 'analytics_buffer_schema_version';
   static const String shuffleMode = 'shuffle_mode';
   static const String shuffleClears = 'shuffle_clears';
   static const String shuffleEnabledGames = 'shuffle_enabled_games';
@@ -87,13 +101,37 @@ class PrefsKeys {
   static const String hasSeenShuffleTutorial = 'has_seen_shuffle_tutorial';
   static const String shownDailyChallengePopupV1 = 'shown_daily_challenge_popup_v1';
 
-  static String gameLevel(String gameId) => 'level_$gameId';
+  // First-run app tour (AppTourDialog). Set as soon as the tour is offered, not
+  // when it is finished, so a player who quits mid-tour is not shown it again
+  // on every cold start. Versioned so a future rewrite of the tour can be
+  // re-offered to existing players without disturbing this one.
+  static const String hasSeenAppTour = 'has_seen_app_tour_v1';
+
+  // These four are mode-aware: in Zen Mode they resolve to a parallel set of
+  // keys so zen play keeps its own level record, mid-game save and stats, and
+  // never overwrites the player's Challenge progress. Anything that must always
+  // address Challenge progress regardless of mode (the daily-challenge backup
+  // and restore path) has to use the explicit `normal*` variants below.
+  static String gameLevel(String gameId) =>
+      ZenMode.isEnabled ? ZenMode.zenGameLevel(gameId) : normalGameLevel(gameId);
+  static String clearedCount(String gameId) => ZenMode.isEnabled
+      ? ZenMode.zenClearedCount(gameId)
+      : normalClearedCount(gameId);
+  static String normalGameState(String gameId) =>
+      ZenMode.isEnabled ? 'zen_${gameId}_state' : 'normal_${gameId}_state';
+  // Zen and Challenge number their levels independently, so the saved path for
+  // "level 3" must not collide between the two modes.
+  static String zipPath(int levelIndex) =>
+      ZenMode.isEnabled ? 'zen_zip_path_$levelIndex' : 'zip_path_$levelIndex';
+
+  /// Always the Challenge-mode level key, whatever mode is active.
+  static String normalGameLevel(String gameId) => 'level_$gameId';
+
+  /// Always the Challenge-mode clear tally, whatever mode is active.
+  static String normalClearedCount(String gameId) => 'cleared_count_$gameId';
+
   static String gameHints(String gameId) => 'hints_$gameId';
-  static String clearedCount(String gameId) => 'cleared_count_$gameId';
   static String gameStreak(String gameId) => 'streak_$gameId';
-  static String normalGameState(String gameId) => 'normal_${gameId}_state';
-  static String hasSeenTutorial(String gameId) => 'has_seen_tutorial_$gameId';
-  static String zipPath(int levelIndex) => 'zip_path_$levelIndex';
   static String dailyV2Completed(String difficulty, String dateStr) =>
       'daily_v2_completed_${difficulty.toLowerCase()}_$dateStr';
   static String dailyV2Perfect(String dateStr) => 'daily_v2_perfect_$dateStr';

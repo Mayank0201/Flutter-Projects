@@ -11,30 +11,37 @@ import '../utils/recently_played_manager.dart';
 import '../utils/challenge_reminder_helper.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/prefs_keys.dart';
+import '../utils/zen_mode.dart';
 import '../widgets/confetti_overlay.dart';
+// Kept in step with the map of the same name in home_screen.dart — a daily
+// challenge can roll any live game, and a missing entry silently degrades to a
+// generic gamepad icon. ('connections' used to sit here long after that game
+// was removed in 2.3.)
 const Map<String, IconData> _gameIcons = {
-  'wordle':      Icons.grid_4x4_outlined,
-  'hangman':     Icons.person_outline,
-  'weaver':      Icons.swap_horiz_outlined,
-  'zip':         Icons.bolt_outlined,
-  'crossclimb':  Icons.trending_up_outlined,
-  'queens':      Icons.star_outline_rounded,
-  'chimp':       Icons.psychology_outlined,
-  'connections': Icons.hub_outlined,
-  'flagle':      Icons.flag_outlined,
-  'wordbuilder': Icons.spellcheck_outlined,
-  'memory':      Icons.style_outlined,
-  'spellingbee': Icons.hive_outlined,
-  'sudoku':      Icons.grid_on_outlined,
-  'minesweeper': Icons.dangerous_outlined,
-  'numbermemory': Icons.pin_outlined,
-  'sequence':    Icons.pattern_outlined,
-  'oddcolor':    Icons.palette_outlined,
-  'hue':         Icons.color_lens_outlined,
-  'kakuro':      Icons.border_all_outlined,
+  'zip':           Icons.bolt_outlined,
+  'queens':        Icons.star_outline_rounded,
+  'chimp':         Icons.psychology_outlined,
+  'spellingbee':   Icons.hive_outlined,
+  'sudoku':        Icons.grid_on_outlined,
+  'minesweeper':   Icons.dangerous_outlined,
+  'oddcolor':      Icons.palette_outlined,
+  'hue':           Icons.color_lens_outlined,
+  'pattern_lock':  Icons.lock_outline,
+  'colour_link':   Icons.link_outlined,
+  'color_flood':   Icons.water_drop_outlined,
+  'circuit_guide': Icons.electrical_services_outlined,
+  'kakuro':        Icons.border_all_outlined,
   'cipherdecoder': Icons.vpn_key_outlined,
-  'hitori':      Icons.grid_on_outlined,
-  'slitherlink': Icons.loop_outlined,
+  'hitori':        Icons.grid_on_outlined,
+  'slitherlink':   Icons.loop_outlined,
+  'masyu':         Icons.circle_outlined,
+  'bridges':       Icons.gesture_outlined,
+  'sumstrike':     Icons.add_box_outlined,
+  'sandsort':      Icons.hourglass_bottom_outlined,
+  'lightbeam':     Icons.flare_outlined,
+  'untangle':      Icons.polyline_outlined,
+  'zenslide':      Icons.spa_outlined,
+  'killersudoku':  Icons.calculate_outlined,
 };
 
 class DailyScreen extends StatefulWidget {
@@ -154,9 +161,13 @@ class _DailyScreenState extends State<DailyScreen> {
     final isCompleted = await DailyChallengeManager.isChallengeCompleted(difficulty, _dateStr);
     if (isCompleted) return;
 
+    // Daily challenges always run under Challenge rules so stars, streaks and
+    // the shared difficulty curve keep their meaning across players.
+    await ZenMode.suspendForDaily();
+
     final game = challenge.game;
     final gameId = game.id;
-    final levelKey = 'level_$gameId';
+    final levelKey = PrefsKeys.normalGameLevel(gameId);
     final levelIndex = challenge.levelIndex;
 
     final prefs = await SharedPreferences.getInstance();
@@ -243,7 +254,7 @@ class _DailyScreenState extends State<DailyScreen> {
                 'Challenge cleared! +25 points earned.',
                 style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
               ),
-              backgroundColor: AppTheme.wordleGreen,
+              backgroundColor: AppTheme.positiveGreen,
             ),
           );
         }
@@ -909,7 +920,11 @@ class _DailyScreenState extends State<DailyScreen> {
         const SizedBox(height: 20),
 
         Text(
-          'Week $week of 14 • Day $dayInWeek of 7 • progress day $_activeDay',
+          // Derived, never hardcoded. This read "of 14" while the cycle was 30
+          // theme weeks, so it would have shown "Week 22 of 14".
+          'Week $week of ${DailyChallengeManager.kThemeCount} • '
+          'Day $dayInWeek of ${DailyChallengeManager.kDaysPerWeek} • '
+          'progress day $_activeDay',
           textAlign: TextAlign.center,
           style: GoogleFonts.outfit(fontSize: 13, color: context.textSecondary, fontWeight: FontWeight.bold),
         ),
@@ -1022,13 +1037,6 @@ class _DailyScreenState extends State<DailyScreen> {
           style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: context.textPrimary),
         ),
         actions: [
-          // IconButton(
-          //   icon: const Icon(Icons.bug_report_outlined, color: Colors.amber, size: 20),
-          //   onPressed: () {
-          //     Navigator.pushNamed(context, '/daily_test');
-          //   },
-          //   tooltip: 'Debug 90 Challenges',
-          // ),
           // Star Counter Badge Row
           Padding(
             padding: const EdgeInsets.only(right: 16.0),

@@ -3,7 +3,10 @@ import 'dart:async';
 import 'dart:convert';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
+import 'sudoku_levels.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,1108 +20,22 @@ import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/loss_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
-class SudokuLevel {
-  final int size; // 4, 6, or 9
-  final List<List<int>> startBoard;
-  final List<List<int>> solution;
-  const SudokuLevel({
-    required this.size,
-    required this.startBoard,
-    required this.solution,
-  });
-}
 
-const List<SudokuLevel> _kLevels = [
-  // Easy (4x4)
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 2, 4, 0],
-      [1, 0, 0, 3],
-      [4, 0, 0, 2],
-      [0, 1, 3, 0],
-    ],
-    solution: [
-      [3, 2, 4, 1],
-      [1, 4, 2, 3],
-      [4, 3, 1, 2],
-      [2, 1, 3, 4],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [4, 0, 0, 2],
-      [0, 1, 3, 0],
-      [0, 4, 2, 0],
-      [3, 0, 0, 1],
-    ],
-    solution: [
-      [4, 3, 1, 2],
-      [2, 1, 3, 4],
-      [1, 4, 2, 3],
-      [3, 2, 4, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 1, 3, 0],
-      [4, 0, 0, 2],
-      [3, 0, 0, 1],
-      [0, 4, 2, 0],
-    ],
-    solution: [
-      [2, 1, 3, 4],
-      [4, 3, 1, 2],
-      [3, 2, 4, 1],
-      [1, 4, 2, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [1, 0, 0, 3],
-      [0, 2, 4, 0],
-      [0, 1, 3, 0],
-      [4, 0, 0, 2],
-    ],
-    solution: [
-      [1, 4, 2, 3],
-      [3, 2, 4, 1],
-      [2, 1, 3, 4],
-      [4, 3, 1, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [4, 0, 2, 0],
-      [0, 2, 0, 4],
-      [2, 0, 1, 0],
-      [0, 1, 0, 2],
-    ],
-    solution: [
-      [4, 3, 2, 1],
-      [1, 2, 3, 4],
-      [2, 4, 1, 3],
-      [3, 1, 4, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 2, 3, 0],
-      [4, 0, 0, 1],
-      [3, 0, 0, 2],
-      [0, 4, 1, 0],
-    ],
-    solution: [
-      [1, 2, 3, 4],
-      [4, 3, 2, 1],
-      [3, 1, 4, 2],
-      [2, 4, 1, 3],
-    ],
-  ),
 
-  // Medium (6x6)
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [2, 1, 3, 4, 6, 5],
-      [5, 4, 6, 1, 3, 2],
-      [3, 2, 4, 5, 1, 6],
-      [6, 5, 1, 2, 4, 3],
-      [4, 3, 5, 6, 2, 1],
-      [1, 6, 2, 3, 5, 4],
-    ],
-    solution: [
-      [2, 1, 3, 4, 6, 5],
-      [5, 4, 6, 1, 3, 2],
-      [3, 2, 4, 5, 1, 6],
-      [6, 5, 1, 2, 4, 3],
-      [4, 3, 5, 6, 2, 1],
-      [1, 6, 2, 3, 5, 4],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [3, 0, 4, 0, 1, 0],
-      [0, 5, 0, 2, 0, 3],
-      [4, 0, 5, 0, 2, 0],
-      [0, 6, 0, 3, 0, 4],
-      [5, 0, 6, 0, 3, 0],
-      [0, 1, 0, 4, 0, 5],
-    ],
-    solution: [
-      [3, 2, 4, 5, 1, 6],
-      [6, 5, 1, 2, 4, 3],
-      [4, 3, 5, 6, 2, 1],
-      [1, 6, 2, 3, 5, 4],
-      [5, 4, 6, 1, 3, 2],
-      [2, 1, 3, 4, 6, 5],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 3, 0, 6, 2, 0],
-      [1, 0, 2, 0, 0, 4],
-      [0, 4, 6, 0, 3, 0],
-      [2, 0, 0, 4, 0, 5],
-      [6, 0, 1, 0, 4, 0],
-      [0, 2, 0, 5, 0, 6],
-    ],
-    solution: [
-      [4, 3, 5, 6, 2, 1],
-      [1, 6, 2, 3, 5, 4],
-      [5, 4, 6, 1, 3, 2],
-      [2, 1, 3, 4, 6, 5],
-      [6, 5, 1, 2, 4, 3],
-      [3, 2, 4, 5, 1, 6],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [5, 0, 6, 0, 3, 0],
-      [0, 1, 0, 4, 0, 5],
-      [6, 0, 1, 0, 4, 0],
-      [0, 2, 0, 5, 0, 6],
-      [1, 0, 2, 0, 5, 0],
-      [0, 3, 0, 6, 0, 1],
-    ],
-    solution: [
-      [5, 4, 6, 1, 3, 2],
-      [2, 1, 3, 4, 6, 5],
-      [6, 5, 1, 2, 4, 3],
-      [3, 2, 4, 5, 1, 6],
-      [1, 6, 2, 3, 5, 4],
-      [4, 3, 5, 6, 2, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 5, 0, 2, 0, 3],
-      [3, 0, 4, 0, 1, 0],
-      [0, 6, 0, 3, 0, 4],
-      [4, 0, 5, 0, 2, 0],
-      [0, 1, 0, 4, 0, 5],
-      [5, 0, 6, 0, 3, 0],
-    ],
-    solution: [
-      [6, 5, 1, 2, 4, 3],
-      [3, 2, 4, 5, 1, 6],
-      [1, 6, 2, 3, 5, 4],
-      [4, 3, 5, 6, 2, 1],
-      [2, 1, 3, 4, 6, 5],
-      [5, 4, 6, 1, 3, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [1, 0, 2, 0, 5, 0],
-      [0, 3, 0, 6, 0, 1],
-      [2, 0, 3, 0, 6, 0],
-      [0, 4, 0, 1, 0, 2],
-      [3, 0, 4, 0, 1, 0],
-      [0, 5, 0, 2, 0, 3],
-    ],
-    solution: [
-      [1, 6, 2, 3, 5, 4],
-      [4, 3, 5, 6, 2, 1],
-      [2, 1, 3, 4, 6, 5],
-      [5, 4, 6, 1, 3, 2],
-      [3, 2, 4, 5, 1, 6],
-      [6, 5, 1, 2, 4, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 1, 0, 6, 0, 3],
-      [3, 0, 4, 0, 2, 0],
-      [0, 5, 0, 3, 0, 4],
-      [4, 0, 1, 0, 6, 0],
-      [0, 2, 0, 4, 0, 1],
-      [1, 0, 5, 0, 3, 0],
-    ],
-    solution: [
-      [5, 1, 2, 6, 4, 3],
-      [3, 6, 4, 1, 2, 5],
-      [2, 5, 6, 3, 1, 4],
-      [4, 3, 1, 5, 6, 2],
-      [6, 2, 3, 4, 5, 1],
-      [1, 4, 5, 2, 3, 6],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [6, 0, 3, 0, 5, 0],
-      [0, 1, 0, 2, 0, 6],
-      [3, 0, 1, 0, 2, 0],
-      [0, 4, 0, 6, 0, 3],
-      [1, 0, 4, 0, 6, 0],
-      [0, 5, 0, 3, 0, 1],
-    ],
-    solution: [
-      [6, 2, 3, 1, 5, 4],
-      [4, 1, 5, 2, 3, 6],
-      [3, 6, 1, 4, 2, 5],
-      [5, 4, 2, 6, 1, 3],
-      [1, 3, 4, 5, 6, 2],
-      [2, 5, 6, 3, 4, 1],
-    ],
-  ),
 
-  // Hard (9x9)
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [5, 3, 0, 0, 7, 0, 0, 0, 0],
-      [6, 0, 0, 1, 9, 5, 0, 0, 0],
-      [0, 9, 8, 0, 0, 0, 0, 6, 0],
-      [8, 0, 0, 0, 6, 0, 0, 0, 3],
-      [4, 0, 0, 8, 0, 3, 0, 0, 1],
-      [7, 0, 0, 0, 2, 0, 0, 0, 6],
-      [0, 6, 0, 0, 0, 0, 2, 8, 0],
-      [0, 0, 0, 4, 1, 9, 0, 0, 5],
-      [0, 0, 0, 0, 8, 0, 0, 7, 9],
-    ],
-    solution: [
-      [5, 3, 4, 6, 7, 8, 9, 1, 2],
-      [6, 7, 2, 1, 9, 5, 3, 4, 8],
-      [1, 9, 8, 3, 4, 2, 5, 6, 7],
-      [8, 5, 9, 7, 6, 1, 4, 2, 3],
-      [4, 2, 6, 8, 5, 3, 7, 9, 1],
-      [7, 1, 3, 9, 2, 4, 8, 5, 6],
-      [9, 6, 1, 5, 3, 7, 2, 8, 4],
-      [2, 8, 7, 4, 1, 9, 6, 3, 5],
-      [3, 4, 5, 2, 8, 6, 1, 7, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [6, 0, 0, 7, 8, 0, 1, 0, 0],
-      [0, 8, 3, 0, 0, 6, 4, 0, 9],
-      [2, 0, 0, 4, 5, 0, 0, 7, 0],
-      [0, 6, 1, 0, 0, 2, 5, 0, 4],
-      [5, 0, 0, 9, 0, 4, 0, 1, 2],
-      [8, 0, 4, 1, 0, 0, 9, 6, 0],
-      [0, 7, 0, 0, 4, 8, 0, 0, 5],
-      [3, 0, 8, 5, 0, 0, 7, 4, 0],
-      [0, 0, 6, 0, 9, 7, 0, 0, 1],
-    ],
-    solution: [
-      [6, 4, 5, 7, 8, 9, 1, 2, 3],
-      [7, 8, 3, 2, 1, 6, 4, 5, 9],
-      [2, 1, 9, 4, 5, 3, 6, 7, 8],
-      [9, 6, 1, 8, 7, 2, 5, 3, 4],
-      [5, 3, 7, 9, 6, 4, 8, 1, 2],
-      [8, 2, 4, 1, 3, 5, 9, 6, 7],
-      [1, 7, 2, 6, 4, 8, 3, 9, 5],
-      [3, 9, 8, 5, 2, 1, 7, 4, 6],
-      [4, 5, 6, 3, 9, 7, 2, 8, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [7, 0, 6, 8, 0, 0, 2, 0, 4],
-      [8, 9, 0, 0, 2, 7, 0, 6, 0],
-      [0, 2, 0, 5, 0, 0, 7, 0, 9],
-      [1, 0, 2, 0, 8, 3, 0, 4, 0],
-      [6, 0, 0, 1, 0, 5, 0, 2, 3],
-      [0, 3, 5, 2, 4, 0, 1, 0, 0],
-      [2, 0, 3, 0, 5, 9, 0, 1, 0],
-      [0, 1, 0, 6, 0, 0, 8, 5, 7],
-      [5, 0, 7, 0, 0, 8, 3, 0, 2],
-    ],
-    solution: [
-      [7, 5, 6, 8, 9, 1, 2, 3, 4],
-      [8, 9, 4, 3, 2, 7, 5, 6, 1],
-      [3, 2, 1, 5, 6, 4, 7, 8, 9],
-      [1, 7, 2, 9, 8, 3, 6, 4, 5],
-      [6, 4, 8, 1, 7, 5, 9, 2, 3],
-      [9, 3, 5, 2, 4, 6, 1, 7, 8],
-      [2, 8, 3, 7, 5, 9, 4, 1, 6],
-      [4, 1, 9, 6, 3, 2, 8, 5, 7],
-      [5, 6, 7, 4, 1, 8, 3, 9, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [0, 6, 7, 0, 1, 2, 0, 4, 5],
-      [9, 0, 5, 4, 0, 0, 6, 0, 2],
-      [4, 0, 0, 6, 7, 0, 8, 9, 0],
-      [2, 8, 0, 1, 0, 4, 0, 5, 0],
-      [0, 5, 9, 0, 8, 6, 1, 0, 4],
-      [1, 0, 6, 3, 0, 0, 2, 8, 0],
-      [3, 9, 0, 8, 0, 1, 0, 2, 7],
-      [0, 2, 1, 0, 4, 3, 9, 0, 0],
-      [6, 0, 8, 5, 0, 9, 0, 1, 3],
-    ],
-    solution: [
-      [8, 6, 7, 9, 1, 2, 3, 4, 5],
-      [9, 1, 5, 4, 3, 8, 6, 7, 2],
-      [4, 3, 2, 6, 7, 5, 8, 9, 1],
-      [2, 8, 3, 1, 9, 4, 7, 5, 6],
-      [7, 5, 9, 2, 8, 6, 1, 3, 4],
-      [1, 4, 6, 3, 5, 7, 2, 8, 9],
-      [3, 9, 4, 8, 6, 1, 5, 2, 7],
-      [5, 2, 1, 7, 4, 3, 9, 6, 8],
-      [6, 7, 8, 5, 2, 9, 4, 1, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [9, 0, 8, 1, 0, 3, 4, 0, 6],
-      [0, 2, 6, 0, 4, 9, 0, 8, 0],
-      [5, 4, 0, 7, 0, 0, 9, 0, 2],
-      [3, 0, 4, 0, 1, 5, 0, 6, 0],
-      [8, 6, 0, 3, 9, 0, 2, 4, 5],
-      [0, 5, 7, 4, 0, 8, 3, 0, 0],
-      [4, 0, 5, 9, 0, 2, 0, 3, 8],
-      [6, 3, 0, 0, 5, 0, 1, 0, 9],
-      [7, 0, 9, 6, 3, 1, 0, 2, 4],
-    ],
-    solution: [
-      [9, 7, 8, 1, 2, 3, 4, 5, 6],
-      [1, 2, 6, 5, 4, 9, 7, 8, 3],
-      [5, 4, 3, 7, 8, 6, 9, 1, 2],
-      [3, 9, 4, 2, 1, 5, 8, 6, 7],
-      [8, 6, 1, 3, 9, 7, 2, 4, 5],
-      [2, 5, 7, 4, 6, 8, 3, 9, 1],
-      [4, 1, 5, 9, 7, 2, 6, 3, 8],
-      [6, 3, 2, 8, 5, 4, 1, 7, 9],
-      [7, 8, 9, 6, 3, 1, 5, 2, 4],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [1, 0, 9, 2, 3, 0, 5, 0, 7],
-      [0, 3, 7, 0, 5, 1, 0, 9, 0],
-      [6, 5, 0, 8, 0, 7, 1, 0, 3],
-      [4, 0, 5, 0, 2, 6, 0, 7, 8],
-      [9, 7, 0, 4, 0, 8, 3, 5, 6],
-      [3, 5, 8, 7, 6, 0, 4, 1, 0],
-      [5, 2, 0, 1, 0, 3, 7, 0, 9],
-      [0, 4, 3, 9, 6, 5, 0, 8, 1],
-      [8, 9, 1, 0, 4, 2, 6, 3, 0],
-    ],
-    solution: [
-      [1, 8, 9, 2, 3, 4, 5, 6, 7],
-      [2, 3, 7, 6, 5, 1, 8, 9, 4],
-      [6, 5, 4, 8, 9, 7, 1, 2, 3],
-      [4, 1, 5, 3, 2, 6, 9, 7, 8],
-      [9, 7, 2, 4, 1, 8, 3, 5, 6],
-      [3, 5, 8, 7, 6, 9, 4, 1, 2],
-      [5, 2, 6, 1, 8, 3, 7, 4, 9],
-      [7, 4, 3, 9, 6, 5, 2, 8, 1],
-      [8, 9, 1, 7, 4, 2, 6, 3, 5],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [2, 0, 1, 3, 0, 5, 6, 0, 8],
-      [3, 4, 0, 7, 6, 0, 9, 1, 0],
-      [7, 6, 5, 0, 1, 8, 0, 3, 4],
-      [0, 2, 6, 4, 0, 7, 1, 0, 9],
-      [1, 0, 3, 5, 2, 9, 0, 6, 7],
-      [4, 7, 0, 8, 6, 1, 5, 2, 0],
-      [6, 3, 7, 2, 0, 4, 8, 5, 0],
-      [8, 5, 4, 0, 7, 6, 0, 9, 2],
-      [0, 1, 2, 8, 5, 0, 7, 4, 6],
-    ],
-    solution: [
-      [2, 9, 1, 3, 4, 5, 6, 7, 8],
-      [3, 4, 8, 7, 6, 2, 9, 1, 5],
-      [7, 6, 5, 9, 1, 8, 2, 3, 4],
-      [5, 2, 6, 4, 3, 7, 1, 8, 9],
-      [1, 8, 3, 5, 2, 9, 4, 6, 7],
-      [4, 7, 9, 8, 6, 1, 5, 2, 3],
-      [6, 3, 7, 2, 9, 4, 8, 5, 1],
-      [8, 5, 4, 1, 7, 6, 3, 9, 2],
-      [9, 1, 2, 8, 5, 3, 7, 4, 6],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [3, 0, 2, 4, 5, 0, 7, 0, 9],
-      [0, 5, 9, 0, 7, 3, 1, 2, 0],
-      [8, 7, 0, 1, 0, 9, 0, 4, 5],
-      [6, 3, 7, 5, 4, 0, 2, 9, 1],
-      [2, 0, 4, 6, 3, 1, 5, 0, 8],
-      [5, 8, 1, 9, 0, 2, 6, 3, 4],
-      [7, 0, 8, 3, 1, 5, 0, 6, 2],
-      [9, 6, 5, 0, 8, 7, 4, 1, 0],
-      [1, 0, 3, 7, 6, 4, 8, 0, 9],
-    ],
-    solution: [
-      [3, 1, 2, 4, 5, 6, 7, 8, 9],
-      [4, 5, 9, 8, 7, 3, 1, 2, 6],
-      [8, 7, 6, 1, 2, 9, 3, 4, 5],
-      [6, 3, 7, 5, 4, 8, 2, 9, 1],
-      [2, 9, 4, 6, 3, 1, 5, 7, 8],
-      [5, 8, 1, 9, 7, 2, 6, 3, 4],
-      [7, 4, 8, 3, 1, 5, 9, 6, 2],
-      [9, 6, 5, 2, 8, 7, 4, 1, 3],
-      [1, 2, 3, 7, 6, 4, 8, 5, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [0, 2, 3, 5, 6, 0, 8, 0, 1],
-      [5, 6, 0, 9, 0, 4, 2, 3, 0],
-      [9, 8, 7, 0, 3, 1, 0, 5, 6],
-      [7, 0, 8, 6, 5, 0, 3, 1, 0],
-      [3, 1, 5, 7, 0, 2, 6, 8, 9],
-      [0, 9, 2, 8, 1, 3, 7, 0, 5],
-      [8, 5, 9, 0, 2, 6, 0, 7, 3],
-      [1, 7, 6, 3, 9, 0, 5, 2, 4],
-      [2, 0, 4, 1, 7, 5, 9, 0, 8],
-    ],
-    solution: [
-      [4, 2, 3, 5, 6, 7, 8, 9, 1],
-      [5, 6, 1, 9, 8, 4, 2, 3, 7],
-      [9, 8, 7, 2, 3, 1, 4, 5, 6],
-      [7, 4, 8, 6, 5, 9, 3, 1, 2],
-      [3, 1, 5, 7, 4, 2, 6, 8, 9],
-      [6, 9, 2, 8, 1, 3, 7, 4, 5],
-      [8, 5, 9, 4, 2, 6, 1, 7, 3],
-      [1, 7, 6, 3, 9, 8, 5, 2, 4],
-      [2, 3, 4, 1, 7, 5, 9, 6, 8],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [1, 6, 0, 3, 5, 0, 9, 0, 4],
-      [3, 5, 4, 2, 0, 1, 6, 8, 0],
-      [2, 9, 0, 6, 8, 4, 1, 3, 5],
-      [7, 1, 9, 0, 3, 2, 8, 0, 6],
-      [8, 4, 3, 7, 1, 0, 5, 9, 2],
-      [5, 2, 0, 9, 4, 8, 7, 1, 3],
-      [0, 3, 2, 1, 6, 5, 4, 0, 8],
-      [4, 7, 5, 0, 2, 9, 3, 6, 1],
-      [6, 8, 1, 4, 7, 0, 2, 5, 9],
-    ],
-    solution: [
-      [1, 6, 8, 3, 5, 7, 9, 2, 4],
-      [3, 5, 4, 2, 9, 1, 6, 8, 7],
-      [2, 9, 7, 6, 8, 4, 1, 3, 5],
-      [7, 1, 9, 5, 3, 2, 8, 4, 6],
-      [8, 4, 3, 7, 1, 6, 5, 9, 2],
-      [5, 2, 6, 9, 4, 8, 7, 1, 3],
-      [9, 3, 2, 1, 6, 5, 4, 7, 8],
-      [4, 7, 5, 8, 2, 9, 3, 6, 1],
-      [6, 8, 1, 4, 7, 3, 2, 5, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [1, 0, 3, 8, 6, 4, 2, 0, 7],
-      [8, 6, 7, 0, 2, 1, 5, 3, 0],
-      [9, 2, 0, 5, 3, 7, 0, 8, 6],
-      [0, 1, 2, 6, 8, 9, 3, 7, 5],
-      [3, 7, 8, 4, 0, 5, 6, 2, 9],
-      [6, 9, 5, 2, 7, 3, 8, 1, 0],
-      [2, 0, 9, 1, 5, 6, 7, 4, 3],
-      [7, 4, 6, 3, 0, 8, 5, 2, 1],
-      [5, 3, 1, 7, 4, 2, 9, 0, 8],
-    ],
-    solution: [
-      [1, 5, 3, 8, 6, 4, 2, 9, 7],
-      [8, 6, 7, 9, 2, 1, 5, 3, 4],
-      [9, 2, 4, 5, 3, 7, 1, 8, 6],
-      [4, 1, 2, 6, 8, 9, 3, 7, 5],
-      [3, 7, 8, 4, 1, 5, 6, 2, 9],
-      [6, 9, 5, 2, 7, 3, 8, 1, 4],
-      [2, 8, 9, 1, 5, 6, 7, 4, 3],
-      [7, 4, 6, 3, 9, 8, 5, 2, 1],
-      [5, 3, 1, 7, 4, 2, 9, 6, 8],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [9, 0, 2, 7, 5, 3, 0, 8, 6],
-      [7, 5, 6, 0, 1, 9, 4, 2, 0],
-      [8, 1, 0, 4, 2, 6, 9, 7, 5],
-      [3, 0, 1, 5, 7, 8, 2, 6, 4],
-      [2, 6, 7, 3, 0, 4, 5, 1, 8],
-      [5, 8, 4, 1, 6, 2, 3, 9, 0],
-      [1, 7, 8, 9, 0, 5, 6, 3, 2],
-      [6, 3, 5, 2, 8, 1, 7, 4, 9],
-      [4, 2, 9, 0, 3, 7, 8, 5, 1],
-    ],
-    solution: [
-      [9, 4, 2, 7, 5, 3, 1, 8, 6],
-      [7, 5, 6, 8, 1, 9, 4, 2, 3],
-      [8, 1, 3, 4, 2, 6, 9, 7, 5],
-      [3, 9, 1, 5, 7, 8, 2, 6, 4],
-      [2, 6, 7, 3, 9, 4, 5, 1, 8],
-      [5, 8, 4, 1, 6, 2, 3, 9, 7],
-      [1, 7, 8, 9, 4, 5, 6, 3, 2],
-      [6, 3, 5, 2, 8, 1, 7, 4, 9],
-      [4, 2, 9, 6, 3, 7, 8, 5, 1],
-    ],
-  ),
-  // 10 new levels
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [1, 0, 3, 0],
-      [0, 4, 0, 2],
-      [2, 0, 4, 0],
-      [0, 1, 0, 3],
-    ],
-    solution: [
-      [1, 2, 3, 4],
-      [3, 4, 1, 2],
-      [2, 3, 4, 1],
-      [4, 1, 2, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 1, 0, 3],
-      [2, 0, 4, 0],
-      [0, 4, 0, 2],
-      [1, 0, 3, 0],
-    ],
-    solution: [
-      [4, 1, 2, 3],
-      [2, 3, 4, 1],
-      [3, 4, 1, 2],
-      [1, 2, 3, 4],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [2, 0, 0, 3],
-      [0, 3, 2, 0],
-      [0, 2, 3, 0],
-      [3, 0, 0, 2],
-    ],
-    solution: [
-      [2, 4, 1, 3],
-      [1, 3, 2, 4],
-      [4, 2, 3, 1],
-      [3, 1, 4, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [1, 0, 3, 0, 5, 0],
-      [0, 5, 0, 1, 0, 3],
-      [0, 3, 0, 5, 0, 1],
-      [5, 0, 1, 0, 3, 0],
-      [3, 0, 5, 0, 1, 0],
-      [0, 1, 0, 3, 0, 5],
-    ],
-    solution: [
-      [1, 2, 3, 4, 5, 6],
-      [4, 5, 6, 1, 2, 3],
-      [2, 3, 4, 5, 6, 1],
-      [5, 6, 1, 2, 3, 4],
-      [3, 4, 5, 6, 1, 2],
-      [6, 1, 2, 3, 4, 5],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [2, 0, 0, 0, 6, 1],
-      [0, 6, 1, 2, 0, 0],
-      [1, 0, 3, 4, 0, 0],
-      [0, 5, 6, 0, 2, 0],
-      [0, 0, 5, 6, 0, 2],
-      [6, 1, 0, 0, 4, 0],
-    ],
-    solution: [
-      [2, 3, 4, 5, 6, 1],
-      [5, 6, 1, 2, 3, 4],
-      [1, 2, 3, 4, 5, 6],
-      [4, 5, 6, 1, 2, 3],
-      [3, 4, 5, 6, 1, 2],
-      [6, 1, 2, 3, 4, 5],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 4, 5, 6, 0, 0],
-      [6, 0, 2, 0, 4, 5],
-      [2, 3, 0, 0, 6, 0],
-      [0, 6, 1, 2, 0, 4],
-      [0, 0, 3, 4, 5, 0],
-      [4, 5, 0, 0, 2, 3],
-    ],
-    solution: [
-      [3, 4, 5, 6, 1, 2],
-      [6, 1, 2, 3, 4, 5],
-      [2, 3, 4, 5, 6, 1],
-      [5, 6, 1, 2, 3, 4],
-      [1, 2, 3, 4, 5, 6],
-      [4, 5, 6, 1, 2, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [5, 3, 0, 0, 7, 0, 0, 0, 2],
-      [6, 0, 0, 1, 0, 0, 0, 4, 8],
-      [1, 0, 8, 0, 4, 0, 5, 0, 0],
-      [0, 5, 0, 7, 0, 1, 0, 0, 3],
-      [0, 0, 6, 0, 5, 0, 7, 0, 0],
-      [7, 0, 0, 9, 0, 4, 0, 5, 0],
-      [0, 0, 1, 0, 3, 0, 2, 0, 4],
-      [2, 8, 0, 0, 0, 9, 0, 0, 5],
-      [3, 0, 0, 0, 8, 0, 0, 7, 9],
-    ],
-    solution: [
-      [5, 3, 4, 6, 7, 8, 9, 1, 2],
-      [6, 7, 2, 1, 9, 5, 3, 4, 8],
-      [1, 9, 8, 3, 4, 2, 5, 6, 7],
-      [8, 5, 9, 7, 6, 1, 4, 2, 3],
-      [4, 2, 6, 8, 5, 3, 7, 9, 1],
-      [7, 1, 3, 9, 2, 4, 8, 5, 6],
-      [9, 6, 1, 5, 3, 7, 2, 8, 4],
-      [2, 8, 7, 4, 1, 9, 6, 3, 5],
-      [3, 4, 5, 2, 8, 6, 1, 7, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [5, 0, 0, 0, 7, 8, 9, 0, 0],
-      [0, 7, 2, 0, 9, 0, 0, 4, 0],
-      [1, 0, 0, 3, 0, 0, 0, 6, 7],
-      [0, 5, 9, 0, 6, 0, 0, 2, 0],
-      [4, 0, 0, 8, 0, 3, 0, 0, 1],
-      [0, 1, 0, 0, 2, 0, 8, 5, 0],
-      [9, 6, 0, 0, 0, 7, 0, 0, 4],
-      [0, 8, 0, 0, 1, 0, 6, 3, 0],
-      [0, 0, 5, 2, 8, 0, 0, 0, 9],
-    ],
-    solution: [
-      [5, 3, 4, 6, 7, 8, 9, 1, 2],
-      [6, 7, 2, 1, 9, 5, 3, 4, 8],
-      [1, 9, 8, 3, 4, 2, 5, 6, 7],
-      [8, 5, 9, 7, 6, 1, 4, 2, 3],
-      [4, 2, 6, 8, 5, 3, 7, 9, 1],
-      [7, 1, 3, 9, 2, 4, 8, 5, 6],
-      [9, 6, 1, 5, 3, 7, 2, 8, 4],
-      [2, 8, 7, 4, 1, 9, 6, 3, 5],
-      [3, 4, 5, 2, 8, 6, 1, 7, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [0, 3, 4, 6, 0, 0, 0, 1, 2],
-      [6, 0, 0, 0, 9, 5, 3, 0, 0],
-      [1, 9, 0, 3, 0, 0, 0, 6, 0],
-      [8, 0, 9, 0, 6, 0, 4, 0, 3],
-      [0, 2, 0, 8, 0, 3, 0, 9, 0],
-      [7, 0, 3, 0, 2, 0, 8, 0, 6],
-      [0, 6, 0, 0, 0, 7, 0, 8, 4],
-      [2, 0, 7, 4, 0, 0, 6, 0, 5],
-      [3, 4, 0, 0, 8, 6, 0, 7, 0],
-    ],
-    solution: [
-      [5, 3, 4, 6, 7, 8, 9, 1, 2],
-      [6, 7, 2, 1, 9, 5, 3, 4, 8],
-      [1, 9, 8, 3, 4, 2, 5, 6, 7],
-      [8, 5, 9, 7, 6, 1, 4, 2, 3],
-      [4, 2, 6, 8, 5, 3, 7, 9, 1],
-      [7, 1, 3, 9, 2, 4, 8, 5, 6],
-      [9, 6, 1, 5, 3, 7, 2, 8, 4],
-      [2, 8, 7, 4, 1, 9, 6, 3, 5],
-      [3, 4, 5, 2, 8, 6, 1, 7, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 9,
-    startBoard: [
-      [5, 0, 0, 6, 7, 0, 0, 1, 2],
-      [6, 7, 0, 1, 0, 5, 0, 4, 8],
-      [1, 0, 8, 0, 4, 0, 5, 0, 7],
-      [0, 5, 0, 7, 0, 1, 0, 2, 0],
-      [4, 0, 6, 0, 0, 0, 7, 0, 1],
-      [0, 1, 0, 9, 0, 4, 0, 5, 0],
-      [9, 0, 1, 0, 3, 0, 2, 0, 4],
-      [2, 8, 0, 4, 0, 9, 0, 3, 5],
-      [3, 4, 0, 0, 8, 6, 0, 0, 9],
-    ],
-    solution: [
-      [5, 3, 4, 6, 7, 8, 9, 1, 2],
-      [6, 7, 2, 1, 9, 5, 3, 4, 8],
-      [1, 9, 8, 3, 4, 2, 5, 6, 7],
-      [8, 5, 9, 7, 6, 1, 4, 2, 3],
-      [4, 2, 6, 8, 5, 3, 7, 9, 1],
-      [7, 1, 3, 9, 2, 4, 8, 5, 6],
-      [9, 6, 1, 5, 3, 7, 2, 8, 4],
-      [2, 8, 7, 4, 1, 9, 6, 3, 5],
-      [3, 4, 5, 2, 8, 6, 1, 7, 9],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 2, 4, 0],
-      [3, 0, 0, 1],
-      [4, 0, 0, 2],
-      [0, 3, 1, 0],
-    ],
-    solution: [
-      [1, 2, 4, 3],
-      [3, 4, 2, 1],
-      [4, 1, 3, 2],
-      [2, 3, 1, 4],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [2, 0, 0, 4],
-      [0, 1, 3, 0],
-      [0, 2, 4, 0],
-      [3, 0, 0, 1],
-    ],
-    solution: [
-      [2, 3, 1, 4],
-      [4, 1, 3, 2],
-      [1, 2, 4, 3],
-      [3, 4, 2, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 4, 3, 0],
-      [1, 0, 0, 2],
-      [3, 0, 0, 4],
-      [0, 1, 2, 0],
-    ],
-    solution: [
-      [2, 4, 3, 1],
-      [1, 3, 4, 2],
-      [3, 2, 1, 4],
-      [4, 1, 2, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [1, 0, 0, 2],
-      [0, 3, 4, 0],
-      [0, 1, 2, 0],
-      [4, 0, 0, 3],
-    ],
-    solution: [
-      [1, 4, 3, 2],
-      [2, 3, 4, 1],
-      [3, 1, 2, 4],
-      [4, 2, 1, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [4, 0, 1, 0],
-      [0, 1, 0, 4],
-      [1, 0, 2, 0],
-      [0, 2, 0, 1],
-    ],
-    solution: [
-      [4, 3, 1, 2],
-      [2, 1, 3, 4],
-      [1, 4, 2, 3],
-      [3, 2, 4, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [4, 0, 2, 0],
-      [0, 1, 0, 3],
-      [0, 2, 0, 4],
-      [1, 0, 3, 0],
-    ],
-    solution: [
-      [4, 3, 2, 1],
-      [2, 1, 4, 3],
-      [3, 2, 1, 4],
-      [1, 4, 3, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 2, 0, 4],
-      [4, 0, 1, 0],
-      [0, 1, 0, 3],
-      [3, 0, 2, 0],
-    ],
-    solution: [
-      [1, 2, 3, 4],
-      [4, 3, 1, 2],
-      [2, 1, 4, 3],
-      [3, 4, 2, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [2, 0, 0, 1],
-      [0, 4, 2, 0],
-      [0, 2, 4, 0],
-      [1, 0, 0, 3],
-    ],
-    solution: [
-      [2, 3, 1, 4],
-      [1, 4, 2, 3],
-      [3, 2, 4, 1],
-      [4, 1, 3, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 0, 2, 1],
-      [1, 2, 0, 0],
-      [0, 0, 1, 2],
-      [2, 1, 0, 0],
-    ],
-    solution: [
-      [4, 3, 2, 1],
-      [1, 2, 3, 4],
-      [3, 4, 1, 2],
-      [2, 1, 4, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 4,
-    startBoard: [
-      [0, 2, 3, 0],
-      [4, 0, 0, 1],
-      [1, 0, 0, 4],
-      [0, 3, 2, 0],
-    ],
-    solution: [
-      [4, 2, 3, 1],
-      [3, 1, 2, 4],
-      [1, 4, 3, 2],
-      [2, 3, 1, 4],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 3, 0, 6, 1, 0],
-      [2, 0, 1, 0, 0, 4],
-      [0, 4, 6, 0, 3, 0],
-      [1, 0, 0, 4, 0, 5],
-      [6, 0, 2, 0, 4, 0],
-      [0, 1, 0, 5, 0, 6],
-    ],
-    solution: [
-      [4, 3, 5, 6, 1, 2],
-      [2, 6, 1, 3, 5, 4],
-      [5, 4, 6, 2, 3, 1],
-      [1, 2, 3, 4, 6, 5],
-      [6, 5, 2, 1, 4, 3],
-      [3, 1, 4, 5, 2, 6],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [5, 0, 6, 0, 4, 0],
-      [0, 1, 0, 3, 0, 5],
-      [6, 0, 1, 0, 3, 0],
-      [0, 2, 0, 5, 0, 6],
-      [1, 0, 2, 0, 5, 0],
-      [0, 4, 0, 6, 0, 1],
-    ],
-    solution: [
-      [5, 3, 6, 1, 4, 2],
-      [2, 1, 4, 3, 6, 5],
-      [6, 5, 1, 2, 3, 4],
-      [4, 2, 3, 5, 1, 6],
-      [1, 6, 2, 4, 5, 3],
-      [3, 4, 5, 6, 2, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [5, 0, 0, 1, 0, 2],
-      [0, 1, 4, 0, 6, 0],
-      [0, 5, 0, 2, 0, 4],
-      [4, 0, 3, 0, 1, 0],
-      [0, 6, 0, 4, 0, 3],
-      [3, 0, 0, 6, 2, 0],
-    ],
-    solution: [
-      [5, 3, 6, 1, 4, 2],
-      [2, 1, 4, 3, 6, 5],
-      [6, 5, 1, 2, 3, 4],
-      [4, 2, 3, 5, 1, 6],
-      [1, 6, 2, 4, 5, 3],
-      [3, 4, 5, 6, 2, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [1, 0, 5, 0, 2, 0],
-      [0, 3, 0, 6, 0, 1],
-      [5, 0, 3, 0, 6, 0],
-      [0, 4, 0, 1, 0, 5],
-      [3, 0, 4, 0, 1, 0],
-      [0, 2, 0, 5, 0, 3],
-    ],
-    solution: [
-      [1, 6, 5, 3, 2, 4],
-      [4, 3, 2, 6, 5, 1],
-      [5, 1, 3, 4, 6, 2],
-      [2, 4, 6, 1, 3, 5],
-      [3, 5, 4, 2, 1, 6],
-      [6, 2, 1, 5, 4, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 1, 0, 3, 0, 6],
-      [6, 0, 4, 0, 2, 0],
-      [0, 5, 0, 6, 0, 4],
-      [4, 0, 1, 0, 3, 0],
-      [0, 2, 0, 4, 0, 1],
-      [1, 0, 5, 0, 6, 0],
-    ],
-    solution: [
-      [2, 1, 5, 3, 4, 6],
-      [6, 3, 4, 1, 2, 5],
-      [3, 5, 2, 6, 1, 4],
-      [4, 6, 1, 5, 3, 2],
-      [5, 2, 6, 4, 3, 1],
-      [1, 4, 5, 2, 6, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [1, 0, 2, 0, 5, 0],
-      [0, 3, 0, 5, 0, 1],
-      [2, 0, 3, 0, 5, 0],
-      [0, 4, 0, 1, 0, 2],
-      [3, 0, 4, 0, 1, 0],
-      [0, 5, 0, 2, 0, 3],
-    ],
-    solution: [
-      [1, 5, 2, 3, 6, 4],
-      [4, 3, 6, 5, 2, 1],
-      [2, 1, 3, 4, 6, 5],
-      [5, 6, 6, 1, 3, 2],
-      [3, 2, 4, 6, 1, 5],
-      [6, 4, 1, 2, 5, 3],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 3, 0, 5, 0, 6],
-      [1, 0, 5, 0, 4, 0],
-      [0, 4, 1, 0, 6, 0],
-      [6, 0, 2, 0, 5, 0],
-      [0, 5, 0, 6, 0, 4],
-      [4, 0, 6, 0, 2, 0],
-    ],
-    solution: [
-      [2, 3, 4, 5, 1, 6],
-      [1, 6, 5, 2, 4, 3],
-      [5, 4, 1, 3, 6, 2],
-      [6, 1, 2, 4, 5, 3],
-      [3, 5, 2, 6, 1, 4],
-      [4, 2, 6, 1, 3, 5],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [5, 0, 3, 0, 6, 0],
-      [0, 1, 0, 4, 0, 5],
-      [3, 0, 1, 0, 4, 0],
-      [0, 2, 0, 5, 0, 3],
-      [1, 0, 2, 0, 5, 0],
-      [0, 6, 0, 3, 0, 1],
-    ],
-    solution: [
-      [5, 4, 3, 1, 6, 2],
-      [2, 1, 6, 4, 3, 5],
-      [3, 5, 1, 2, 4, 6],
-      [6, 2, 4, 5, 1, 3],
-      [1, 3, 2, 6, 5, 4],
-      [4, 6, 5, 3, 2, 1],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [0, 5, 0, 2, 0, 3],
-      [3, 0, 6, 0, 1, 0],
-      [0, 4, 0, 3, 0, 6],
-      [6, 0, 5, 0, 2, 0],
-      [0, 1, 0, 6, 0, 5],
-      [5, 0, 3, 0, 4, 0],
-    ],
-    solution: [
-      [1, 5, 4, 2, 6, 3],
-      [3, 2, 6, 5, 1, 4],
-      [2, 4, 1, 3, 5, 6],
-      [6, 3, 5, 4, 2, 1],
-      [4, 1, 2, 6, 3, 5],
-      [5, 6, 3, 1, 4, 2],
-    ],
-  ),
-  SudokuLevel(
-    size: 6,
-    startBoard: [
-      [3, 0, 1, 0, 4, 0],
-      [0, 5, 0, 2, 0, 3],
-      [1, 0, 5, 0, 2, 0],
-      [0, 6, 0, 3, 0, 1],
-      [5, 0, 6, 0, 3, 0],
-      [0, 4, 0, 1, 0, 5],
-    ],
-    solution: [
-      [3, 2, 1, 5, 4, 6],
-      [6, 5, 4, 2, 1, 3],
-      [1, 3, 5, 6, 2, 4],
-      [4, 6, 2, 3, 5, 1],
-      [5, 1, 6, 4, 3, 2],
-      [2, 4, 3, 1, 6, 5],
-    ],
-  ),
+/// The free-play modifier pool. Mirrored by `pools['sudoku']` in
+/// test/difficulty_curve_test.dart — keep the two in step.
+///
+/// `ratchet` must never be added here: it punishes the first wrong digit
+/// instantly, which is the exact opposite of `silence`.
+const List<String> kSudokuModifierPool = [
+  'clueThinning',
+  'eclipse',
+  'timer',
+  'zoom',
+  'glitch',
+  'time_warp',
+  'silence',
 ];
 
 class SudokuScreen extends StatefulWidget {
@@ -1142,6 +59,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
   int _actualGameLevel = 0;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
   int _dailyGridSize = 9;
   double _dailyRadius = 1.5;
   Timer? _blackoutTimer;
@@ -1161,15 +80,35 @@ class _SudokuScreenState extends State<SudokuScreen> {
   final Set<(int, int)> _recallCorrectSelections = {};
   final Set<(int, int)> _lockedRecallCells = {};
 
-  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
   Set<String> _activeModifiers = {};
-  bool get _isEclipseActive {
-    if (_playDailyMode) return _dailyModifierType == 'eclipse';
-    return !_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('eclipse');
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _levelIndex >= RotationEngine.modifierStartLevel('sudoku') &&
+        _activeModifiers.contains(name);
   }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isEclipseActive => _isModActive('eclipse');
+  bool get _isEndgame => _isModActive('timer');
+  bool get _silent => _isModActive('silence');
+  bool get _isGlitchActive => _isModActive('glitch');
+  bool get _isZoomActive => _isModActive('zoom');
+  bool get _isTimeWarpActive => _isModActive('time_warp');
+  bool get _isClueThinningActive => _isModActive('clueThinning');
+  int _submitAttempts = 3;
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('sudoku', _levelIndex);
 
   @override
   void initState() {
@@ -1180,8 +119,15 @@ class _SudokuScreenState extends State<SudokuScreen> {
     _initLevel();
   }
 
+  /// Held in state rather than rebuilt inside build(): a fresh controller
+  /// on every frame leaked one per rebuild and snapped the player's pan
+  /// position back to the start each time the board changed.
+  final TransformationController _zoomController =
+      TransformationController(Matrix4.identity()..scale(1.4));
+
   @override
   void dispose() {
+    _zoomController.dispose();
     _blackoutTimer?.cancel();
     _warpTimer?.cancel();
     _gameTimer?.cancel();
@@ -1249,6 +195,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       final difficulty = prefs.getString(PrefsKeys.dailyModifierDifficulty) ?? 'Medium';
       if (difficulty.toLowerCase() == 'hard') {
         _dailyGridSize = 9;
@@ -1272,6 +220,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
       }
     } else {
       _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
       _dailyGridSize = 9;
       _dailyRadius = 1.5;
     }
@@ -1412,10 +362,22 @@ class _SudokuScreenState extends State<SudokuScreen> {
         );
       }
     }
-    if (widget.dailyLevelIndex != null) return;
+    // A daily challenge borrows the game's level slot, so saving here would leak
+    // the challenge's level into real progress. Registering the clear would also
+    // double-pay: the daily grants its own reward, and HintManager.onLevelCleared
+    // adds points, the global clear count, achievements and trail milestones on
+    // top. Same guard as star_battle_screen.dart.
+    // `widget.dailyLevelIndex` alone never fired — nothing in lib/ ever passes it,
+    // so a daily run (which is flagged by the play_daily_mode pref) got through.
+    if (_playDailyMode || widget.dailyLevelIndex != null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(PrefsKeys.gameLevel('sudoku'), lvl);
-    final earned = await HintManager.onLevelCleared('sudoku');
+    final earned = await HintManager.onLevelCleared(
+      'sudoku',
+      // Speed Demon: cleared a hard-timer level with more than half the
+      // clock still left. _initialTime is 0 unless the timer modifier ran.
+      isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+    );
     if (earned) {
       final newCount = await HintManager.getHints('sudoku');
       if (mounted) {
@@ -1480,9 +442,9 @@ class _SudokuScreenState extends State<SudokuScreen> {
   }
 
   SudokuLevel _getSudokuLevel(int index) {
-    final List<SudokuLevel> levels4 = _kLevels.where((l) => l.size == 4).toList();
-    final List<SudokuLevel> levels6 = _kLevels.where((l) => l.size == 6).toList();
-    final List<SudokuLevel> levels9 = _kLevels.where((l) => l.size == 9).toList();
+    final List<SudokuLevel> levels4 = kSudokuLevels.where((l) => l.size == 4).toList();
+    final List<SudokuLevel> levels6 = kSudokuLevels.where((l) => l.size == 6).toList();
+    final List<SudokuLevel> levels9 = kSudokuLevels.where((l) => l.size == 9).toList();
 
     SudokuLevel baseLevel;
     if (_playDailyMode) {
@@ -1513,7 +475,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
       mapping[i + 1] = digits[i];
     }
     mapping[0] = 0;
-    final transpose = rng.nextBool();
+    // Transposing is only safe when the box shape is square. A 6x6 uses 2x3
+    // boxes, so a transposed grid is valid for 3x2 boxes while the validator,
+    // hint solver and win check all still use 2x3 -- which made the stored
+    // solution unreachable and the level unwinnable.
+    final transpose = size == 6 ? false : rng.nextBool();
     final startBoard = List.generate(size, (r) => List.filled(size, 0));
     final solutionList = List.generate(size, (r) => List.filled(size, 0));
     for (int r = 0; r < size; r++) {
@@ -1551,7 +517,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       } else {
         targetFilled = 17;
       }
-    } else if (!_playDailyMode && index >= 30) {
+    } else if (!_playDailyMode && index >= 30) { // not-a-modifier-gate
       if (size == 4) {
         targetFilled = 5;
       } else if (size == 6) {
@@ -1563,7 +529,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
           targetFilled = max(17, 25 - ((index - 45) ~/ 3));
         }
       }
-      if (_activeModifiers.contains('clueThinning')) {
+      if (_isModActive('clueThinning')) {
         targetFilled = max(4, targetFilled - (size == 4 ? 1 : size == 6 ? 2 : 3));
       }
     } else if (size == 9) {
@@ -1609,31 +575,47 @@ class _SudokuScreenState extends State<SudokuScreen> {
     );
   }
 
+  // COGNIQ-FIX:mod-desc-copy
   String _getModifierDescription(String mod) {
     switch (mod) {
       case 'clueThinning':
-        return 'Thin Clues: fewer pre-filled numbers provided';
+        return 'Fewer starting numbers provided across the grid.';
       case 'eclipse':
-        return 'Eclipse: scan and recall phases are enabled';
+        return 'Periodic eclipse tests your recall of placed numbers.';
       case 'timer':
-        return 'Timer: clear the board before time runs out';
+        return 'Solve the entire puzzle before time runs out.';
       case 'zoom':
-        return 'Zoom: enables zoom and pan mode';
+        return 'The grid is magnified with pan-and-scan enabled.';
       case 'glitch':
-        return 'Glitch: rows swap every 3 correct inputs';
+        return 'Rows subtly shift positions periodically.';
       case 'time_warp':
-        return 'Time Warp: +5s for correct, −10s for wrong';
+        return '+5s gained for correct placements, -10s lost on mistakes.';
+      case 'silence':
+        return 'No error feedback until you submit the completed board (3 tries).';
       default:
         return '';
     }
   }
 
+  String get _modifierBannerText {
+    if (_isTutorialMode) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
+  }
+
   void _loadLevel() {
-    if (!_playDailyMode && _levelIndex >= 30) {
+    if (_modsOn) {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'sudoku',
         levelIndex: _levelIndex,
-        pool: ['clueThinning', 'eclipse', 'timer', 'zoom', 'glitch', 'time_warp'],
+        pool: kSudokuModifierPool,
         minActive: 2,
         maxActive: 4,
       );
@@ -1643,6 +625,17 @@ class _SudokuScreenState extends State<SudokuScreen> {
     if (_forcedModifier != null) {
       _activeModifiers = {_forcedModifier!};
     }
+    // `silence` defers every judgement to Submit, so it cannot share a level
+    // with a modifier that reports correctness on each placement -- `eclipse`
+    // fails the level the instant a recalled cell is wrong, and `time_warp`
+    // announces "+5s"/"-10s" per digit. RotationEngine enumerates every pair,
+    // so keeping them out of the pool cannot keep them apart; drop the partner
+    // here instead, and let the caption show only what actually ran.
+    if (_activeModifiers.contains('silence')) {
+      _activeModifiers.remove('eclipse');
+      _activeModifiers.remove('time_warp');
+    }
+    _submitAttempts = 3;
     _level = _getSudokuLevel(_levelIndex);
     _board = List.generate(_level.size, (r) => List.from(_level.startBoard[r]));
     _selectedRow = -1;
@@ -1664,7 +657,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
     
     final bool hasTimeWarp = _forcedModifier == 'time_warp' ||
         (_playDailyMode && _dailyModifierType == 'time_warp') ||
-        (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('time_warp'));
+        (_modsOn && _activeModifiers.contains('time_warp'));
     if (hasTimeWarp) {
       _warpTimeLeft = 90;
       _warpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -1692,6 +685,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       _timeBonusEarned = false;
       if (_isEndgame && _activeModifiers.contains('timer')) {
         _timeLeft = _level.size == 4 ? 60 : (_level.size == 6 ? 120 : 240);
+        _initialTime = _timeLeft;
         _timeBonusEarned = true;
         _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
           if (!mounted || _won || _gameOver) {
@@ -1725,7 +719,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       builder: (context) {
         int target = _levelIndex + 1;
         String? selectedMod = _forcedModifier;
-        final pool = ['clueThinning', 'eclipse', 'timer', 'zoom', 'glitch', 'time_warp'];
+        const pool = kSudokuModifierPool;
         
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -1884,7 +878,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
     
     final bool isTimeWarp = _forcedModifier == 'time_warp' ||
         (_playDailyMode && _dailyModifierType == 'time_warp') ||
-        (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('time_warp'));
+        (_modsOn && _activeModifiers.contains('time_warp'));
     if (isTimeWarp) {
       if (num == targetVal) {
         _warpTimeLeft = (_warpTimeLeft + 5).clamp(0, 300);
@@ -1902,9 +896,14 @@ class _SudokuScreenState extends State<SudokuScreen> {
     
     final bool isGlitch = _forcedModifier == 'glitch' ||
         (_playDailyMode && _dailyModifierType == 'glitch') ||
-        (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('glitch'));
+        (_modsOn && _activeModifiers.contains('glitch'));
     if (isGlitch) {
-      if (prevVal != num && num == targetVal) {
+      // Under `silence` the swap must not double as a correctness tell, so it
+      // counts placements rather than correct placements. The board still
+      // shuffles just as often.
+      final bool countsTowardsSwap =
+          prevVal != num && (_silent || num == targetVal);
+      if (countsTowardsSwap) {
         _correctPlacementsCount++;
         if (_correctPlacementsCount >= 3) {
           _correctPlacementsCount = 0;
@@ -1918,6 +917,9 @@ class _SudokuScreenState extends State<SudokuScreen> {
 
   void _tryAutoCheck() {
     if (_won || _gameOver) return;
+    // `silence`: filling the last cell must not reveal anything. The board is
+    // only judged when the player presses Submit.
+    if (_silent) return;
     final size = _level.size;
     for (int r = 0; r < size; r++) {
       for (int c = 0; c < size; c++) {
@@ -1936,6 +938,46 @@ class _SudokuScreenState extends State<SudokuScreen> {
       AudioManager.playClick();
     });
     _saveNormalState();
+  }
+
+  /// `silence`'s only judgement. Reports how many cells are wrong and never
+  /// which, spends one of three attempts, and loses the level when they run
+  /// out.
+  void _onSubmitSilent() {
+    if (_won || _gameOver || _submitAttempts <= 0) return;
+    final size = _level.size;
+    int wrong = 0;
+    int blank = 0;
+    for (int r = 0; r < size; r++) {
+      for (int c = 0; c < size; c++) {
+        final v = _board[r][c];
+        if (v == 0) {
+          blank++;
+        } else if (v != _level.solution[r][c]) {
+          wrong++;
+        }
+      }
+    }
+
+    if (wrong == 0 && blank == 0) {
+      _checkBoard();
+      return;
+    }
+
+    setState(() {
+      _submitAttempts--;
+      _message = wrong == 0
+          ? 'No errors — but the board is not complete'
+          : '$wrong cell${wrong == 1 ? '' : 's'} wrong';
+      AudioManager.playFail();
+    });
+
+    if (_submitAttempts <= 0) {
+      setState(() {
+        _gameOver = true;
+        _message = 'Out of submissions.';
+      });
+    }
   }
 
   void _checkBoard() {
@@ -2060,13 +1102,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
       appBar: AppBar(
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
-        title: Text(
-          _isTutorialMode ? 'Tutorial' : 'Sudoku',
-          style: GoogleFonts.outfit(
-            fontWeight: FontWeight.w700,
-            color: context.textPrimary,
-          ),
-        ),
+        title: const GameTitle('Sudoku'),
         centerTitle: true,
         actions: [
           if (_shuffleActive && !_isTutorialMode)
@@ -2076,6 +1112,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'sudoku'),
             ),
           IconButton(
+            tooltip: 'Hint',
             icon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2146,11 +1183,13 @@ class _SudokuScreenState extends State<SudokuScreen> {
             )
           else ...[
             IconButton(
+              tooltip: 'Rules',
               icon: const Icon(Icons.help_outline, size: 20),
               color: context.textMuted,
               onPressed: () => RulesHelper.showRulesBottomSheet(context, 'sudoku', 'Sudoku'),
             ),
             IconButton(
+              tooltip: 'Restart',
               icon: const Icon(Icons.refresh, size: 20),
               onPressed: _reset,
               color: context.textMuted,
@@ -2180,33 +1219,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
                 ),
               ),
             ),
-          GestureDetector(
-            onTap: _showJumpToLevelDialog,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _isTutorialMode
-                          ? 'Tutorial'
-                          : _playDailyMode 
-                              ? 'Daily' 
-                              : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
-                      style: AppTheme.numberStyle(
-                        color: accentColor,
-                        fontSize: context.scale(13),
-                      ),
-                    ),
-                    if (!_isTutorialMode && !_playDailyMode) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.edit, size: 12, color: accentColor),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          GameLevelChip(
+            level: _levelIndex + 1,
+            modeLabel: _isTutorialMode ? 'Tutorial' : (_playDailyMode ? 'Daily' : null),
+            accent: AppTheme.accentFor('sudoku'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -2289,11 +1306,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ],
                     const SizedBox(height: 16),
                   ],
-                  if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                  if (_modifierBannerText.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12.0),
                       child: Text(
-                        _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                        _modifierBannerText,
                         textAlign: TextAlign.center,
                         style: GoogleFonts.outfit(
                           fontSize: 13,
@@ -2304,7 +1321,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                     ),
                   ],
                   // Sudoku Board Display
-                  if (_forcedModifier == 'zoom' || (_playDailyMode && _dailyModifierType == 'zoom') || (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('zoom'))) ...[
+                  if (_isZoomActive) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -2459,7 +1476,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                           ),
                         );
 
-                        if (_forcedModifier == 'zoom' || (_playDailyMode && _dailyModifierType == 'zoom') || (!_playDailyMode && _levelIndex >= 30 && _activeModifiers.contains('zoom'))) {
+                        if (_forcedModifier == 'zoom' || (_playDailyMode && _dailyModifierType == 'zoom') || (_modsOn && _activeModifiers.contains('zoom'))) {
                           boardWidget = SizedBox(
                             width: context.scale(boardScale),
                             height: context.scale(boardScale),
@@ -2468,7 +1485,7 @@ class _SudokuScreenState extends State<SudokuScreen> {
                               scaleEnabled: false,
                               minScale: 1.4,
                               maxScale: 1.4,
-                              transformationController: TransformationController(Matrix4.identity()..scale(1.4)),
+                              transformationController: _zoomController,
                               child: boardWidget,
                             ),
                           );
@@ -2531,6 +1548,27 @@ class _SudokuScreenState extends State<SudokuScreen> {
                       ),
                       const SizedBox(height: 20),
                     ],
+                    if (_silent) ...[
+                      Center(
+                        child: FilledButton.tonal(
+                          onPressed: _onSubmitSilent,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accentColor.withValues(alpha: 0.18),
+                            foregroundColor: accentColor,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 12),
+                          ),
+                          child: Text(
+                            'Submit  ·  $_submitAttempts left',
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold,
+                              fontSize: context.scale(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     if (!_isEclipseActive)
                       Center(
                         child: TextButton(
@@ -2563,7 +1601,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
       if (_gameOver && !_won)
         LossOverlay(
           onTryAgain: _reset,
-          subtitle: _playDailyMode ? 'Daily Challenge failed.' : 'Failed on level ${_levelIndex + 1}.',
+          subtitle: _silent && _submitAttempts <= 0
+              ? 'Three submissions, still wrong.'
+              : (_playDailyMode
+                  ? 'Daily Challenge failed.'
+                  : 'Failed on level ${_levelIndex + 1}.'),
           accentColor: accentColor,
         ),
       if (_won && _playDailyMode)

@@ -327,6 +327,7 @@ class _BuyHintsDialogState extends State<BuyHintsDialog> {
                       children: [
                         _buildQtyButton(
                           icon: Icons.remove_rounded,
+                          tooltip: 'Decrease quantity',
                           onPressed: _hintQuantity > 1
                               ? () {
                                   setState(() {
@@ -370,6 +371,7 @@ class _BuyHintsDialogState extends State<BuyHintsDialog> {
                         ),
                         _buildQtyButton(
                           icon: Icons.add_rounded,
+                          tooltip: 'Increase quantity',
                           onPressed: () {
                             setState(() {
                               _hintQuantity++;
@@ -508,7 +510,7 @@ class _BuyHintsDialogState extends State<BuyHintsDialog> {
     );
   }
 
-  Widget _buildQtyButton({required IconData icon, VoidCallback? onPressed}) {
+  Widget _buildQtyButton({required IconData icon, required String tooltip, VoidCallback? onPressed}) {
     return Container(
       width: 36,
       height: 36,
@@ -520,6 +522,7 @@ class _BuyHintsDialogState extends State<BuyHintsDialog> {
         ),
       ),
       child: IconButton(
+        tooltip: tooltip,
         padding: EdgeInsets.zero,
         icon: Icon(icon, size: 20),
         color: onPressed != null ? context.textPrimary : context.textMuted.withOpacity(0.3),

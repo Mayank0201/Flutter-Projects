@@ -41,18 +41,38 @@ android {
         versionName = flutter.versionName
     }
 
+    // The upload keystore lives outside version control, so it is absent on a
+    // fresh clone and on CI. Casting the missing properties straight to String
+    // failed the whole build with an opaque error; fall back to debug signing
+    // instead so the project still builds, and let `storeFile` be an absolute
+    // path so the keystore can live outside the project directory.
+    val hasReleaseSigning = keystorePropertiesFile.exists() &&
+        keystoreProperties["storeFile"] != null &&
+        keystoreProperties["keyAlias"] != null
+
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
+        if (hasReleaseSigning) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                // Resolved relative to this module (android/app), which is what
+                // the stored `../app/upload-keystore.jks` path expects. An
+                // absolute path also works, so the keystore can live outside
+                // the project directory.
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn("key.properties not found - signing release with the debug key. This build cannot be uploaded to Play.")
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

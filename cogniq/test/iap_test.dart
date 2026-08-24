@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_platform_interface/in_app_purchase_platform_interface.dart';
@@ -7,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cogniq/utils/purchase_manager.dart';
 import 'package:cogniq/utils/point_manager.dart';
 import 'package:cogniq/utils/iap_catalog.dart';
-import 'package:cogniq/utils/prefs_keys.dart';
 
 // Hand-written mock implementation for InAppPurchase class
 class MockInAppPurchase implements InAppPurchase {

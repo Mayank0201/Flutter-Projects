@@ -3,7 +3,9 @@ import 'dart:async';
 import 'dart:convert';
 import '../../../utils/rotation_engine.dart';
 import '../../../utils/point_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import 'package:cogniq/widgets/buy_hints_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +18,19 @@ import '../../../widgets/auto_next_countdown.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../utils/shuffle_manager.dart';
+
+/// The free-play modifier pool. Mirrored by `pools['mines']` in
+/// test/difficulty_curve_test.dart — keep the two in step.
+///
+/// `ratchet` must never be added here: it punishes a mistake the instant it is
+/// made, which is the exact opposite of `silence`.
+const List<String> kMineFinderModifierPool = [
+  'limitedFlags',
+  'hiddenCount',
+  'timer',
+  'fog',
+  'silence',
+];
 
 class MineFinderScreen extends StatefulWidget {
   final int? dailyLevelIndex;
@@ -50,46 +65,125 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
   String _dailyModifierName = '';
   String _dailyModifierDesc = '';
 
-  bool get _isEndgame => !_playDailyMode && _levelIndex >= 30;
   Set<String> _activeModifiers = {};
 
-  bool get _isLimitedFlagsActive {
-    if (_playDailyMode) return false;
-    if (_levelIndex >= 30) {
-      return _activeModifiers.contains('limitedFlags');
-    }
-    return false;
-  }
-  bool get _isHiddenMinesActive {
-    if (_playDailyMode) return false;
-    if (_levelIndex >= 30) {
-      return _activeModifiers.contains('hiddenCount');
-    }
-    return false;
-  }
-  bool get _isFogActive {
-    if (_forcedModifier == 'fog') return true;
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
     if (_playDailyMode) {
-      return _dailyModifierType == 'fog' || _dailyModifierType == 'spotlight' || _dailyModifierType == 'spotlight2';
+      if (name == 'fog') {
+        return _dailyModifierType == 'fog' ||
+            _dailyModifierType == 'spotlight' ||
+            _dailyModifierType == 'spotlight2';
+      }
+      return _dailyModifierType == name;
     }
-    return _levelIndex >= 30 && _activeModifiers.contains('fog');
+    return _levelIndex >= RotationEngine.modifierStartLevel('minesweeper') &&
+        _activeModifiers.contains(name);
   }
 
+  // COGNIQ-FIX:mod-getters
+  bool get _isLimitedFlagsActive => _isModActive('limitedFlags');
+  bool get _isHiddenMinesActive => _isModActive('hiddenCount');
+  bool get _isFogActive => _isModActive('fog');
+  bool get _isEndgame => _isModActive('timer');
+
+  /// `silence` — digging a mine no longer detonates. The cell simply opens and
+  /// shows its adjacent count like any other, the board is never judged as you
+  /// play, and the only verdict comes from Submit: how many cells are wrong,
+  /// never which. Three attempts, then the level is lost.
+  bool get _silent => _isModActive('silence');
+  int _submitAttempts = 3;
+
+  /// Set once the level ends, so the board may finally show where the mines
+  /// were. While `silence` is live this stays false and a dug mine renders as
+  /// an ordinary opened cell.
+  bool get _revealTruth => _won || _lost;
+
+  /// How many of the player's committed decisions contradict the board: a mine
+  /// that has been dug, or a flag on safe ground.
+  int _countSilentErrors() {
+    int wrong = 0;
+    for (int r = 0; r < _gridSize; r++) {
+      for (int c = 0; c < _gridSize; c++) {
+        if (_mines[r][c] && _revealed[r][c]) wrong++;
+        if (!_mines[r][c] && _flagged[r][c]) wrong++;
+      }
+    }
+    return wrong;
+  }
+
+  /// True when every safe cell has been opened — the game's normal win shape.
+  bool _allSafeRevealed() {
+    for (int r = 0; r < _gridSize; r++) {
+      for (int c = 0; c < _gridSize; c++) {
+        if (!_mines[r][c] && !_revealed[r][c]) return false;
+      }
+    }
+    return true;
+  }
+
+  void _onSubmitSilent() {
+    if (_won || _lost || _submitAttempts <= 0) return;
+    final wrong = _countSilentErrors();
+    if (wrong == 0 && _allSafeRevealed()) {
+      _finishSilentWin();
+      return;
+    }
+
+    setState(() {
+      _submitAttempts--;
+      _message = wrong == 0
+          ? 'No errors — but the field is not cleared'
+          : '$wrong cell${wrong == 1 ? '' : 's'} wrong';
+      AudioManager.playFail();
+    });
+
+    if (_submitAttempts <= 0) {
+      setState(() {
+        _lost = true;
+        _message = 'Out of submissions.';
+        for (int i = 0; i < _gridSize; i++) {
+          for (int j = 0; j < _gridSize; j++) {
+            if (_mines[i][j]) _revealed[i][j] = true;
+          }
+        }
+      });
+      _clearNormalState();
+    }
+  }
+
+  // COGNIQ-FIX:mod-desc-copy
   String _getModifierDescription(String mod) {
     switch (mod) {
       case 'limitedFlags':
-        return 'Limited Flags: max flags = mine count';
+        return 'Flag count is strictly limited to total mines.';
       case 'hiddenCount':
-        return 'Hidden Mines: mine count and flag numbers are hidden';
+        return 'Mine counts and remaining flags are hidden.';
       case 'timer':
-        return 'Timer: clear the mines before time runs out';
+        return 'Clear all safe cells before the timer runs out.';
       case 'blind':
-        return 'Blind: flagging a safe cell results in instant loss';
+        return 'Flagging a safe cell triggers an instant loss.';
       case 'fog':
-        return 'Fog: overlay shadows obscure the board';
+        return 'A dense fog obscures unrevealed regions of the board.';
+      case 'silence':
+        return 'Mines do not detonate immediately — submit when finished (3 tries).';
       default:
         return '';
     }
+  }
+
+  String get _modifierBannerText {
+    if (_isTutorialMode) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
 
   int _countFlags() {
@@ -104,6 +198,9 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
 
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
 
   @override
@@ -111,6 +208,10 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _gameTimer?.cancel();
     super.dispose();
   }
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('mines', _levelIndex);
 
   @override
   void initState() {
@@ -261,7 +362,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _timeLeft = -1;
     _timeBonusEarned = false;
 
-    bool isHighLevel = !_playDailyMode && _levelIndex >= 30;
+    bool isHighLevel = !_playDailyMode && _levelIndex >= 30; // not-a-modifier-gate
     if (isHighLevel) {
       _gridSize = (10 + ((_levelIndex - 30) ~/ 4)).clamp(10, 16);
       final double maxMines = ((_gridSize * _gridSize) - 9) * 0.28;
@@ -269,7 +370,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'mines',
         levelIndex: _levelIndex,
-        pool: ['limitedFlags', 'hiddenCount', 'timer', 'fog'],
+        pool: kMineFinderModifierPool,
         minActive: 2,
         maxActive: 3,
         smallGrid: _gridSize <= 10,
@@ -292,9 +393,11 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _won = false;
     _lost = false;
     _message = '';
+    _submitAttempts = 3;
 
     if (isHighLevel && _activeModifiers.contains('timer')) {
       _timeLeft = 35 + (_gridSize * 9);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -643,10 +746,22 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         );
       }
     }
-    if (widget.dailyLevelIndex != null) return;
+    // A daily challenge borrows the game's level slot, so saving here would leak
+    // the challenge's level into real progress. Registering the clear would also
+    // double-pay: the daily grants its own reward, and HintManager.onLevelCleared
+    // adds points, the global clear count, achievements and trail milestones on
+    // top. Same guard as star_battle_screen.dart.
+    // `widget.dailyLevelIndex` alone never fired — nothing in lib/ ever passes it,
+    // so a daily run (which is flagged by the play_daily_mode pref) got through.
+    if (_playDailyMode || widget.dailyLevelIndex != null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(PrefsKeys.gameLevel('minesweeper'), lvl + 1);
-    final earned = await HintManager.onLevelCleared('minesweeper');
+    final earned = await HintManager.onLevelCleared(
+      'minesweeper',
+      // Speed Demon: cleared a hard-timer level with more than half the
+      // clock still left. _initialTime is 0 unless the timer modifier ran.
+      isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+    );
     if (earned) {
       final newCount = await HintManager.getHints('minesweeper');
       setState(() {
@@ -703,7 +818,11 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       if (_flagged[r][c]) return;
 
       if (_mines[r][c]) {
-        if (_playDailyMode && _dailyModifierType == 'hidden_rule' && _isCorner(r, c)) {
+        if (_silent) {
+          // No boom, no red, no message. The cell opens like any other and
+          // shows its adjacent count; the mistake is only counted at Submit.
+          _revealed[r][c] = true;
+        } else if (_playDailyMode && _dailyModifierType == 'hidden_rule' && _isCorner(r, c)) {
           _revealCell(r, c);
           _checkWin();
         } else {
@@ -756,7 +875,15 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     }
   }
 
-  void _checkWin() {
+  void _finishSilentWin() {
+    _checkWin(fromSubmit: true);
+    if (_won) _clearNormalState();
+  }
+
+  void _checkWin({bool fromSubmit = false}) {
+    // `silence`: opening the last safe cell must not announce anything. Only
+    // Submit can end the level.
+    if (_silent && !fromSubmit) return;
     bool allSafeRevealed = true;
     for (int r = 0; r < _gridSize; r++) {
       for (int c = 0; c < _gridSize; c++) {
@@ -889,13 +1016,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       appBar: AppBar(
         backgroundColor: context.bgDark,
         foregroundColor: context.textPrimary,
-        title: Text(
-          _isTutorialMode ? 'Tutorial' : 'Mine Finder',
-          style: GoogleFonts.outfit(
-            fontWeight: FontWeight.w700,
-            color: context.textPrimary,
-          ),
-        ),
+        title: const GameTitle('Mine Finder'),
         centerTitle: true,
         actions: [
           if (_shuffleActive && !_isTutorialMode)
@@ -905,6 +1026,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
               onPressed: () => ShuffleManager.tryShuffleNavigate(context, 'minesweeper'),
             ),
           IconButton(
+            tooltip: 'Hint',
             icon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -975,6 +1097,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
             )
           else ...[
             IconButton(
+              tooltip: 'Rules',
               icon: const Icon(Icons.help_outline, size: 20),
               color: context.textMuted,
               onPressed: () => RulesHelper.showRulesBottomSheet(
@@ -984,6 +1107,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
               ),
             ),
             IconButton(
+              tooltip: 'Restart',
               icon: const Icon(Icons.refresh, size: 20),
               onPressed: _reset,
               color: context.textMuted,
@@ -1013,34 +1137,13 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                 ),
               ),
             ),
-          GestureDetector(
-            onTap: _showJumpToLevelDialog,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _isTutorialMode
-                          ? 'Tutorial'
-                          : _playDailyMode 
-                              ? 'Daily' 
-                              : (MediaQuery.of(context).size.width < 360 ? 'L. ${_levelIndex + 1}' : 'Level ${_levelIndex + 1}'),
-                      style: AppTheme.numberStyle(
-                        color: accentColor,
-                        fontSize: context.scale(13),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    if (!_isTutorialMode && !_playDailyMode) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.edit, size: 12, color: accentColor),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          GameLevelChip(
+            level: _levelIndex + 1,
+            modeLabel: _isTutorialMode
+                ? 'Tutorial'
+                : (_playDailyMode ? 'Daily' : null),
+            accent: AppTheme.accentFor('minesweeper'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -1106,22 +1209,30 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
               // Game Info Row (Mines Count & Flag Count)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                // Each badge takes half the row and shrinks with the screen.
+                // At their natural width the pair ran past the edge of a narrow
+                // phone.
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildStatsBadge(
-                      icon: Icons.dangerous_outlined,
-                      label: 'Mines',
-                      value: _isHiddenMinesActive ? '?' : '$_mineCount',
-                      color: accentColor,
+                    Flexible(
+                      child: _buildStatsBadge(
+                        icon: Icons.dangerous_outlined,
+                        label: 'Mines',
+                        value: _isHiddenMinesActive ? '?' : '$_mineCount',
+                        color: accentColor,
+                      ),
                     ),
-                    _buildStatsBadge(
-                      icon: Icons.flag_rounded,
-                      label: 'Flags',
-                      value: _isHiddenMinesActive
-                          ? '?'
-                          : '${_flagged.expand((f) => f).where((f) => f).length}',
-                      color: Colors.redAccent,
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: _buildStatsBadge(
+                        icon: Icons.flag_rounded,
+                        label: 'Flags',
+                        value: _isHiddenMinesActive
+                            ? '?'
+                            : '${_flagged.expand((f) => f).where((f) => f).length}',
+                        color: Colors.redAccent,
+                      ),
                     ),
                   ],
                 ),
@@ -1170,7 +1281,12 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: List.generate(_gridSize, (c) {
                               final isRev = _revealed[r][c];
-                              final isMine = _mines[r][c];
+                              // Under `silence` a dug mine must look exactly
+                              // like any other opened cell until the level
+                              // ends, or the board would leak the verdict the
+                              // modifier exists to withhold.
+                              final isMine =
+                                  _mines[r][c] && (!_silent || _revealTruth);
                               final isFlag = _flagged[r][c];
                               final adjCount = _countAdjacentMines(r, c);
                               final revealedSafeColor = context.isDarkMode
@@ -1287,9 +1403,34 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
 
               // Controls row
               if (!_won && !_lost)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                // A Wrap, not a Row: `silence` adds a Submit button next to
+                // the mode toggle and the pair is wider than a phone. Both
+                // have to stay on screen and tappable, so the second one drops
+                // to its own line rather than being clipped.
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: [
+                    if (_silent) ...[
+                      FilledButton.tonal(
+                        onPressed: _onSubmitSilent,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: accentColor.withValues(alpha: 0.18),
+                          foregroundColor: accentColor,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                        ),
+                        child: Text(
+                          'Submit  ·  $_submitAttempts left',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.w800,
+                            fontSize: context.scale(12),
+                          ),
+                        ),
+                      ),
+                    ],
                     // Mode Toggle Action Button
                     InkWell(
                       onTap: () => setState(() => _flagMode = !_flagMode),
@@ -1310,6 +1451,9 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
                           ),
                         ),
                         child: Row(
+                          // A Wrap hands its children a bounded width, so the
+                          // pill would stretch edge to edge without this.
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               _flagMode
@@ -1412,11 +1556,16 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 6),
-          Text(
-            '$label: ',
-            style: GoogleFonts.outfit(
-              color: context.textSecondary,
-              fontSize: context.scale(12),
+          // The label gives way before the value does, so a narrow screen
+          // shortens "Mines" rather than pushing the count out of view.
+          Flexible(
+            child: Text(
+              '$label: ',
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.outfit(
+                color: context.textSecondary,
+                fontSize: context.scale(12),
+              ),
             ),
           ),
           Text(

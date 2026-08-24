@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,31 +17,29 @@ import 'achievements_screen.dart';
 import 'trails_screen.dart';
 import '../widgets/points_store_dialog.dart';
 import '../widgets/buy_hints_dialog.dart';
+import '../widgets/app_tour_dialog.dart';
 import '../utils/challenge_reminder_helper.dart';
 import '../utils/prefs_keys.dart';
-// import 'daily_challenge_test_screen.dart';
+import '../widgets/seasonal_event_banner.dart';
+import '../utils/analytics/analytics.dart';
+import '../utils/streak_manager.dart';
+import '../widgets/analytics_consent_dialog.dart';
+import '../utils/seasonal_event_manager.dart';
 import '../utils/activity_tracker.dart';
 import '../utils/notification_manager.dart';
 import '../utils/shuffle_manager.dart';
 import '../utils/achievement_manager.dart';
+import '../utils/zen_mode.dart';
+import '../utils/trail_catalog.dart';
 import '../main.dart';
 
 const Map<String, IconData> _gameIcons = {
-  'wordle': Icons.grid_4x4_outlined,
-  'hangman': Icons.person_outline,
-  'weaver': Icons.swap_horiz_outlined,
   'zip': Icons.bolt_outlined,
-  'crossclimb': Icons.trending_up_outlined,
   'queens': Icons.star_outline_rounded,
   'chimp': Icons.psychology_outlined,
-  'flagle': Icons.flag_outlined,
-  'wordbuilder': Icons.spellcheck_outlined,
-  'memory': Icons.style_outlined,
   'spellingbee': Icons.hive_outlined,
   'sudoku': Icons.grid_on_outlined,
   'minesweeper': Icons.dangerous_outlined,
-  'numbermemory': Icons.pin_outlined,
-  'sequence': Icons.pattern_outlined,
   'oddcolor': Icons.palette_outlined,
   'hue': Icons.color_lens_outlined,
   'pattern_lock': Icons.lock_outline,
@@ -56,12 +53,20 @@ const Map<String, IconData> _gameIcons = {
   'masyu': Icons.circle_outlined,
   'bridges': Icons.gesture_outlined,
   'sumstrike': Icons.add_box_outlined,
+  'sandsort': Icons.hourglass_bottom_outlined,
+  'lightbeam': Icons.flare_outlined,
+  'untangle': Icons.polyline_outlined,
+  'zenslide': Icons.spa_outlined,
+  'killersudoku': Icons.calculate_outlined,
 };
 
 const Map<String, List<String>> _categories = {
   'All': [],
   'Word': [
     'spellingbee',
+    // Cipher Decoder is about decoding phrases, so it sits with the word
+    // games rather than the pure-deduction Logic set.
+    'cipherdecoder',
   ],
   'Logic': [
     'sudoku',
@@ -76,6 +81,16 @@ const Map<String, List<String>> _categories = {
     'masyu',
     'bridges',
     'sumstrike',
+    // Deduction / spatial-planning puzzles — Logic is the closest fit of the
+    // existing chips for all of these.
+    'kakuro',
+    'hitori',
+    'slitherlink',
+    'killersudoku',
+    'sandsort',
+    'lightbeam',
+    'untangle',
+    'zenslide',
   ],
   'Memory': [
     'chimp',
@@ -253,8 +268,42 @@ class _AnimatedRainbowTextState extends State<AnimatedRainbowText>
           Color(0xFF3A3B3C), // loop
         ];
         break;
+      case 'Devoted':
+        // Warm ember gradient (30-day active streak — a slow steady burn)
+        gradientColors = const [
+          Color(0xFFB5651D), // ember brown
+          Color(0xFFFF7F50), // coral
+          Color(0xFFE9967A), // dark salmon
+          Color(0xFFB5651D), // loop
+        ];
+        break;
+      case 'Relentless':
+        // Forged flame gradient (100-day active streak)
+        gradientColors = const [
+          Color(0xFF8B0000), // dark red
+          Color(0xFFFF4500), // orange red
+          Color(0xFFFFA500), // orange
+          Color(0xFF8B0000), // loop
+        ];
+        break;
+      case 'Still Mind':
+        // Sage-teal calm gradient (400 Zen clears)
+        gradientColors = const [
+          Color(0xFF6B8E7B), // muted sage
+          Color(0xFF20B2AA), // light sea green
+          Color(0xFF66CDAA), // medium aquamarine
+          Color(0xFF6B8E7B), // loop
+        ];
+        break;
       default:
-        gradientColors = const [Colors.white, Colors.white];
+        // A future title without its own case must still degrade READABLE in
+        // both themes. Plain white here rendered three titles invisible on the
+        // light theme; a mid-tone slate shimmer is visible on light and dark.
+        gradientColors = const [
+          Color(0xFF78879B), // slate
+          Color(0xFFA9B7C6), // silver blue
+          Color(0xFF78879B), // loop
+        ];
     }
 
     return AnimatedBuilder(
@@ -288,6 +337,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
+  /// Only needed so the banner can refresh itself after a badge claim.
+  final _seasonalBannerKey = GlobalKey<SeasonalEventBannerState>();
   late AnimationController _ctrl;
   String _activeCategory = 'All';
   int _dailyStreak = 0;
@@ -296,10 +347,15 @@ class _HomeScreenState extends State<HomeScreen>
   int _currentTab = 0;
   int _completedCount = 0;
 
+  /// The S1 play streak — any game, any mode. Distinct from `_dailyStreak`,
+  /// which counts daily challenges only.
+  int _playStreak = 0;
+
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   List<GameInfo> _recentlyPlayedGames = [];
   bool _shuffleActive = false;
+  bool _zenEnabled = ZenMode.isEnabled;
   int _pointBalance = 0;
   String _activeTitle = 'Seeker';
 
@@ -353,6 +409,192 @@ class _HomeScreenState extends State<HomeScreen>
         );
       },
     );
+  }
+
+  int _achievementsUnlocked = 0;
+  int _achievementsClaimable = 0;
+  int _trailsOwned = 0;
+  int _trailsClaimable = 0;
+
+  /// Counts shown on the home-screen entry cards for Achievements and Trails.
+  /// Without these the two features were reachable only through unlabelled
+  /// icon buttons buried in the Stats tab, which nobody found.
+  /// Labelled entry points for Achievements and Trails. These used to be two
+  /// bare icon buttons with tooltip-only labels in the Stats tab header, which
+  /// are invisible on touch devices.
+  Widget _buildDiscoveryRow() {
+    Widget card({
+      required String label,
+      required String value,
+      required IconData icon,
+      required Color accent,
+      required int badge,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+              color: context.bgCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: badge > 0 ? accent : context.textMuted.withAlpha(25),
+                width: badge > 0 ? 1.5 : 0.5,
+              ),
+              boxShadow: AppTheme.cardShadow,
+            ),
+            child: Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: accent.withAlpha(30),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(icon, color: accent, size: 19),
+                    ),
+                    if (badge > 0)
+                      Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: accent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '$badge',
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: context.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        value,
+                        style: GoogleFonts.outfit(
+                          fontSize: 11,
+                          color: badge > 0 ? accent : context.textSecondary,
+                          fontWeight:
+                              badge > 0 ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        card(
+          label: 'Achievements',
+          value: _achievementsClaimable > 0
+              ? '$_achievementsClaimable ready to claim'
+              : '$_achievementsUnlocked / ${AchievementManager.allAchievements.length} unlocked',
+          icon: Icons.emoji_events_rounded,
+          accent: AppTheme.dustyMauve,
+          badge: _achievementsClaimable,
+          onTap: () {
+            settingsNotifier.hapticTap();
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AchievementsScreen()),
+            ).then((_) {
+              _loadDailyChallengeInfo();
+              _loadDiscoveryCounts();
+            });
+          },
+        ),
+        const SizedBox(width: 12),
+        card(
+          label: 'Trails',
+          value: _trailsClaimable > 0
+              ? '$_trailsClaimable ready to claim'
+              : '$_trailsOwned / ${kAllTrails.length - 1} owned',
+          icon: Icons.auto_awesome_rounded,
+          accent: AppTheme.softSage,
+          badge: _trailsClaimable,
+          onTap: () {
+            settingsNotifier.hapticTap();
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TrailsScreen()),
+            ).then((_) {
+              _loadDailyChallengeInfo();
+              _loadDiscoveryCounts();
+            });
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _loadDiscoveryCounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final unlocked = prefs.getStringList(PrefsKeys.unlockedAchievements) ?? [];
+    final claimedAch = prefs.getStringList(PrefsKeys.claimedAchievements) ?? [];
+    final claimedTrails =
+        prefs.getStringList(PrefsKeys.claimedTrailStyles) ?? ['none'];
+    final clears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
+    final zenClears = prefs.getInt(ZenMode.zenClearedCountKey) ?? 0;
+
+    // A trail is "claimable" when it has been earned but not yet taken, which
+    // is the nudge worth surfacing on the home screen.
+    final stars = StarCounts.fromPrefs(prefs);
+    var claimableTrails = 0;
+    for (final t in kAllTrails) {
+      if (claimedTrails.contains(t.id)) continue;
+      final earned = TrailCatalog.isEarnedFree(
+        styleId: t.id,
+        clears: clears,
+        zenClears: zenClears,
+        stars: stars,
+      );
+      if (earned) claimableTrails++;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _achievementsUnlocked = unlocked.length;
+      _achievementsClaimable =
+          unlocked.where((id) => !claimedAch.contains(id)).length;
+      _trailsOwned = claimedTrails.where((id) => id != 'none').length;
+      _trailsClaimable = claimableTrails;
+    });
   }
 
   Future<void> _loadShuffleState() async {
@@ -551,6 +793,176 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Mode picker behind the spa icon. Challenge is the original experience;
+  /// Zen strips every modifier and keeps its own separate level record.
+  Future<void> _showModeSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            Widget modeTile({
+              required bool zen,
+              required String title,
+              required String subtitle,
+              required IconData icon,
+              required Color accent,
+            }) {
+              final selected = _zenEnabled == zen;
+              return GestureDetector(
+                onTap: () async {
+                  if (_zenEnabled == zen) return;
+                  await ZenMode.setEnabled(zen);
+                  if (!mounted) return;
+                  setState(() => _zenEnabled = zen);
+                  setSheetState(() {});
+                  // Level records differ per mode, so every card and stat on
+                  // screen has to be re-read against the new key set.
+                  await _loadDailyChallengeInfo();
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: selected ? accent.withAlpha(28) : context.bgCard,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selected ? accent : context.textMuted.withAlpha(30),
+                      width: selected ? 2 : 0.5,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: accent.withAlpha(35),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon, color: accent, size: 22),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: context.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              subtitle,
+                              style: GoogleFonts.outfit(
+                                fontSize: 11.5,
+                                color: context.textSecondary,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selected)
+                        Icon(Icons.check_circle_rounded, color: accent, size: 22),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return Container(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+              decoration: BoxDecoration(
+                color: context.bgDark,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: context.textMuted.withAlpha(60),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Play Mode',
+                    style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: context.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Each mode keeps its own level progress, so switching never '
+                    'costs you anything.',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: context.textSecondary,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  modeTile(
+                    zen: false,
+                    title: 'Challenge',
+                    subtitle:
+                        'The full experience. Modifiers, timers and rising '
+                        'difficulty on higher levels. Full points.',
+                    icon: Icons.local_fire_department_rounded,
+                    accent: AppTheme.dustyMauve,
+                  ),
+                  const SizedBox(height: 12),
+                  modeTile(
+                    zen: true,
+                    title: 'Zen',
+                    subtitle:
+                        'Just the puzzle. No modifiers, no timers, no fail '
+                        'states. Half points, own progress, own achievements.',
+                    icon: Icons.spa_rounded,
+                    accent: AppTheme.softSage,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded,
+                          size: 14, color: context.textMuted),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Daily Challenges always run on Challenge rules.',
+                          style: GoogleFonts.outfit(
+                            fontSize: 11,
+                            color: context.textMuted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _toggleShuffle() async {
     final prefs = await SharedPreferences.getInstance();
     final hasSeen = prefs.getBool(PrefsKeys.hasSeenShuffleTutorial) ?? false;
@@ -660,15 +1072,23 @@ class _HomeScreenState extends State<HomeScreen>
     DailyChallengeManager.clearDailyModifier();
     _loadDailyChallengeInfo();
     _loadShuffleState();
+    _loadDiscoveryCounts();
     settingsNotifier.addListener(_onSettingsChanged);
     AchievementManager.titleClaimedNotifier.addListener(_onTitleClaimed);
+    // Ordering contract for everything that can pop over the home screen on
+    // launch — these used to fire independently from this callback, so the
+    // Android 13+ notification-permission dialog could land on top of (or
+    // under) the App Tour, and the streak reminder could stack with the daily
+    // popup. One awaited sequence now, in _runStartupFlow:
+    //
+    //   1. First-run flow (App Tour) — nothing may draw over it.
+    //   2. NotificationManager.requestPermissions() — the OS dialog.
+    //   3. ChallengeReminderHelper reminder, then the deferred daily-challenge
+    //      popup only if neither the tour nor the reminder showed (reminder
+    //      wins; the popup's seen-flag is untouched, so it defers again).
+    //   4. The notification schedulers, which show no UI.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ChallengeReminderHelper.checkAndShowReminder(context);
-      NotificationManager.requestPermissions();
-      NotificationManager.updateDailyChallengeReminder();
-      NotificationManager.updateInactivityReminders();
-      // NotificationManager.scheduleInstallTestNotification();
-      _checkAndShowDailyChallengePopup();
+      _runStartupFlow();
     });
   }
 
@@ -677,6 +1097,50 @@ class _HomeScreenState extends State<HomeScreen>
     if (state == AppLifecycleState.paused) {
       NotificationManager.updateInactivityReminders();
     }
+  }
+
+  /// Orders everything that can pop up the moment the home screen appears.
+  ///
+  /// They used to be independent, which on a brand-new install meant the
+  /// OS notification-permission dialog, the "Today's Daily Challenge" prompt
+  /// and the tour would race for the same frame and stack. The rule now:
+  ///
+  ///  1. The tour goes first and is awaited, so nothing draws over it.
+  ///  2. The OS notification-permission request follows the tour.
+  ///  3. The streak reminder runs next; the daily prompt shows only if
+  ///     neither the tour nor the reminder did. A skipped prompt's seen-flag
+  ///     is left untouched, so it appears on a later launch: two dialogs back
+  ///     to back is a bad welcome, the tour already explains the daily
+  ///     challenge, and the prompt then lands on a player who knows what it
+  ///     is talking about.
+  ///
+  /// On a first run [ChallengeReminderHelper.checkAndShowReminder] cannot
+  /// collide with the tour anyway — it returns early while
+  /// `daily_challenge_start_time` is unset, which is always the case before
+  /// the first daily challenge is opened — but the sequence below does not
+  /// depend on that: everything is awaited in order.
+  Future<void> _runStartupFlow() async {
+    // 1. App Tour (first run only). Awaited until dismissed.
+    final tourShown = await AppTourDialog.showIfFirstRun(context);
+
+    // 2. OS notification permission. On Android 13+ this pops a system dialog;
+    // requesting only after the tour has closed means it can never cover it.
+    await NotificationManager.requestPermissions();
+    if (!mounted) return;
+
+    // 3. Streak reminder vs deferred daily-challenge popup: the reminder wins.
+    // The popup's seen-flag is only written when the popup itself shows, so
+    // skipping it here just defers it to the next launch.
+    final reminderShown =
+        await ChallengeReminderHelper.checkAndShowReminder(context);
+    if (!tourShown && !reminderShown && mounted) {
+      await _checkAndShowDailyChallengePopup();
+    }
+
+    // 4. Schedulers — pure bookkeeping, no UI.
+    await NotificationManager.updateDailyChallengeReminder();
+    await NotificationManager.updateInactivityReminders();
+    // NotificationManager.scheduleInstallTestNotification();
   }
 
   Future<void> _checkAndShowDailyChallengePopup() async {
@@ -787,6 +1251,7 @@ class _HomeScreenState extends State<HomeScreen>
     await ShuffleManager.setInactive();
     _loadDailyChallengeInfo();
     _loadShuffleState();
+    _loadDiscoveryCounts();
   }
 
   @override
@@ -839,14 +1304,26 @@ class _HomeScreenState extends State<HomeScreen>
       _todaysGame = dailyGames[seed % dailyGames.length];
     }
 
-    // Compute total exercises completed and favorite game
-    int completed = 0;
+    // "Cleared" is the TRUE lifetime clear tally, the same figure the Trails
+    // screen shows. It used to be the sum of current level indices, which meant
+    // two different numbers were both labelled "Cleared": that one moved when
+    // you toggled Zen (levels are per-mode) and ignored replays entirely.
+    // Owner decision 2026-08-23 — one number, everywhere, and it only ever
+    // goes up.
+    final int completed = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
+
+    // The play streak is what the reminder notifications actually quote
+    // ("You are on a 12-day streak"), and until 2026-08-23 it appeared NOWHERE
+    // in the app — the card below showed the daily-challenge streak under the
+    // same words. Players were being notified about a number they could not
+    // find. Owner decision: surface this one.
+    final streakState = await StreakManager.currentState();
+    _playStreak = streakState.streak;
+
     String favGame = 'Grid Path';
     int maxLvl = 0;
-
     for (final g in kAllGames) {
       final lvl = prefs.getInt(PrefsKeys.gameLevel(g.id)) ?? 0;
-      if (lvl > 0) completed += lvl;
       if (lvl > maxLvl) {
         maxLvl = lvl;
         favGame = g.name;
@@ -1185,27 +1662,59 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   const SizedBox(width: 6),
+                  // Labelled so the feature is legible at a glance, and with a
+                  // visible settings icon because the configure sheet used to
+                  // be reachable only by an unadvertised long-press.
                   GestureDetector(
                     onTap: _toggleShuffle,
                     onLongPress: _showShuffleConfigureSheet,
                     behavior: HitTestBehavior.opaque,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                      child: Column(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _shuffleActive
+                            ? const Color(0xFF1DB954).withAlpha(30)
+                            : context.textMuted.withAlpha(18),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: _shuffleActive
+                              ? const Color(0xFF1DB954)
+                              : Colors.transparent,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             Icons.shuffle_rounded,
-                            color: _shuffleActive ? const Color(0xFF1DB954) : context.textMuted,
-                            size: 22,
+                            color: _shuffleActive
+                                ? const Color(0xFF1DB954)
+                                : context.textMuted,
+                            size: 15,
                           ),
-                          const SizedBox(height: 2),
-                          Container(
-                            width: 4,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: _shuffleActive ? const Color(0xFF1DB954) : Colors.transparent,
-                              shape: BoxShape.circle,
+                          const SizedBox(width: 5),
+                          Text(
+                            'Shuffle',
+                            style: GoogleFonts.outfit(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: _shuffleActive
+                                  ? const Color(0xFF1DB954)
+                                  : context.textMuted,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          GestureDetector(
+                            onTap: _showShuffleConfigureSheet,
+                            behavior: HitTestBehavior.opaque,
+                            child: Icon(
+                              Icons.tune_rounded,
+                              size: 13,
+                              color: _shuffleActive
+                                  ? const Color(0xFF1DB954)
+                                  : context.textMuted,
                             ),
                           ),
                         ],
@@ -1213,17 +1722,28 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: AppTheme.dustyMauve.withAlpha(25),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.spa_outlined,
-                      color: AppTheme.dustyMauve,
-                      size: 20,
+                  GestureDetector(
+                    onTap: _showModeSheet,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: _zenEnabled
+                            ? AppTheme.softSage.withAlpha(45)
+                            : AppTheme.dustyMauve.withAlpha(25),
+                        shape: BoxShape.circle,
+                        border: _zenEnabled
+                            ? Border.all(color: AppTheme.softSage, width: 1.5)
+                            : null,
+                      ),
+                      child: Icon(
+                        _zenEnabled ? Icons.spa_rounded : Icons.spa_outlined,
+                        color: _zenEnabled
+                            ? AppTheme.softSage
+                            : AppTheme.dustyMauve,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ],
@@ -1260,10 +1780,38 @@ class _HomeScreenState extends State<HomeScreen>
               return ListView(
                 padding: EdgeInsets.fromLTRB(paddingVal, 8, paddingVal, 24),
             children: [
+              // S3 — seasonal event. Renders SizedBox.shrink() outside an event
+              // window, so it costs nothing for most of the year. Without this
+              // the whole seasonal framework ships invisible.
+              SeasonalEventBanner(
+                key: _seasonalBannerKey,
+                onClaim: () async {
+                  // Claim whichever event is actually running. This was
+                  // hardcoded to the winter badge, which silently did nothing
+                  // for the other three events on the calendar.
+                  final running = SeasonalEventManager.activeEvent();
+                  if (running != null) {
+                    await SeasonalEventManager
+                        .claimBadge(running.definition.badge.id);
+                  }
+                  await _seasonalBannerKey.currentState?.refresh();
+                },
+              )
+                  .animate()
+                  .fadeIn(duration: 350.ms)
+                  .slideY(begin: 0.08, end: 0.0, curve: Curves.easeOutQuad),
+
               // 1. Mindful Report Dashboard
               _buildProgressReportCard()
                   .animate()
                   .fadeIn(duration: 350.ms)
+                  .slideY(begin: 0.08, end: 0.0, curve: Curves.easeOutQuad),
+              const SizedBox(height: 20),
+
+              // Achievements + Trails entry cards
+              _buildDiscoveryRow()
+                  .animate()
+                  .fadeIn(delay: 60.ms, duration: 350.ms)
                   .slideY(begin: 0.08, end: 0.0, curve: Curves.easeOutQuad),
               const SizedBox(height: 20),
 
@@ -1474,8 +2022,8 @@ class _HomeScreenState extends State<HomeScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _buildReportStat(
-                _dailyStreak > 0 ? '$_dailyStreak Days' : '0 Days',
-                'Active Streak',
+                _playStreak > 0 ? '$_playStreak Days' : '0 Days',
+                'Play Streak',
                 Icons.wb_sunny_outlined,
                 AppTheme.warmAmber,
               ),
@@ -1881,7 +2429,7 @@ class _StatsTab extends StatefulWidget {
 
 class _StatsTabState extends State<_StatsTab> {
   Map<String, int> _levels = {};
-  Map<String, int> _streaks = {};
+  Map<String, int> _playCounts = {};
   List<String> _recentlyPlayedIds = [];
   String _sortBy = 'default'; // 'default', 'most_played', 'recent'
   bool _loading = true;
@@ -1895,16 +2443,16 @@ class _StatsTabState extends State<_StatsTab> {
   Future<void> _loadStats() async {
     final prefs = await SharedPreferences.getInstance();
     final Map<String, int> lvls = {};
-    final Map<String, int> strks = {};
+    final Map<String, int> plays = {};
     for (final g in kAllGames) {
       lvls[g.id] = (prefs.getInt(PrefsKeys.gameLevel(g.id)) ?? 0) + 1;
-      strks[g.id] = prefs.getInt(PrefsKeys.gameStreak(g.id)) ?? 0;
+      plays[g.id] = prefs.getInt(ActivityTracker.playCountKey(g.id)) ?? 0;
     }
     final recentlyPlayedIds = prefs.getStringList(PrefsKeys.recentlyPlayedGames) ?? [];
     if (mounted) {
       setState(() {
         _levels = lvls;
-        _streaks = strks;
+        _playCounts = plays;
         _recentlyPlayedIds = recentlyPlayedIds;
         _loading = false;
       });
@@ -1961,10 +2509,14 @@ class _StatsTabState extends State<_StatsTab> {
 
     final displayGames = kAllGames.where((g) => !g.isStashed).toList();
     if (_sortBy == 'most_played') {
+      // Real launch counts from ActivityTracker, not the reached level — a
+      // game ground to level 40 once is not "most played". Games never
+      // launched sort as 0; name breaks ties so the order is deterministic.
       displayGames.sort((a, b) {
-        final lvlA = _levels[a.id] ?? 1;
-        final lvlB = _levels[b.id] ?? 1;
-        return lvlB.compareTo(lvlA); // Descending
+        final playsA = _playCounts[a.id] ?? 0;
+        final playsB = _playCounts[b.id] ?? 0;
+        if (playsA != playsB) return playsB.compareTo(playsA); // Descending
+        return a.name.compareTo(b.name);
       });
     } else if (_sortBy == 'recent') {
       displayGames.sort((a, b) {
@@ -2064,7 +2616,6 @@ class _StatsTabState extends State<_StatsTab> {
           child: Column(
             children: displayGames.map((g) {
               final lvl = _levels[g.id] ?? 1;
-              final strk = _streaks[g.id] ?? 0;
               final accent = AppTheme.accentFor(g.id);
               return Column(
                 children: [
@@ -2124,7 +2675,7 @@ class _StatsTabState extends State<_StatsTab> {
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            'Level $lvl${strk > 0 ? ' • Streak $strk' : ''}',
+                            'Level $lvl',
                             style: GoogleFonts.outfit(
                               fontSize: 12,
                               color: context.textSecondary,
@@ -2249,7 +2800,29 @@ class _ProfileTab extends StatelessWidget {
                       ),
                     ),
                   ),
-
+                  Divider(
+                    color: context.textMuted.withAlpha(40),
+                    height: 1,
+                    thickness: 0.8,
+                  ),
+                  // SettingsNotifier.setHaptic existed with no caller at all,
+                  // so every buzz in the app was unconditional. Sound/music
+                  // deliberately get no tile here: AudioManager is stubbed, so
+                  // those switches would toggle nothing.
+                  _ProfileTile(
+                    icon: settingsNotifier.hapticEnabled
+                        ? Icons.vibration_rounded
+                        : Icons.smartphone_outlined,
+                    title: 'Haptic Feedback',
+                    subtitle: settingsNotifier.hapticEnabled
+                        ? 'Taps and clears buzz'
+                        : 'Off. The app stays silent to the touch.',
+                    trailing: Switch.adaptive(
+                      value: settingsNotifier.hapticEnabled,
+                      activeThumbColor: AppTheme.dustyMauve,
+                      onChanged: (val) => settingsNotifier.setHaptic(val),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2330,7 +2903,7 @@ class _ProfileTab extends StatelessWidget {
                                   'Restore process finished.',
                                   style: GoogleFonts.outfit(),
                                 ),
-                                backgroundColor: AppTheme.wordleGreen,
+                                backgroundColor: AppTheme.positiveGreen,
                               ),
                             );
                           } else {
@@ -2365,6 +2938,69 @@ class _ProfileTab extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
+            // Privacy lives HERE. It used to live only in the old
+            // SettingsScreen, which was registered at /settings but never
+            // navigated to, so the analytics opt-out was unreachable. A
+            // consent control a player cannot find is not a control. That
+            // screen has since been deleted; this Profile tab is the one
+            // settings surface.
+            _SectionHeader(title: 'Privacy'),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: context.bgCard,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: AppTheme.cardShadow,
+              ),
+              child: Column(
+                children: [
+                  ListenableBuilder(
+                listenable: Analytics.enabledNotifier,
+                builder: (ctx, _) {
+                  return _ProfileTile(
+                    icon: Icons.insights_outlined,
+                    title: 'Anonymous Usage Data',
+                    subtitle: Analytics.isEnabled
+                        ? 'Sharing anonymous play stats — no personal data'
+                        : 'Off. Nothing is collected.',
+                    trailing: Switch.adaptive(
+                      value: Analytics.isEnabled,
+                      activeThumbColor: AppTheme.positiveGreen,
+                      onChanged: (value) async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        await Analytics.setConsent(value);
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              value
+                                  ? 'Thanks — anonymous usage data is on.'
+                                  : 'Usage data is off. Pending events deleted.',
+                              style: GoogleFonts.outfit(),
+                            ),
+                            backgroundColor: value
+                                ? AppTheme.positiveGreen
+                                : Colors.grey[800],
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+                  ),
+                  // Consent needs reachable disclosure to mean anything. This
+                  // dialog used to exist only inside the old, unreachable
+                  // settings screen — so the toggle was there and the
+                  // explanation was not.
+                  _ProfileTile(
+                    icon: Icons.privacy_tip_outlined,
+                    title: 'What We Collect',
+                    subtitle: 'See exactly what is and is not shared',
+                    onTap: () => AnalyticsConsentDialog.show(context),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
             _SectionHeader(title: 'Data Management'),
             const SizedBox(height: 8),
             Container(
@@ -2375,24 +3011,37 @@ class _ProfileTab extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  // _ProfileTile(
-                  //   icon: Icons.bug_report_outlined,
-                  //   title: 'Daily Challenges Debug Tester',
-                  //   subtitle: 'Test and debug all 90 daily challenges directly',
-                  //   onTap: () {
-                  //     Navigator.pushNamed(context, '/daily_test');
-                  //   },
-                  // ),
-                  // Divider(
-                  //   color: context.textMuted.withAlpha(40),
-                  //   height: 1,
-                  //   thickness: 0.8,
-                  // ),
                   _ProfileTile(
                     icon: Icons.delete_outline,
                     title: 'Clear All Saved Progress',
                     titleColor: Colors.redAccent,
                     onTap: () => _showResetDialog(context),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            // The tour is shown once on first launch, so without a way back to
+            // it a player who skipped can never read it again. This is that way
+            // back, and the only one — the Profile tab is the settings surface
+            // the bottom bar actually reaches.
+            _SectionHeader(title: 'Help'),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: context.bgCard,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: AppTheme.cardShadow,
+              ),
+              child: Column(
+                children: [
+                  _ProfileTile(
+                    icon: Icons.help_outline_rounded,
+                    title: 'App Tour',
+                    subtitle: 'See the quick guide to CogniQ again',
+                    trailing:
+                        const Icon(Icons.arrow_forward_ios_rounded, size: 12),
+                    onTap: () => AppTourDialog.show(context),
                   ),
                 ],
               ),

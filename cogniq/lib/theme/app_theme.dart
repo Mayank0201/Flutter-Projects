@@ -9,15 +9,15 @@ class AppTheme {
   static const Color bgSurfaceLight    = Color(0xFFEEECE8); // slightly warm surface
   static const Color textPrimaryLight   = Color(0xFF1C1A18); // warm dark charcoal
   static const Color textSecondaryLight = Color(0xFF5A5550); // darker muted taupe
-  static const Color textMutedLight     = Color(0xFF827B75); // readable muted gray
+  static const Color textMutedLight     = Color(0xFF706963); // readable muted gray (WCAG AA on linen/card/surface)
 
   // Dark
   static const Color bgDarkDark       = Color(0xFF1C1A18);
   static const Color bgCardDark       = Color(0xFF252320);
   static const Color bgSurfaceDark    = Color(0xFF252320);
   static const Color textPrimaryDark   = Color(0xFFF0EBE3);
-  static const Color textSecondaryDark = Color(0xFF8A847C);
-  static const Color textMutedDark     = Color(0xFF6E6760);
+  static const Color textSecondaryDark = Color(0xFF908A82); // WCAG AA on bgDarkDark + bgCardDark
+  static const Color textMutedDark     = Color(0xFF746D66); // clears 3:1 UI floor on bgCardDark
 
   // ── Warm-zen accent palette ─────────────────────────────────────────────────
   // Drawn from the reference image: mauve, warm gold, slate periwinkle, terracotta
@@ -29,21 +29,15 @@ class AppTheme {
   static const Color roseGold      = Color(0xFFC4786E); // gentle
   static const Color deepLavender  = Color(0xFF7068A0); // focus
 
+  // ── Semantic aliases ─────────────────────────────────────────────────────────
+  /// Affirmative accent: success snackbars, confirm actions ("Allow"), and the
+  /// engaged/on state of switches and sliders.
+  static const Color positiveGreen    = softSage;
+
   // ── Legacy game-colour aliases ───────────────────────────────────────────────
-  static const Color forestGreen      = softSage;
-  static const Color oliveGreen       = softSage;
-  static const Color burntOrange      = warmAmber;
-  static const Color wordleGreen      = softSage;
-  static const Color wordleYellow     = warmAmber;
-  static const Color spellingbeeGold  = warmAmber;
-  static const Color weaverBlue       = slateBlue;
   static const Color zipPink          = roseGold;
-  static const Color hangmanGold      = warmAmber;
-  static const Color crossclimbPurple = dustyMauve;
   static const Color queensOrange     = deepLavender;
   static const Color patchesTeal      = slateBlue;
-  static const Color connectionsRed   = dustyMauve;
-  static const Color flagleSky        = slateBlue;
 
   // ── Themes ───────────────────────────────────────────────────────────────────
   static ThemeData get lightTheme => ThemeData(
@@ -90,28 +84,26 @@ class AppTheme {
 
   static Color accentFor(String id) {
     switch (id) {
-      case 'wordle':      return softSage;
-      case 'hangman':     return warmAmber;
-      case 'weaver':      return slateBlue;
       case 'zip':         return roseGold;
-      case 'crossclimb':  return dustyMauve;
       case 'queens':      return deepLavender;
       case 'chimp':       return terracotta;
-      case 'flagle':      return slateBlue;
-      case 'wordbuilder': return softSage;
-      case 'memory':      return roseGold;
       case 'spellingbee': return warmAmber;
       case 'sudoku':      return deepLavender;
       case 'minesweeper': return terracotta;
-      case 'reaction':    return roseGold;
-      case 'numbermemory': return slateBlue;
-      case 'sequence':    return dustyMauve;
       case 'oddcolor':    return warmAmber;
       case 'hue':         return deepLavender;
       case 'pattern_lock': return terracotta;
       case 'colour_link':  return roseGold;
       case 'color_flood':  return warmAmber;
       case 'circuit_guide': return slateBlue;
+      case 'kakuro':      return dustyMauve;
+      case 'hitori':      return slateBlue;
+      case 'slitherlink': return softSage;
+      case 'zenslide':    return softSage;
+      case 'untangle':    return slateBlue;
+      case 'sandsort':    return terracotta;
+      case 'lightbeam':   return warmAmber;
+      case 'cipherdecoder': return deepLavender;
       default:            return textSecondaryLight;
     }
   }
@@ -195,11 +187,7 @@ class GameColors {
 }
 
 const Map<String, GameColors> kGameColors = {
-  'wordle':      GameColors(primary: AppTheme.softSage,      dark: Color(0xFF4B6B4E), emoji: '', name: 'Word Guess',   description: ''),
-  'hangman':     GameColors(primary: AppTheme.warmAmber,     dark: Color(0xFF8A6020), emoji: '', name: 'Hangman',      description: ''),
-  'weaver':      GameColors(primary: AppTheme.slateBlue,     dark: Color(0xFF3E5A6C), emoji: '', name: 'Word Ladder',  description: ''),
   'zip':         GameColors(primary: AppTheme.roseGold,     dark: Color(0xFF9E5D54), emoji: '⚡', name: 'Grid Path',   description: ''),
-  'crossclimb':  GameColors(primary: AppTheme.dustyMauve,   dark: Color(0xFF5E4860), emoji: '', name: 'Word Climb',   description: ''),
   'queens':      GameColors(primary: AppTheme.deepLavender, dark: Color(0xFF4A4278), emoji: '♛', name: 'Star Battle',  description: ''),
   'chimp':       GameColors(primary: AppTheme.terracotta,   dark: Color(0xFF6E4838), emoji: '', name: 'Chimp Test',   description: ''),
   'oddcolor':    GameColors(primary: AppTheme.warmAmber,     dark: Color(0xFF8A6020), emoji: '🎨', name: 'Odd Color Out', description: ''),

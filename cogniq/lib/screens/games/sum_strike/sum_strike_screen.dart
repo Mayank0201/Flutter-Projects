@@ -1,13 +1,16 @@
 import 'dart:convert';
 import 'dart:math';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import '../../../utils/point_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/settings_manager.dart';
 import '../../../utils/prefs_keys.dart';
+import '../../../utils/progress_guard.dart';
 import '../../../utils/shuffle_manager.dart';
 import '../../../widgets/loss_overlay.dart';
 import '../../../utils/audio_manager.dart';
@@ -19,7 +22,35 @@ import '../../../utils/hint_manager.dart';
 import '../../../utils/rotation_engine.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 
+import '../../../widgets/momentum_meter.dart';
+
 import 'sum_strike_levels.dart';
+
+/// Sum Strike's pool on a *curated* level.
+///
+/// `negatives` and `denseStrike` shape the board while it is generated, so they
+/// cannot do anything to a hand-authored one and are left out below level
+/// [kSumStrikeLevels].length.
+///
+/// `momentum` is in both pools: every cell tap is judged immediately against
+/// `_solutionMask`, so a correct strike and a wrong strike are already
+/// first-class events in this game and need no new mechanic to feed the chain.
+const List<String> kSumStrikeCuratedPool = [
+  'timer',
+  'whisper',
+  'fog',
+  'momentum',
+];
+
+/// Sum Strike's pool on a generated level.
+const List<String> kSumStrikeGeneratedPool = [
+  'negatives',
+  'denseStrike',
+  'timer',
+  'whisper',
+  'fog',
+  'momentum',
+];
 
 class SumStrikeScreen extends StatefulWidget {
   const SumStrikeScreen({super.key});
@@ -36,6 +67,8 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   bool _isSuccess = false;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
   double _dailyRadius = 1.5;
 
   late int _gridSize;
@@ -51,12 +84,49 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   final Set<int> _wrongTaps = {};
   Timer? _gameTimer;
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
   bool _timeBonusEarned = false;
   bool _gameOver = false;
   Set<String> _activeModifiers = {};
   int _lives = 3;
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _currentLevel >= RotationEngine.modifierStartLevel('sumstrike') &&
+        _activeModifiers.contains(name);
+  }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isWhisperActive => _isModActive('whisper');
+  bool get _isFogActive => _isModActive('fog');
+  bool get _isNegativesActive => _isModActive('negatives');
+  bool get _isDenseActive => _isModActive('denseStrike');
+  bool get _isEndgame => _isModActive('timer');
+  bool get _isMomentumActive => _isModActive('momentum');
+
+  /// `momentum`: the combo chain for the level currently on screen.
+  late final MomentumController _momentum =
+      MomentumController(onChanged: () {
+    if (mounted) setState(() {});
+  });
+
+  void _momentumCorrect() {
+    if (_isModActive('momentum')) _momentum.correct();
+  }
+
+  void _momentumMistake() {
+    if (_isModActive('momentum')) _momentum.mistake();
+  }
   final Set<int> _hiddenRowTargets = {};
   final Set<int> _hiddenColTargets = {};
+
+  /// Modifiers now begin at a per-game level chosen in RotationEngine
+  /// rather than a flat level 30 for every game.
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('sumstrike', _currentLevel);
 
   @override
   void initState() {
@@ -67,6 +137,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   @override
   void dispose() {
     _gameTimer?.cancel();
+    _momentum.dispose();
     super.dispose();
   }
 
@@ -76,6 +147,8 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
@@ -105,7 +178,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       builder: (context) {
         int target = _currentLevel + 1;
         String? selectedMod = _forcedModifier;
-        final pool = ['negatives', 'denseStrike', 'timer', 'whisper', 'fog'];
+        final pool = kSumStrikeGeneratedPool;
         
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -176,21 +249,37 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     );
   }
 
+  // COGNIQ-FIX:mod-desc-copy
   String _getModifierDescription(String mod) {
     switch (mod) {
       case 'negatives':
-        return 'Negatives: grid contains negative number tiles';
+        return 'Grid contains negative number tiles.';
       case 'denseStrike':
-        return 'Dense: more target numbers must be tapped';
+        return 'More target numbers must be struck out.';
       case 'timer':
-        return 'Timer: clear the board before time runs out';
+        return 'Clear all needed tiles before the timer expires.';
       case 'whisper':
-        return 'Whisper: row and column targets are partially hidden';
+        return 'Row and column targets are partially obscured.';
       case 'fog':
-        return 'Fog: overlay shadows obscure the board';
+        return 'A dense fog obscures regions of the grid.';
+      case 'momentum':
+        return 'Chain correct strikes quickly to multiply bonus points.';
       default:
         return '';
     }
+  }
+
+  String get _modifierBannerText {
+    if (_isSuccess) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
 
   void _generatePuzzle() {
@@ -204,10 +293,13 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     _gameOver = false;
     _wrongTaps.clear();
     _lives = 3;
+    // A new level starts a new chain, or the previous level's average would be
+    // carried over and paid a second time.
+    _momentum.reset();
     _hiddenRowTargets.clear();
     _hiddenColTargets.clear();
 
-    if (!_playDailyMode && _currentLevel >= 30) {
+    if (_modsOn) {
       int tempGridSize = 5;
       if (_currentLevel < kSumStrikeLevels.length) {
         tempGridSize = kSumStrikeLevels[_currentLevel].gridSize;
@@ -217,10 +309,16 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         else if (_currentLevel < 85) tempGridSize = 6;
         else tempGridSize = (6 + ((_currentLevel - 85) ~/ 10)).clamp(6, 7);
       }
+      // 'negatives' and 'denseStrike' shape the board while it is being
+      // generated, so they can do nothing on a hand-authored level. Levels
+      // below kSumStrikeLevels.length are curated, which meant these were
+      // announced to the player on ~170 levels and then had no effect. Only
+      // offer modifiers the level can actually honour.
+      final bool curated = _currentLevel < kSumStrikeLevels.length;
       _activeModifiers = RotationEngine.getActiveModifiers(
         gameId: 'sumstrike',
         levelIndex: _currentLevel,
-        pool: ['negatives', 'denseStrike', 'timer', 'whisper', 'fog'],
+        pool: curated ? kSumStrikeCuratedPool : kSumStrikeGeneratedPool,
         minActive: 1,
         maxActive: 2,
         smallGrid: tempGridSize <= 4,
@@ -250,13 +348,13 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
           ? Random()
           : RotationEngine.getDeterminism('sumstrike', _currentLevel);
 
-      bool allowNegatives = _activeModifiers.contains('negatives');
+      bool allowNegatives = _isNegativesActive;
       double negativeChance = allowNegatives ? 0.20 : 0.0;
       int maxNum = 9;
-      double maskThreshold = _activeModifiers.contains('denseStrike') ? 0.50 : 0.45;
+      double maskThreshold = _isDenseActive ? 0.50 : 0.45;
 
-      if (!_playDailyMode && _currentLevel >= 30) {
-        if (_currentLevel >= 30 && _currentLevel < 45) {
+      if (!_playDailyMode && _currentLevel >= 30) { // not-a-modifier-gate
+        if (_currentLevel >= 30 && _currentLevel < 45) { // not-a-modifier-gate
           _gridSize = 5;
           maxNum = 9 + ((_currentLevel - 30) ~/ 3);
           if (maxNum > 15) maxNum = 15;
@@ -279,22 +377,6 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
           _gridSize = 4;
         } else {
           _gridSize = 5;
-        }
-      }
-
-      final randSelect = isCurated ? Random(_currentLevel * 45 + 6) : rand;
-      if (_activeModifiers.contains('whisper')) {
-        final rowIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
-        final colIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
-        
-        int toHideRows = (_gridSize * 0.6).round().clamp(1, _gridSize - 1);
-        int toHideCols = (_gridSize * 0.6).round().clamp(1, _gridSize - 1);
-        
-        for (int i = 0; i < toHideRows; i++) {
-          _hiddenRowTargets.add(rowIndices[i]);
-        }
-        for (int i = 0; i < toHideCols; i++) {
-          _hiddenColTargets.add(colIndices[i]);
         }
       }
 
@@ -382,14 +464,35 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       }
     }
 
+    // Whisper only hides row/column targets from view, so unlike 'negatives'
+    // and 'denseStrike' it works on curated boards too. It used to live inside
+    // the generated-only branch, which is why it did nothing on the ~170
+    // hand-authored levels that make up most of the endgame.
+    if (_activeModifiers.contains('whisper')) {
+      final randSelect = RotationEngine.getDeterminism('sumstrike_whisper', _currentLevel);
+      final rowIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
+      final colIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
+
+      final int toHideRows = (_gridSize * 0.6).round().clamp(1, _gridSize - 1);
+      final int toHideCols = (_gridSize * 0.6).round().clamp(1, _gridSize - 1);
+
+      for (int i = 0; i < toHideRows; i++) {
+        _hiddenRowTargets.add(rowIndices[i]);
+      }
+      for (int i = 0; i < toHideCols; i++) {
+        _hiddenColTargets.add(colIndices[i]);
+      }
+    }
+
     _keep = List.filled(_gridSize * _gridSize, true);
     _isSuccess = false;
     _hintIdx = -1;
     _isHintShowing = false;
     _wrongTaps.clear();
 
-    if ((_playDailyMode || _currentLevel >= 30) && _activeModifiers.contains('timer')) {
+    if (_isEndgame) {
       _timeLeft = 30 + (_gridSize * 10);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -527,9 +630,13 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
 
     if (_solutionMask[idx] == false) {
       // Correct: the number should be struck out/deleted!
+      // Scored before the win check so the strike that clears the board is part
+      // of the average the `momentum` bonus is paid on.
+      _momentumCorrect();
       _tryAutoCheck();
     } else {
       // Wrong strike — cell should have been kept. Cost a life and restore it.
+      _momentumMistake();
       setState(() {
         _wrongTaps.add(idx);
         _lives--;
@@ -619,6 +726,43 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       await prefs.setInt('beta_level_sumplete', _currentLevel + 1);
     }
 
+    // Register the clear. Without this the game awards no points, increments no
+    // clear count, unlocks no achievement and ticks no trail milestone — a win
+    // here was worth literally nothing. It also drives the Zen-vs-Challenge
+    // split, so hand-rolled bookkeeping cannot substitute for it.
+    if (!_playDailyMode) {
+      await HintManager.onLevelCleared(
+        'sumstrike',
+        // Speed Demon: cleared a hard-timer level with more than half the
+        // clock still left. _initialTime is 0 unless the timer modifier ran.
+        isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+      );
+      // `momentum`: the difference above the base 10 that the call above just
+      // paid, never a second full award. See widgets/momentum_meter.dart. A x1
+      // average pays 0, so an unchained clear is worth exactly what it always
+      // was. This is additive to — and independent of — the speed bonus below.
+      if (_isModActive('momentum')) {
+        final bonus = _momentum.bonusPoints;
+        if (bonus > 0) {
+          await PointManager.addPoints(bonus);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Combo Streak! +$bonus Points '
+                  '(x${_momentum.averageMultiplier.toStringAsFixed(1)} average)',
+                  style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.bold, color: Colors.black),
+                ),
+                backgroundColor: AppTheme.warmAmber,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      }
+    }
+
     if (_timeBonusEarned && _timeLeft > 0) {
       await PointManager.addPoints(5);
       if (mounted) {
@@ -640,9 +784,14 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       _currentLevel++;
       _generatePuzzle();
     });
-    final prefs = SharedPreferences.getInstance().then((p) {
-      p.setInt(PrefsKeys.gameLevel('sumstrike'), _currentLevel);
-    });
+    // Was an unguarded write: during a daily it leaked the challenge level into
+    // real progress, and after replaying an earlier level it wrote that lower
+    // number straight over a higher saved level.
+    ProgressGuard.saveLevel(
+      'sumstrike',
+      _currentLevel,
+      isDaily: _playDailyMode,
+    );
   }
 
   void _showHint() {
@@ -687,7 +836,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       return Scaffold(
         backgroundColor: context.bgDark,
         appBar: AppBar(
-          title: Text('Sum Strike', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+          title: const GameTitle('Sum Strike'),
         ),
         body: Center(
           child: Container(
@@ -774,6 +923,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
         title: Text('Sum Strike', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           IconButton(
+            tooltip: 'Hint',
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -836,29 +986,15 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
               ),
             ),
           IconButton(
+            tooltip: 'Rules',
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'sumstrike', 'Sum Strike'),
           ),
-          GestureDetector(
-            onTap: _showJumpToLevelDialog,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16, left: 8),
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                      style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    if (!_playDailyMode) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          GameLevelChip(
+            level: _currentLevel + 1,
+            modeLabel: _playDailyMode ? 'Daily' : null,
+            accent: AppTheme.accentFor('sumstrike'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -906,17 +1042,29 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                           ],
                         ),
                         const SizedBox(height: 24),
-                        if (!_playDailyMode && _activeModifiers.isNotEmpty) ...[
+                        if (_modifierBannerText.isNotEmpty) ...[
                           Padding(
                             padding: const EdgeInsets.only(bottom: 12.0),
                             child: Text(
-                              _activeModifiers.map((m) => _getModifierDescription(m)).where((desc) => desc.isNotEmpty).join(' · '),
+                              _modifierBannerText,
                               textAlign: TextAlign.center,
                               style: GoogleFonts.outfit(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                                 color: AppTheme.accentFor('sumstrike').withOpacity(0.9),
                               ),
+                            ),
+                          ),
+                        ],
+                        // `momentum` must be visible while it runs, not only
+                        // paid at the end. Its own Wrap row, so the chip cannot
+                        // overflow a sibling at 320px.
+                        if (_isModActive('momentum')) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Wrap(
+                              alignment: WrapAlignment.center,
+                              children: [MomentumMeter(controller: _momentum)],
                             ),
                           ),
                         ],
@@ -931,9 +1079,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                               border: Border.all(color: context.textMuted.withAlpha(30)),
                             ),
                             child: FogOverlay(
-                              enabled: _forcedModifier == 'fog' ||
-                                  (_playDailyMode && _dailyModifierType == 'fog') ||
-                                  (!_playDailyMode && _currentLevel >= 30 && _activeModifiers.contains('fog')),
+                              enabled: _isFogActive,
                               radius: cellW * _dailyRadius,
                               child: GridView.builder(
                                 physics: const NeverScrollableScrollPhysics(),

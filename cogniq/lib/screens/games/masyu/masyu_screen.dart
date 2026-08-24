@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:math';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../widgets/game_level_chip.dart';
 import '../../../utils/point_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +16,7 @@ import '../../../widgets/challenge_cleared_overlay.dart';
 import '../../../widgets/fog_overlay.dart';
 import '../../../widgets/buy_hints_dialog.dart';
 import '../../../utils/hint_manager.dart';
+import '../../../utils/rotation_engine.dart';
 import '../../../widgets/game_tutorial_dialog.dart';
 import 'masyu_levels.dart';
 
@@ -38,18 +41,46 @@ class _MasyuScreenState extends State<MasyuScreen> {
   bool _isSuccess = false;
   bool _playDailyMode = false;
   String _dailyModifierType = '';
+  String _dailyModifierName = '';
+  String _dailyModifierDesc = '';
   double _dailyRadius = 1.5;
-
-  late int _gridSize;
-  late List<int> _grid; // 0: empty, 1: white, 2: black
-  Map<String, bool> _activeEdges = {}; // Key: "u-v" (u < v), Value: true/false
-  Map<String, bool> _solutionEdges = {}; // Cached correct solution edges for hints
   bool _solveAttempted = false;
   int _hintCount = 1;
   bool _isHintShowing = false;
   int _hintIdx = -1;
   Timer? _gameTimer;
+
+  late int _gridSize;
+  late List<int> _grid; // 0: empty, 1: white, 2: black
+  Map<String, bool> _activeEdges = {}; // Key: "u-v" (u < v), Value: true/false
+  Map<String, bool> _solutionEdges = {}; // Cached correct solution edges for hints
   int _timeLeft = -1;
+  // Timer value at the moment the hard timer started; 0 when no timer ran.
+  // Only used for the Speed Demon achievement check on clear.
+  int _initialTime = 0;
+
+  Set<String> _activeModifiers = {};
+
+  /// Pearls concealed by the 'hiddenPearls' modifier. They still constrain the
+  /// loop; they are simply not drawn.
+  final Set<int> _hiddenPearls = {};
+
+  // COGNIQ-FIX:mod-active-helper
+  bool _isModActive(String name) {
+    if (_forcedModifier == name) return true;
+    if (_playDailyMode) return _dailyModifierType == name;
+    return _currentLevel >= RotationEngine.modifierStartLevel('masyu') &&
+        _activeModifiers.contains(name);
+  }
+
+  // COGNIQ-FIX:mod-getters
+  bool get _isFogActive => _isModActive('fog');
+  bool get _isHiddenPearlsActive => _isModActive('hiddenPearls');
+  bool get _isZoomActive => _isModActive('zoom');
+  bool get _isEndgame => _isModActive('timer');
+  bool get _modsOn =>
+      !_playDailyMode && RotationEngine.hasModifiers('masyu', _currentLevel);
+
   bool _timeBonusEarned = false;
 
   // Drag loop variables
@@ -59,15 +90,33 @@ class _MasyuScreenState extends State<MasyuScreen> {
 
   static const List<MasyuLevel> _kLevels = kMasyuLevels;
 
+  // COGNIQ-FIX:mod-desc-copy
   String _getModifierDescription(String mod) {
     switch (mod) {
       case 'timer':
-        return 'Timer: clear the board before time runs out';
+        return 'Close the loop before time runs out.';
       case 'fog':
-        return 'Fog: overlay shadows obscure the board';
+        return 'A dense fog obscures portions of the grid.';
+      case 'zoom':
+        return 'Grid is magnified with pan-and-scan navigation.';
+      case 'hiddenPearls':
+        return 'Some pearls are concealed on the board.';
       default:
         return '';
     }
+  }
+
+  String get _modifierBannerText {
+    if (_isSuccess) return '';
+    if (_playDailyMode) {
+      if (_dailyModifierDesc.isNotEmpty) return _dailyModifierDesc;
+      if (_dailyModifierName.isNotEmpty) return _dailyModifierName;
+      return '';
+    }
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
   }
 
   @override
@@ -89,6 +138,8 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _playDailyMode = prefs.getBool(PrefsKeys.playDailyMode) ?? false;
     if (_playDailyMode) {
       _dailyModifierType = prefs.getString(PrefsKeys.dailyModifierType) ?? '';
+      _dailyModifierName = prefs.getString(PrefsKeys.dailyModifierName) ?? '';
+      _dailyModifierDesc = prefs.getString(PrefsKeys.dailyModifierDesc) ?? '';
       final extraParamsStr = prefs.getString(PrefsKeys.dailyModifierExtraParams) ?? '';
       if (extraParamsStr.isNotEmpty) {
         try {
@@ -100,6 +151,8 @@ class _MasyuScreenState extends State<MasyuScreen> {
       }
     } else {
       _dailyModifierType = '';
+      _dailyModifierName = '';
+      _dailyModifierDesc = '';
     }
 
     int level = prefs.getInt(PrefsKeys.gameLevel('masyu')) ?? 0;
@@ -118,7 +171,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
       builder: (context) {
         int target = _currentLevel + 1;
         String? selectedMod = _forcedModifier;
-        final pool = ['timer'];
+        final pool = ['timer', 'fog', 'zoom', 'hiddenPearls'];
         
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -212,9 +265,44 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _gridSize = level.gridSize;
     _grid = List.from(level.pearls);
 
-    final activeMod = _forcedModifier ?? (_playDailyMode ? _dailyModifierType : null);
-    if (activeMod == 'timer') {
+    // Masyu was the one game with no modifier rotation at all: the board is
+    // the same size for fifty levels in a row and nothing else ever changed.
+    // It now draws from a pool like every other game.
+    if (_modsOn) {
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'masyu',
+        levelIndex: _currentLevel,
+        pool: ['timer', 'fog', 'zoom', 'hiddenPearls'],
+        minActive: 1,
+        maxActive: 2,
+      );
+      if (_forcedModifier != null) {
+        _activeModifiers = {_forcedModifier!};
+      }
+    } else {
+      _activeModifiers = {};
+      if (_playDailyMode && _dailyModifierType.isNotEmpty) {
+        _activeModifiers.add(_dailyModifierType);
+      }
+    }
+
+    _hiddenPearls.clear();
+    if (_isHiddenPearlsActive) {
+      // Conceal a couple of pearls: they still have to be satisfied, the
+      // player just has to work out where they are from the loop.
+      final pearlCells = <int>[
+        for (int i = 0; i < _grid.length; i++)
+          if (_grid[i] > 0) i
+      ];
+      final rng = RotationEngine.getDeterminism('masyu_hidden', _currentLevel);
+      pearlCells.shuffle(rng);
+      final hideCount = (pearlCells.length * 0.25).round().clamp(1, 3);
+      _hiddenPearls.addAll(pearlCells.take(hideCount));
+    }
+
+    if (_isEndgame) {
       _timeLeft = 25 + (_gridSize * 8);
+      _initialTime = _timeLeft;
       _timeBonusEarned = true;
       _startTimer();
     }
@@ -249,7 +337,14 @@ class _MasyuScreenState extends State<MasyuScreen> {
     _solutionEdges = _solveMasyu() ?? {};
   }
 
-  Map<String, bool>? _solveMasyu() {
+  /// Finds a valid loop.
+  ///
+  /// When [requiredEdges] is given, only a loop that contains every one of
+  /// those edges counts. That is how a hint tells "the player drew a line that
+  /// belongs to a different valid loop" apart from "the player drew a line no
+  /// loop can use" -- the first deserves to be extended, the second is the only
+  /// case where a hint should rub something out.
+  Map<String, bool>? _solveMasyu({Set<String>? requiredEdges}) {
     int startCell = -1;
     for (int i = 0; i < _grid.length; i++) {
       if (_grid[i] > 0) {
@@ -288,6 +383,16 @@ class _MasyuScreenState extends State<MasyuScreen> {
       final loopSet = Set<int>.from(loop);
       for (int i = 0; i < _grid.length; i++) {
         if (_grid[i] > 0 && !loopSet.contains(i)) return false;
+      }
+
+      if (requiredEdges != null && requiredEdges.isNotEmpty) {
+        final loopEdges = <String>{};
+        for (int j = 0; j < K; j++) {
+          final u = loop[j];
+          final v = loop[(j + 1) % K];
+          loopEdges.add(u < v ? '$u-$v' : '$v-$u');
+        }
+        if (!requiredEdges.every(loopEdges.contains)) return false;
       }
 
       final cellToIdx = {for (int j = 0; j < K; j++) loop[j]: j};
@@ -670,6 +775,19 @@ class _MasyuScreenState extends State<MasyuScreen> {
       }
     }
     
+    // Register the clear. Without this the game awards no points, increments no
+    // clear count, unlocks no achievement and ticks no trail milestone — a win
+    // here was worth literally nothing. It also drives the Zen-vs-Challenge
+    // split, so hand-rolled bookkeeping cannot substitute for it.
+    if (!_playDailyMode) {
+      await HintManager.onLevelCleared(
+        'masyu',
+        // Speed Demon: cleared a hard-timer level with more than half the
+        // clock still left. _initialTime is 0 unless the timer modifier ran.
+        isSpeedDemon: _initialTime > 0 && _timeLeft * 2 > _initialTime,
+      );
+    }
+
     if (_timeBonusEarned && _timeLeft > 0) {
       await PointManager.addPoints(5);
       if (mounted) {
@@ -701,6 +819,21 @@ class _MasyuScreenState extends State<MasyuScreen> {
   }
 
   bool _showHint() {
+    // Prefer a loop that keeps what the player has already drawn. If one
+    // exists they are on a valid line -- perhaps not the puzzle's canonical
+    // one -- and the hint should build on it rather than tear it down.
+    final drawn = <String>{
+      for (final e in _activeEdges.entries)
+        if (e.value) e.key
+    };
+    if (drawn.isNotEmpty) {
+      final consistent = _solveMasyu(requiredEdges: drawn);
+      if (consistent != null && consistent.isNotEmpty) {
+        _solutionEdges = consistent;
+        _solveAttempted = true;
+      }
+    }
+
     _ensureSolution();
     if (_solutionEdges.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -713,39 +846,12 @@ class _MasyuScreenState extends State<MasyuScreen> {
       return false;
     }
 
-    // 1. Spot incorrect edges and erase them
-    String? incorrectKey;
-    _activeEdges.forEach((key, isActive) {
-      if (isActive) {
-        if (!_solutionEdges.containsKey(key) || !_solutionEdges[key]!) {
-          incorrectKey = key;
-        }
-      }
-    });
+    // A hint never removes the player's own lines. Masyu boards can have more
+    // than one valid loop, and this only knows a single stored solution, so
+    // erasing "incorrect" lines used to wipe out work that was actually right
+    // -- and charged a hint for the privilege. It now only ever adds.
 
-    if (incorrectKey != null) {
-      final parts = incorrectKey!.split('-');
-      int u = int.parse(parts[0]);
-      setState(() {
-        _activeEdges[incorrectKey!] = false;
-        _hintIdx = u;
-        _isHintShowing = true;
-      });
-      settingsNotifier.hapticTap();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erased an incorrect line!', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.amber.shade800,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _isHintShowing = false);
-      });
-      return true;
-    }
-
-    // 2. Give the next step by placing a correct edge
+    // Give the next step by placing a correct edge
     String? missingKey;
     _solutionEdges.forEach((key, isSolActive) {
       if (isSolActive) {
@@ -777,6 +883,39 @@ class _MasyuScreenState extends State<MasyuScreen> {
       _tryAutoCheck();
       return true;
     }
+
+    // Nothing left to add, so the board carries lines the solution does not
+    // use -- and the search above already showed no valid loop keeps them.
+    // Removing one is now the genuinely helpful move.
+    String? offending;
+    _activeEdges.forEach((key, isActive) {
+      if (isActive && !(_solutionEdges[key] ?? false)) offending = key;
+    });
+
+    if (offending != null) {
+      final u = int.parse(offending!.split('-')[0]);
+      setState(() {
+        _activeEdges[offending!] = false;
+        _hintIdx = u;
+        _isHintShowing = true;
+      });
+      settingsNotifier.hapticTap();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'That line cannot be part of any loop - removed it.',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.amber.shade800,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _isHintShowing = false);
+      });
+      return true;
+    }
+
     return false;
   }
 
@@ -800,7 +939,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
       return Scaffold(
         backgroundColor: context.bgDark,
         appBar: AppBar(
-          title: Text('Pearl Loop', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+          title: const GameTitle('Pearl Loop'),
         ),
         body: Center(
           child: Container(
@@ -887,6 +1026,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
         title: Text('Pearl Loop', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           IconButton(
+            tooltip: 'Hint',
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -951,29 +1091,15 @@ class _MasyuScreenState extends State<MasyuScreen> {
               ),
             ),
           IconButton(
+            tooltip: 'Rules',
             icon: const Icon(Icons.help_outline),
             onPressed: () => GameTutorialDialog.show(context, 'masyu', 'Pearl Loop'),
           ),
-          GestureDetector(
-            onTap: _showJumpToLevelDialog,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16, left: 8),
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _playDailyMode ? 'Challenge' : 'Level ${_currentLevel + 1}',
-                      style: GoogleFonts.outfit(color: AppTheme.dustyMauve, fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    if (!_playDailyMode) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.edit, size: 12, color: AppTheme.dustyMauve),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          GameLevelChip(
+            level: _currentLevel + 1,
+            modeLabel: _playDailyMode ? 'Daily' : null,
+            accent: AppTheme.accentFor('masyu'),
+            onTap: kDebugMode ? _showJumpToLevelDialog : null,
           ),
         ],
       ),
@@ -1001,26 +1127,20 @@ class _MasyuScreenState extends State<MasyuScreen> {
                           ),
                         ),
                         const SizedBox(height: 24),
-                        Builder(
-                          builder: (context) {
-                            final activeMod = _forcedModifier ?? (_playDailyMode ? _dailyModifierType : null);
-                            if (activeMod != null && activeMod.isNotEmpty) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12.0),
-                                child: Text(
-                                  _getModifierDescription(activeMod),
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.dustyMauve.withOpacity(0.9),
-                                  ),
-                                ),
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          }
-                        ),
+                        if (_modifierBannerText.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Text(
+                              _modifierBannerText,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.dustyMauve.withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                        ],
                         RepaintBoundary(
                           child: Container(
                             width: boardSize,
@@ -1031,7 +1151,9 @@ class _MasyuScreenState extends State<MasyuScreen> {
                               border: Border.all(color: context.textMuted.withAlpha(30)),
                             ),
                             child: FogOverlay(
-                              enabled: _playDailyMode && _dailyModifierType == 'fog',
+                              // Also honours the campaign 'fog' modifier, not
+                              // just the daily one.
+                              enabled: _isFogActive,
                               radius: cellSpacing * _dailyRadius,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
@@ -1042,6 +1164,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
                                   child: CustomPaint(
                                     size: Size(boardSize, boardSize),
                                     painter: _MasyuPainter(
+                                      hiddenPearls: _hiddenPearls,
                                       gridSize: _gridSize,
                                       grid: _grid,
                                       activeEdges: _activeEdges,
@@ -1124,7 +1247,12 @@ class _MasyuPainter extends CustomPainter {
   final ValueNotifier<Offset?> dragPosition;
   final int hintIdx;
 
+  /// Pearls the 'hiddenPearls' modifier conceals. They still bind the loop;
+  /// they are simply not drawn.
+  final Set<int> hiddenPearls;
+
   _MasyuPainter({
+    this.hiddenPearls = const {},
     required this.gridSize,
     required this.grid,
     required this.activeEdges,
@@ -1222,7 +1350,7 @@ class _MasyuPainter extends CustomPainter {
 
     for (int i = 0; i < gridSize * gridSize; i++) {
       int pearl = grid[i];
-      if (pearl > 0) {
+      if (pearl > 0 && !hiddenPearls.contains(i)) {
         Offset center = _nodeCenter(i);
         double rad = cellSpacing * 0.22;
         

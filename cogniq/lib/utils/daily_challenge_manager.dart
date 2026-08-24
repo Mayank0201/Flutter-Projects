@@ -1,11 +1,15 @@
 import 'dart:convert';
-import 'dart:math';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:home_widget/home_widget.dart';
 import '../models/game_info.dart';
 import 'notification_manager.dart';
 import 'prefs_keys.dart';
+import 'hint_manager.dart';
 import 'point_manager.dart';
+import 'trail_catalog.dart';
+import '../widgets/trail_unlock_toast.dart';
+import '../main.dart';
 
 class DailyChallenge {
   final String difficulty; // 'Easy', 'Medium', 'Hard'
@@ -982,9 +986,31 @@ class DailyChallengeManager {
     ),
   ];
 
-  static const int kThemeCount = 14;
+  /// Number of themed weeks in the rotation.
+  ///
+  /// **Derived from the table on purpose.** It used to be a hardcoded `14` while
+  /// `_kDailyChallengesPlan` held 30 entries, so `weekOf` — which indexes the plan
+  /// by *week* — could never reach entries 15..30. Sixteen fully authored theme
+  /// weeks (Gravity → Grand Finale) shipped in every bundle and were unreachable,
+  /// and the rotation repeated after 98 days instead of 210. Deriving the count
+  /// means the table and the cycle can never drift apart again: adding a
+  /// `_DayData` entry lengthens the rotation, full stop.
+  ///
+  /// Release 2.3 / S2 raises this from 14 to 30 (98 → 210 days before a repeat,
+  /// comfortably past the 60 the work order asked for).
+  ///
+  /// **Mid-cycle safety.** `weekOf`/`dayInWeekOf` reduce `globalDay` with
+  /// `(globalDay - 1) % kTotalDays`, then `(d ~/ 7) % kThemeCount`. For every
+  /// stored progress day 1..98 — which is every value any existing player can
+  /// hold, since the old cycle wrapped at 98 — `d` is `globalDay - 1` under both
+  /// the old and the new `kTotalDays`, and `d ~/ 7` is at most 13, so `% 14` and
+  /// `% 30` agree. Days 1..98 therefore resolve to byte-identical challenges
+  /// before and after this change: nobody's "today" moves, and no stored progress
+  /// is rewritten. The only difference is that a player finishing day 98 now
+  /// continues into day 99 (new content) instead of wrapping back to day 1.
+  static final int kThemeCount = _kDailyChallengesPlan.length; // 30
   static const int kDaysPerWeek = 7;
-  static const int kTotalDays = kThemeCount * kDaysPerWeek; // 98
+  static final int kTotalDays = kThemeCount * kDaysPerWeek; // 210
 
   static Future<int> getActiveDay() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1062,6 +1088,25 @@ class DailyChallengeManager {
     'Nightmare Trial':'Minimal clues, maximum difficulty this week. Only the essentials are given.',
     'Prism Day':      'Colour and pearl rules are twisted this week — assumptions are inverted.',
     'Time Warp Day':  'The clock is against you this week; boards change or vanish on a timer.',
+    // Weeks 15-30. The content below was authored with the rest of the plan but
+    // was unreachable while kThemeCount was pinned at 14; these blurbs simply
+    // finish it off so the banner does not fall back to the generic sentence.
+    'Gravity Day':    'Everything sinks this week — clearing a tile pulls the rest of the board downwards.',
+    'Illusion Day':   'Boards jitter, shimmer and blur this week; trust deduction over what you think you see.',
+    'Restriction Day':'Part of your usual toolkit is taken away this week — solve within the limits.',
+    'Spotlight Day':  'The board is dark this week except for a beam around your finger. Sweep it to read the puzzle.',
+    'Ice Day':        'Tiles freeze and slide this week; moves do not always land where you aimed.',
+    'Ghost Day':      'Your own marks fade away this week — hold the board in your head.',
+    'Swap Day':       'Pieces trade places as you play this week. Re-read the board after every move.',
+    'Magnet Day':     'Tiles attract and repel this week, reshaping the board around each move you make.',
+    'Encryption Day': 'Clues arrive encoded this week — decode them before you can even start solving.',
+    'Spotlight Day II':'A second, harsher spotlight week: less light, larger boards, no free looks.',
+    'Mutation Day':   'The puzzle changes its own answer mid-solve this week. Watch for the shift.',
+    'Echo Day':       'Every action repeats itself somewhere else on the board this week.',
+    'Blind Day':      'Key feedback is withheld this week — commit to a read and live with it.',
+    'Aurora Day':     'Shifting colour light plays over every board this week, bending what each shade looks like.',
+    'Matrix Day':     'Boards are stripped to raw notation this week — coordinates, binary and equations instead of pictures.',
+    'Grand Finale':   'The closing week: the longest recalls, the biggest boards and the tightest clocks the rotation has.',
   };
 
   static String themeDescriptionOf(int globalDay) =>
@@ -1069,8 +1114,74 @@ class DailyChallengeManager {
 
   static const List<String> _kDiffLabels = ['Easy', 'Medium', 'Hard'];
 
+  /// True when [gameId] is a game the app can actually open.
+  ///
+  /// A stashed game has no live route in `main.dart`, so navigating to it throws
+  /// an unknown-route exception — and `MaterialApp` here declares no
+  /// `onUnknownRoute`, so it is an unhandled crash rather than a graceful fail.
+  /// A gameId that is no longer in `kAllGames` at all (2.3 deleted ten stashed
+  /// games outright) is unusable for the same reason and takes the same path.
+  static bool _isLiveGame(String gameId) {
+    for (final g in kAllGames) {
+      if (g.id == gameId) return !g.isStashed;
+    }
+    return false; // unknown id: treat as unusable rather than crash later
+  }
+
+  /// Every challenge in the plan whose game is currently live.
+  static List<_ChallengeData> get _liveChallenges => [
+        for (final wk in _kDailyChallengesPlan)
+          for (final c in [wk.easy, wk.medium, wk.hard])
+            if (_isLiveGame(c.gameId)) c,
+      ];
+
+  /// Deterministic stand-in for a challenge whose game is not playable.
+  ///
+  /// The plan still schedules 16 of its 90 slots on the word and memory games
+  /// (wordle, hangman, flagle, memory, numbermemory, sequence, wordbuilder)
+  /// that were stashed and then deleted in 2.3 — every one of those days
+  /// crashed the app when tapped. Their modifiers are game-specific ("Sliding
+  /// Tiles", "Vowel Void"), so they cannot be re-pointed at another game; the
+  /// replacement has to be a challenge that already exists and is known to work.
+  ///
+  /// Those slots are deliberately left in the plan rather than rewritten. The
+  /// substitution below is keyed off the *live* pool, so which challenge a given
+  /// date yields is unchanged by the games' removal; editing the plan's shape
+  /// would silently move every player's daily challenge.
+  ///
+  /// Chosen by day and slot so a given date always yields the same substitute,
+  /// and preferring the same difficulty tier so the day keeps its intended shape.
+  ///
+  /// [avoid] holds the game ids the same day has already committed to. Weeks
+  /// 15-30 schedule up to two dead games in one day (day 17 Restriction, day 23
+  /// Encryption, day 30 Grand Finale), so without this the day could show the
+  /// same game twice — three cards, two identical. The search walks forward from
+  /// the deterministic start index, so it stays a pure function of the day.
+  static _ChallengeData _substituteFor(
+      _ChallengeData original, int globalDay, int slot,
+      {Set<String> avoid = const <String>{}}) {
+    final live = _liveChallenges;
+    if (live.isEmpty) return original; // cannot happen; avoids a divide by zero
+    final sameTier =
+        live.where((c) => c.difficulty == original.difficulty).toList();
+    final pool = sameTier.isNotEmpty ? sameTier : live;
+    // Key off the day's position *within the cycle*, not the raw counter.
+    // Keying off `globalDay` made the substitute drift between one cycle and the
+    // next (day 99 and day 309 are the same calendar slot but picked different
+    // stand-ins), so `getChallengesForDay(d)` was not periodic in kTotalDays.
+    // Harmless while every caller already reduced the day, but the rest of this
+    // class promises a clean cycle and this was the one place that broke it.
+    final cycleDay = ((globalDay - 1) % kTotalDays) + 1;
+    final start = (cycleDay * 3 + slot) % pool.length;
+    for (int i = 0; i < pool.length; i++) {
+      final candidate = pool[(start + i) % pool.length];
+      if (!avoid.contains(candidate.gameId)) return candidate;
+    }
+    return pool[start]; // every live game already used today; duplicate is fine
+  }
+
   static List<DailyChallenge> getChallengesForDay(int globalDay) {
-    final week = weekOf(globalDay);            // 1..14
+    final week = weekOf(globalDay);            // 1..kThemeCount
     final dayInWeek = dayInWeekOf(globalDay);  // 1..7
     final wk = _kDailyChallengesPlan[week - 1];
     final trio = [wk.easy, wk.medium, wk.hard]; // Day-1 [slot0, slot1, slot2]
@@ -1080,9 +1191,28 @@ class DailyChallengeManager {
     final pinnedCount = trio.where((c) => c.pinDifficulty != null).length;
     final m = 3 - pinnedCount;
 
+    // Resolve all three slots up front. Substitution has to know which games the
+    // day has already committed to, so the playable slots are pinned down first
+    // and each stand-in is then chosen around them.
+    final resolved = List<_ChallengeData?>.filled(3, null);
+    for (int slot = 0; slot < 3; slot++) {
+      final planned = trio[slotToGame[slot]];
+      // Never hand back a game that is not live — its route does not exist.
+      if (_isLiveGame(planned.gameId)) resolved[slot] = planned;
+    }
+    for (int slot = 0; slot < 3; slot++) {
+      if (resolved[slot] != null) continue;
+      final taken = <String>{
+        for (final r in resolved)
+          if (r != null) r.gameId,
+      };
+      resolved[slot] =
+          _substituteFor(trio[slotToGame[slot]], globalDay, slot, avoid: taken);
+    }
+
     final out = <DailyChallenge>[];
     for (int slot = 0; slot < 3; slot++) {
-      final c = trio[slotToGame[slot]];
+      final c = resolved[slot]!;
       int level = c.levelIndex + slot * c.step;   // level scales with the slot
       if (m > 0) {
         level += (dayInWeek - 1) ~/ m;
@@ -1122,7 +1252,9 @@ class DailyChallengeManager {
 
       out.add(DailyChallenge(
         difficulty: _kDiffLabels[slot],
-        game: kAllGames.firstWhere((g) => g.id == c.gameId),
+        // orElse so an unknown id degrades to a real game instead of throwing.
+        game: kAllGames.firstWhere((g) => g.id == c.gameId,
+            orElse: () => kAllGames.firstWhere((g) => !g.isStashed)),
         levelIndex: level,
         modifierName: c.modifierName,
         modifierDescription: desc,
@@ -1245,7 +1377,10 @@ class DailyChallengeManager {
     final starKey = PrefsKeys.dailyStarForDate(dateStr);
     int completedCount = await getCompletedCountForDate(dateStr);
     
-    // Determine the previous tier awarded for THIS date (if any) and move the count.
+    // A day holds exactly one star, upgrading bronze -> silver -> gold as more
+    // challenges are finished. The previous tier has to give its count back,
+    // otherwise finishing all three left the day counted as a bronze AND a
+    // silver AND a gold, inflating every star total threefold.
     final prevStar = prefs.getString(starKey);
     String newStar = completedCount == 1 ? 'bronze' : completedCount == 2 ? 'silver' : 'gold';
     await prefs.setString(starKey, newStar);
@@ -1254,15 +1389,56 @@ class DailyChallengeManager {
         ? PrefsKeys.dailyBronzeStars
         : s == 'silver' ? PrefsKeys.dailySilverStars : PrefsKeys.dailyGoldStars;
 
-    final newK = keyFor(newStar);
-    await prefs.setInt(newK, (prefs.getInt(newK) ?? 0) + 1);
+    if (prevStar != newStar) {
+      if (prevStar != null) {
+        final prevK = keyFor(prevStar);
+        final prevCount = prefs.getInt(prevK) ?? 0;
+        if (prevCount > 0) await prefs.setInt(prevK, prevCount - 1);
+      }
+      final newK = keyFor(newStar);
+      await prefs.setInt(newK, (prefs.getInt(newK) ?? 0) + 1);
+    }
 
     // Push stars to widget
     await syncStarsToWidget();
 
+    // COGNIQ-FIX:trail-toast
+    final newTrails = await TrailCatalog.checkStarUnlocks();
+    if (newTrails.isNotEmpty) {
+      final context = navigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        for (final t in newTrails) {
+          TrailUnlockToast.show(context, t.name, t.emoji, t.id);
+        }
+      }
+    }
+
     // Award rewards based on completions (points instead of hints)
     int pointsToAward = (completedCount == 3) ? 50 : 25;
     await PointManager.addPoints(pointsToAward);
+
+    // S2: hint-free bonus. +10 on top of the 25/50 for clearing a daily without
+    // spending a hint. A perfect hint-free day is 130 rather than 100.
+    //
+    // Read from HintManager's real per-level flag, NOT from a hint-balance diff.
+    // A diff is wrong in exactly the case that matters: BuyHintsDialog and
+    // rewarded ads call addHints mid-level, so a player who buys 3 and spends 1
+    // shows a NET INCREASE and would be paid the hint-free bonus for a level
+    // they used a hint on.
+    //
+    // Deliberately NOT a star: a day holds exactly one star by invariant, and
+    // the fix for the 3x star-inflation bug above depends on that. An extra
+    // star would re-break it.
+    //
+    // Guarded by its own per-(difficulty, date) key, and it sits after the
+    // already-completed early return above, so it cannot pay twice.
+    if (!HintManager.wasHintUsedThisLevel(gameId)) {
+      final bonusKey = 'daily_v2_hintfree_${difficulty.toLowerCase()}_$dateStr';
+      if (prefs.getBool(bonusKey) != true) {
+        await prefs.setBool(bonusKey, true);
+        await PointManager.addPoints(10);
+      }
+    }
 
     // Update streak
     int streak = prefs.getInt(PrefsKeys.dailyV2Streak) ?? 0;

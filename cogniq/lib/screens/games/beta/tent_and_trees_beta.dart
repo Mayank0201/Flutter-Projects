@@ -149,7 +149,7 @@ class _TentAndTreesBetaScreenState extends State<TentAndTreesBetaScreen> {
       backgroundColor: context.bgDark,
       appBar: AppBar(
         title: Text('Tent & Trees', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(tooltip: 'Back', icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline, color: AppTheme.dustyMauve),
