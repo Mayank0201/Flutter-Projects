@@ -42,6 +42,12 @@ class _ColourLinkScreenState extends State<ColourLinkScreen> {
   int _dragColor = 0; // 0 = none, 1..C = active dragging color
   bool _shuffleActive = false;
 
+  // COGNIQ-FIX:mod-deadeffect
+  // Both palettes below have exactly this many entries. The monochrome set
+  // cannot grow -- more greys stop being tellable apart -- so this is a hard
+  // ceiling on how many pairs a board can carry.
+  static const int _kPaletteSize = 8;
+
   List<Color> get _colors {
     final bool monochrome = _isMonochromeActive;
     if (monochrome) {
@@ -224,7 +230,16 @@ class _ColourLinkScreenState extends State<ColourLinkScreen> {
         _activeModifiers = RotationEngine.getActiveModifiers(
           gameId: 'colourlink',
           levelIndex: _currentLevel,
-          pool: ['gridSize_pairCount', 'walls', 'tortuosity', 'timer', 'monochrome'],
+          // COGNIQ-FIX:mod-deadeffect
+          // From level 45 the base board is already 8x8 with 8 pairs, so this
+          // modifier has no headroom: it would push the grid to 9x9 while the
+          // pair count stays pinned, and the generator cannot solve that -- it
+          // gave up and dropped the player to the 4x4 tutorial fallback board.
+          // A modifier with nothing to add should not be offered at all.
+          pool: [
+            if (_gridSize < 8 || _numColors < _kPaletteSize) 'gridSize_pairCount',
+            'walls', 'tortuosity', 'timer', 'monochrome',
+          ],
           smallGrid: _gridSize <= 5,
         );
         if (_forcedModifier != null) {
@@ -232,7 +247,12 @@ class _ColourLinkScreenState extends State<ColourLinkScreen> {
         }
         if (_isGridSizePairCountActive) {
           _gridSize = (_gridSize + 1).clamp(4, 9);
-          _numColors = (_numColors + 1).clamp(2, (_gridSize * _gridSize) ~/ 4);
+          // COGNIQ-FIX:mod-deadeffect
+          // The palette has a fixed number of entries; the base curve already
+          // reaches that count at level 45, so +1 without this bound indexes
+          // past the end of `_colors` and throws a RangeError.
+          _numColors = (_numColors + 1)
+              .clamp(2, min(_kPaletteSize, (_gridSize * _gridSize) ~/ 4));
         }
       } else {
         _activeModifiers = {};

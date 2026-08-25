@@ -108,9 +108,49 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
 
   // COGNIQ-FIX:mod-getters
   bool get _isFogActive => _isModActive('fog');
-  bool get _isEndgame => _isModActive('timer');
+  // COGNIQ-FIX:mod-unreachable
+  // Renamed from `_isEndgame`: this only ever meant "the timer modifier is
+  // active", and reading it as "this is an endgame level" is what made the
+  // endgame pool unreachable. Board shape is now decided by _isEndgameBoard.
+  bool get _isTimerActive => _isModActive('timer');
   bool get _quota => _isModActive('quota');
   bool get _isRetroActive => _isModActive('retro');
+
+  /// The modifiers the generator itself reads. They shape the board rather
+  /// than its presentation, so they only mean anything on an endgame board.
+  static const Set<String> kCircuitGuideBoardShapingModifiers = {
+    'tortuosity',
+    'junctionDensity',
+    'decoyWires',
+    'scrambleDepth',
+  };
+
+  /// The first level whose board is built from [kCircuitGuideEndgamePool].
+  /// Matches the `_currentLevel >= 30` ramp `decoyWires` already scales on.
+  static const int kCircuitGuideEndgameLevel = 30; // not-a-modifier-gate
+
+  // COGNIQ-FIX:mod-unreachable
+  /// Whether this level builds an endgame board.
+  ///
+  /// Answered from the LEVEL -- or from the daily/forced modifier, both of
+  /// which are known before any pool is drawn -- and never from
+  /// `_activeModifiers`. `_loadLevel` clears that set and only fills it in
+  /// further down, so the old `_isEndgame` test read an empty set: in free
+  /// play it was always false, the endgame branch never ran, and
+  /// `kCircuitGuideEndgamePool` -- and with it `tortuosity`,
+  /// `junctionDensity`, `decoyWires` and `scrambleDepth` -- could never be
+  /// selected. Both pools are reachable in free play again: the presentation
+  /// pool from the modifier start level up, the endgame pool from
+  /// [kCircuitGuideEndgameLevel] up.
+  bool get _isEndgameBoard {
+    if (_forcedModifier != null) {
+      return _forcedModifier == 'timer' ||
+          kCircuitGuideBoardShapingModifiers.contains(_forcedModifier);
+    }
+    if (_playDailyMode) return _dailyModifierType == 'timer';
+    return _modsOn && _currentLevel >= kCircuitGuideEndgameLevel;
+  }
+
   int _movesLeft = 0;
   int _optimalMoves = 0;
   bool _gameOver = false;
@@ -274,9 +314,12 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
       final List<int> tgts = [];
       int srcNeighbor = 0;
       final int W;
-      final bool generateProc = _isEndgame || (_currentLevel >= 5);
+      // COGNIQ-FIX:mod-unreachable
+      // Level-derived, so the branch below no longer depends on a set that
+      // `_activeModifiers.clear()` has just emptied.
+      final bool generateProc = _isEndgameBoard || (_currentLevel >= 5);
 
-      if (_isEndgame) {
+      if (_isEndgameBoard) {
         int numTargets = 6;
         if (_currentLevel >= 90) {
           _gridSize = 8;
@@ -304,18 +347,26 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
         }
         W = _gridSize;
         bool isSmallGrid = (_gridSize <= 5);
-        _activeModifiers = RotationEngine.getActiveModifiers(
-          gameId: 'circuitguide',
-          levelIndex: _currentLevel,
-          pool: kCircuitGuideEndgamePool,
-          minActive: 2,
-          maxActive: 3,
-          smallGrid: isSmallGrid,
-        );
+        // COGNIQ-FIX:mod-unreachable
+        // Daily mode reaches this branch whenever its modifier is 'timer', and
+        // `_activeModifiers` already holds that modifier. The draw below used
+        // to run unguarded and overwrite it with a random endgame combo while
+        // the banner went on describing the modifier the daily had promised,
+        // so it is now confined to free play.
         if (_forcedModifier != null) {
           _activeModifiers = {_forcedModifier!};
+        } else if (_modsOn) {
+          _activeModifiers = RotationEngine.getActiveModifiers(
+            gameId: 'circuitguide',
+            levelIndex: _currentLevel,
+            pool: kCircuitGuideEndgamePool,
+            minActive: 2,
+            maxActive: 3,
+            smallGrid: isSmallGrid,
+          );
         }
-        
+
+
         final side = rng.nextInt(4);
         if (side == 0) {
           srcIdx = rng.nextInt(W);
@@ -421,7 +472,13 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
           // so only offer ones that act purely on presentation. Announcing
           // 'tortuosity' or 'decoyWires' here would name a modifier that then
           // did nothing, which is exactly the trap Sum Strike had fallen into.
-          if (_modsOn) {
+          // COGNIQ-FIX:mod-unreachable
+          // Reached by free play from the modifier start level up to
+          // `kCircuitGuideEndgameLevel`; the endgame branch above takes over
+          // from there, so both pools now genuinely rotate.
+          if (_forcedModifier != null) {
+            _activeModifiers = {_forcedModifier!};
+          } else if (_modsOn) {
             _activeModifiers = RotationEngine.getActiveModifiers(
               gameId: 'circuitguide',
               levelIndex: _currentLevel,
@@ -429,10 +486,8 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
               minActive: 1,
               maxActive: 2,
             );
-            if (_forcedModifier != null) {
-              _activeModifiers = {_forcedModifier!};
-            }
-          } else {
+          } else if (!_playDailyMode) {
+            // Never clear in daily mode: the daily's own modifier lives here.
             _activeModifiers = {};
           }
 
@@ -775,7 +830,7 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
       _gameOver = false;
       if (_quota) _applyQuotaBudget();
 
-      if (_isEndgame) {
+      if (_isTimerActive) {
         _timeLeft = 25 + (_gridSize * 10);
         _initialTime = _timeLeft;
         _timeBonusEarned = true;
@@ -1393,7 +1448,8 @@ class _CircuitGuideScreenState extends State<CircuitGuideScreen> {
                                       itemCount: _gridSize * _gridSize,
                                       itemBuilder: (context, idx) {
                                         final isNodeConnected = connected[idx];
-                                        final isRetro = _activeModifiers.contains('retro');
+                                        // COGNIQ-FIX:mod-getters
+                                        final isRetro = _isRetroActive;
                                         return AnimatedCircuitNode(
                                           type: _wireTypes[idx],
                                           index: idx,

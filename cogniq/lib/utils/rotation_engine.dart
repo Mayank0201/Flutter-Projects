@@ -28,6 +28,7 @@ class RotationEngine {
   }
 
   // COGNIQ-FIX:mod-start-map
+  // COGNIQ-FIX:mod-start-early
   /// Level at which each game's modifier layer switches on.
   ///
   /// Tuned to each game's board ramp: modifiers begin once the board has taken
@@ -39,40 +40,40 @@ class RotationEngine {
   /// level 1..19 and must still get their rule.
   static const Map<String, int> _modifierStartLevel = {
     // ================= grid puzzles =================
-    'bridges': 10,
-    'masyu': 10,
-    'sumstrike': 12,
-    'killersudoku': 12,
-    'spellingbee': 12,
-    'slitherlink': 12,
-    'hitori': 12,
-    'kakuro': 12,
-    'oddcolorout': 20,
-    'oddcolor': 20,
-    'sudoku': 20,
-    'mines': 30,
-    'minesweeper': 30,
-    'patternlock': 30,
-    'pattern_lock': 30,
-    'queens': 30,
-    'zip': 30,
-    'colorflood': 30,
-    'color_flood': 30,
+    'bridges': 6,
+    'masyu': 6,
+    'sumstrike': 8,
+    'killersudoku': 6,
+    'spellingbee': 8,
+    'slitherlink': 6,
+    'hitori': 6,
+    'kakuro': 6,
+    'oddcolorout': 8,
+    'oddcolor': 8,
+    'sudoku': 10,
+    'mines': 8,
+    'minesweeper': 8,
+    'patternlock': 10,
+    'pattern_lock': 10,
+    'queens': 5,
+    'zip': 8,
+    'colorflood': 8,
+    'color_flood': 8,
     // Chimp's 30-entry table reaches its hardest board (9 wide, 15 numbers)
     // at index 24 and holds it through 29, so modifiers begin at 24 to avoid
     // 6 dead levels.
     'chimp': 24,
-    'circuitguide': 14,
-    'circuit_guide': 14,
+    'circuitguide': 8,
+    'circuit_guide': 8,
     'cipherdecoder': 20,
-    'sandsort': 15,
-    'lightbeam': 15,
-    'untangle': 15,
-    'zenslide': 15,
-    'hue': 15,
-    'spectrum': 15,
-    'colourlink': 15,
-    'colour_link': 15,
+    'sandsort': 6,
+    'lightbeam': 6,
+    'untangle': 8,
+    'zenslide': 5,
+    'hue': 6,
+    'spectrum': 6,
+    'colourlink': 6,
+    'colour_link': 6,
     'nurikabe': 15,
     'skyscrapers': 15,
     'sequence': 3,
@@ -179,15 +180,26 @@ class RotationEngine {
       }
     }
 
-    // `smallGrid` used to force the maximum number of modifiers, on the logic
-    // that a small board late in the game is too easy. That reasoning does not
-    // hold now that modifiers begin around level 10-12, where a small board
-    // simply means an early level -- piling three modifiers onto a 4x4 makes
-    // the first taste of them far harsher than the last. Intensity is governed
-    // by the level ramp alone.
-    k = k.clamp(1, min(maxActive, p));
-    if (k < minActive && levelIndex >= start + singlesSpan + pairsSpan) {
-      k = min(minActive, p);
+    // COGNIQ-FIX:mod-smallgrid
+    // COGNIQ-FIX:mod-minactive
+    // Breadth of the active set is settled here. Precedence, highest first:
+    //   1. `smallGrid` -- a compact board carries at most ONE modifier, whatever
+    //      the tier ramp or `minActive` would otherwise ask for. Modifiers now
+    //      switch on as early as level 5-6, where the board is still tiny, and
+    //      stacking two or three on a 4x4 makes the player's first taste of them
+    //      harsher than the last. This override always wins.
+    //   2. `minActive` -- a floor, not a starting value. The singles tier is a
+    //      deliberate introduction phase (one modifier at a time until every one
+    //      has been seen), so the floor only takes effect once that tier is over.
+    //   3. `maxActive` and the pool size cap the result in every case.
+    final ceiling = min(maxActive, p);
+    if (smallGrid) {
+      k = 1;
+    } else {
+      k = k.clamp(1, ceiling);
+      if (levelIndex >= start + singlesSpan) {
+        k = max(k, min(minActive, ceiling));
+      }
     }
 
     final combos = _combinations(p, k);

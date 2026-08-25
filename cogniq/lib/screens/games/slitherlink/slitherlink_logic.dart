@@ -51,19 +51,63 @@ class SlitherlinkBoard {
 }
 
 class SlitherlinkLogic {
-  static int sizeFor(int level) => level < 5 ? 3 : (level < 12 ? 4 : 5);
+  // COGNIQ-FIX:curve-plateau
+  /// Board edge length for [level].
+  ///
+  /// Was `level < 5 ? 3 : (level < 12 ? 4 : 5)` -- capped at 5 from level 12,
+  /// which together with a [targetRegionFor] that ignored its `level` argument
+  /// and a `hideCount` in the screen that is a function of size alone meant
+  /// Slitherlink stopped progressing at level 12 and played identically forever
+  /// after.
+  ///
+  /// 7 is the ceiling because of how the screen lays the board out: it is a
+  /// square of `min(width, height * 0.7)` divided into `size` columns, and the
+  /// edge hit targets are `cellSpacing - 12` long by 24 wide. On a 375pt phone
+  /// the board is about 343px, so a 7x7 cell is 49px and an edge target is 37px
+  /// -- still comfortably tappable. An 8x8 would put it at 31px and a 9x9 at
+  /// 26px, at which point adjacent edges start competing for the same thumb.
+  static int sizeFor(int level) {
+    if (level < 5) return 3;
+    if (level < 12) return 4;
+    if (level < 25) return 5;
+    if (level < 45) return 6;
+    return 7;
+  }
 
-  /// Cells the loop encloses, as a fraction of the grid. Rises with level so
-  /// later boards have longer, more interesting loops.
+  // COGNIQ-FIX:curve-plateau
+  /// Cells the loop encloses. Rises with level so later boards have longer,
+  /// more interesting loops.
+  ///
+  /// The old body switched on `size` alone and never read `level`, so the doc
+  /// comment above it was simply false and every 5x5 board from level 12 up drew
+  /// its region from the same 10..14 bag. It is now a fraction of the grid that
+  /// climbs with the level, which means the loop keeps getting longer *within* a
+  /// board size as well as when the board grows -- and the boundary of the region
+  /// is exactly the loop the player has to find, so region size is the honest
+  /// difficulty knob here.
+  ///
+  /// The fraction runs 0.34 of the grid at level 0 to 0.56 at level 60 and holds
+  /// there. 0.56 is the old 5x5 top end (14/25) carried across every size, so no
+  /// board is asked to enclose a shape denser than one the generator is already
+  /// known to produce reliably; below about 0.3 the loop hugs one corner and
+  /// above about 0.6 the complement gets thin enough that the connectivity and
+  /// diagonal-pinch filters start rejecting most candidates.
+  ///
+  /// Early levels are deliberately near-unchanged: level 0 at 3x3 gives 3..4
+  /// against the old 3..5, level 6 at 4x4 gives 6..8 against 6..9.
   static int targetRegionFor(int size, int level, Random rng) {
-    switch (size) {
-      case 3:
-        return 3 + rng.nextInt(3); // 3..5
-      case 4:
-        return 6 + rng.nextInt(4); // 6..9
-      default:
-        return 10 + rng.nextInt(5); // 10..14
-    }
+    final area = size * size;
+    final clamped = level < 0 ? 0 : (level > 60 ? 60 : level);
+    final fraction = 0.34 + 0.22 * (clamped / 60.0);
+    final base = (area * fraction).round();
+    // Jitter scaled to the board, so two boards on the same level are not the
+    // same shape but a 3x3 is not handed a 5-cell swing.
+    final span = 1 + area ~/ 8;
+    final target = base + rng.nextInt(span);
+    // The region must leave the complement something to be: at `area` the loop
+    // is just the board border, and the generator's own filters reject far less
+    // than that anyway.
+    return target.clamp(3, area - 2);
   }
 
   // ------------------------------------------------------------- geometry

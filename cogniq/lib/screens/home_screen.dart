@@ -3001,26 +3001,6 @@ class _ProfileTab extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            _SectionHeader(title: 'Data Management'),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: context.bgCard,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: AppTheme.cardShadow,
-              ),
-              child: Column(
-                children: [
-                  _ProfileTile(
-                    icon: Icons.delete_outline,
-                    title: 'Clear All Saved Progress',
-                    titleColor: Colors.redAccent,
-                    onTap: () => _showResetDialog(context),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
             // The tour is shown once on first launch, so without a way back to
             // it a player who skipped can never read it again. This is that way
             // back, and the only one — the Profile tab is the settings surface
@@ -3071,62 +3051,6 @@ class _ProfileTab extends StatelessWidget {
       },
     );
   }
-
-  void _showResetDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.bgCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'Reset Progress?',
-          style: GoogleFonts.outfit(
-            fontWeight: FontWeight.w700,
-            color: context.textPrimary,
-          ),
-        ),
-        content: Text(
-          'This will clear all your level data and streaks. This action cannot be undone.',
-          style: GoogleFonts.outfit(color: context.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.outfit(
-                color: context.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              await settingsNotifier.resetAllProgress();
-              if (ctx.mounted) Navigator.pop(ctx);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('All progress has been reset'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-              }
-            },
-            child: Text(
-              'Reset',
-              style: GoogleFonts.outfit(
-                color: Colors.redAccent,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-
 }
 
 class _SectionHeader extends StatelessWidget {

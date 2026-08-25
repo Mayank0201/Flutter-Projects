@@ -65,6 +65,40 @@ class _SlitherlinkScreenState extends State<SlitherlinkScreen> {
   bool get _modsOn =>
       !_playDailyMode &&
       RotationEngine.hasModifiers('slitherlink', _currentLevel);
+
+  // COGNIQ-FIX:mod-desc-copy
+  /// One line of plain English per modifier, in the same shape Sudoku uses.
+  ///
+  /// Slitherlink shipped four working modifiers and explained exactly one of
+  /// them: the board fogged, magnified, timed out and faded with nothing on
+  /// screen saying why, which reads as a bug rather than a rule.
+  String _getModifierDescription(String mod) {
+    switch (mod) {
+      case 'timer':
+        return 'Close the loop before time runs out.';
+      case 'fog':
+        return 'Only the area around your finger stays lit.';
+      case 'zoom':
+        return 'The board is magnified with pan-and-scan enabled.';
+      case 'decay':
+        return 'Clues dim over time — tap one to read it again.';
+      default:
+        return '';
+    }
+  }
+
+  /// The caption above the board. Daily mode carries a single rule, so it is
+  /// described on its own; free play joins whatever the rotation picked.
+  String get _modifierBannerText {
+    if (_playDailyMode) return _getModifierDescription(_dailyModifierType);
+    if (!_modsOn) return '';
+    // Iterates the whole set rather than testing one modifier, so reading
+    // `_activeModifiers` directly here is the correct thing to do.
+    return _activeModifiers
+        .map(_getModifierDescription)
+        .where((d) => d.isNotEmpty)
+        .join(' · ');
+  }
   double _dailyRadius = 1.5;
   int _gridSize = 3; // 3, 4, or 5 cells
 
@@ -592,15 +626,16 @@ class _SlitherlinkScreenState extends State<SlitherlinkScreen> {
                                   ),
                                   textAlign: TextAlign.center,
                                 ),
-                                // `decay` is announced as well as applied. Its
-                                // own wrapping Text row inside the scroll view,
-                                // so it cannot overflow at any viewport.
-                                if (_isModActive('decay'))
+                                // COGNIQ-FIX:mod-desc-copy
+                                // Was a `decay`-only caption. Every pooled modifier is
+                                // announced now, through the same description table, in
+                                // its own wrapping Text row inside the scroll view so it
+                                // cannot overflow at any viewport.
+                                if (_modifierBannerText.isNotEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 4),
                                     child: Text(
-                                      'Fading Clues: clues dim over time — tap '
-                                      'one to read it again',
+                                      _modifierBannerText,
                                       style: GoogleFonts.outfit(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
@@ -678,11 +713,21 @@ class _SlitherlinkScreenState extends State<SlitherlinkScreen> {
                                                           '${_clues[i]}',
                                                           style:
                                                               GoogleFonts.spaceGrotesk(
+                                                                // COGNIQ-FIX:curve-plateau
+                                                                // 6x6 and 7x7
+                                                                // boards exist
+                                                                // now; a cell
+                                                                // is ~49px at
+                                                                // 7x7, so the
+                                                                // clue steps
+                                                                // down with it.
                                                                 fontSize:
                                                                     _gridSize ==
                                                                         3
                                                                     ? 20
-                                                                    : 16,
+                                                                    : (_gridSize <= 5
+                                                                        ? 16
+                                                                        : 14),
                                                                 fontWeight:
                                                                     FontWeight
                                                                         .bold,

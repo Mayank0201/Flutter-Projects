@@ -1210,9 +1210,15 @@ class _BridgesScreenState extends State<BridgesScreen> {
                           ),
                         ],
                         const SizedBox(height: 24),
-                        if (_activeModifiers.contains('zoom')) ...[
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                        if (_isZoomActive) ...[
+                          // COGNIQ-FIX:mod-deadeffect
+                          // Wrap, not Row: the two chips plus their gap
+                          // overflow a narrow phone by ~44px once `zoom` is
+                          // drawn, and modifiers now start far earlier.
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 12,
+                            runSpacing: 8,
                             children: [
                               ChoiceChip(
                                 label: Text('Draw Bridges', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
@@ -1220,7 +1226,6 @@ class _BridgesScreenState extends State<BridgesScreen> {
                                 onSelected: (val) => setState(() => _isPanMode = !val),
                                 selectedColor: AppTheme.dustyMauve.withOpacity(0.2),
                               ),
-                              const SizedBox(width: 12),
                               ChoiceChip(
                                 label: Text('Scroll Grid', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
                                 selected: _isPanMode,
@@ -1274,7 +1279,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                               ),
                             );
 
-                            if (_activeModifiers.contains('zoom')) {
+                            if (_isZoomActive) {
                               boardWidget = SizedBox(
                                 width: boardSize,
                                 height: boardSize,

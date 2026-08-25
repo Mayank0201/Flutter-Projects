@@ -209,6 +209,8 @@ class _ColorFloodScreenState extends State<ColorFloodScreen> {
       _seedFromCenter = false;
       bool hasObstacles = false;
 
+      // Board difficulty only (grid size, colour count, move budget). These
+      // thresholds are difficulty tuning, NOT a modifier gate.
       if (!_playDailyMode && _currentLevel >= 30) { // not-a-modifier-gate
         // First determine grid size and colour count
         if (_currentLevel >= 30 && _currentLevel < 45) { // not-a-modifier-gate
@@ -216,34 +218,34 @@ class _ColorFloodScreenState extends State<ColorFloodScreen> {
           _numColors = 6;
         } else if (_currentLevel >= 45 && _currentLevel < 60) {
           _gridSize = 9;
-          _numColors = 6 + min(2, (_currentLevel - 45) ~/ 7); // 7-8 colors
+          _numColors = 6 + min(2, (_currentLevel - 45) ~/ 7); // 6-8 colors
         } else if (_currentLevel >= 60 && _currentLevel < 75) {
-          _gridSize = 9;
-          _numColors = 7;
-        } else if (_currentLevel >= 75 && _currentLevel < 90) {
-          _gridSize = 9;
-          _numColors = 7;
-        } else {
-          // Rotation (L90+)
+          // COGNIQ-FIX:curve-plateau
+          // Was 7 colours here and 7 colours again in the 75-90 band -- two
+          // character-identical branches, 30 flat levels. The board cannot grow
+          // (gridSize is pinned at 9 from level 30 on), so the colour count is
+          // what has to climb: this band now continues the 45-60 ramp at 8.
           _gridSize = 9;
           _numColors = 8;
+        } else if (_currentLevel >= 75 && _currentLevel < 90) {
+          // COGNIQ-FIX:curve-plateau
+          // Genuinely harder than 60-75: same colour count, but obstacles now
+          // actually appear (see hasObstacles below) with a density that ramps
+          // across the band.
+          _gridSize = 9;
+          _numColors = 8;
+          hasObstacles = true;
+        } else {
+          // Rotation (L90+): obstacles at the highest density band.
+          _gridSize = 9;
+          _numColors = 8;
+          hasObstacles = true;
         }
-
-        _activeModifiers = RotationEngine.getActiveModifiers(
-          gameId: 'colorflood',
-          levelIndex: _currentLevel,
-          pool: ['centerSeed', 'timer', 'chaos'],
-          minActive: 2,
-          maxActive: 3,
-          smallGrid: (_gridSize <= 6),
-        );
 
         minOptimal = 6 + ((_gridSize + _numColors) * 1.5).round();
         maxOptimal = minOptimal + 2;
 
         buffer = 0;
-        _seedFromCenter = _isCenterSeedActive;
-        hasObstacles = false;
       } else {
         _activeModifiers = _playDailyMode && _dailyModifierType.isNotEmpty ? {_dailyModifierType} : {};
         if (_currentLevel < 5) {
@@ -279,6 +281,25 @@ class _ColorFloodScreenState extends State<ColorFloodScreen> {
         }
       }
 
+      // COGNIQ-FIX:mod-start-early
+      // Modifier selection is gated on RotationEngine's per-game start level
+      // (via _modsOn -> RotationEngine.hasModifiers), never on a literal 30.
+      // Daily mode keeps its own modifier, assigned above.
+      if (_modsOn) {
+        _activeModifiers = RotationEngine.getActiveModifiers(
+          gameId: 'colorflood',
+          levelIndex: _currentLevel,
+          pool: ['centerSeed', 'timer', 'chaos'],
+          minActive: 2,
+          maxActive: 3,
+          smallGrid: (_gridSize <= 6),
+        );
+        if (_forcedModifier != null) {
+          _activeModifiers = {_forcedModifier!};
+        }
+        _seedFromCenter = _isCenterSeedActive;
+      }
+
       final rng = _playDailyMode
           ? Random()
           : RotationEngine.getDeterminism('colorflood', _currentLevel);
@@ -295,11 +316,16 @@ class _ColorFloodScreenState extends State<ColorFloodScreen> {
         List<int> testGrid;
         
         if (hasObstacles) {
+          bool connected = false;
+          int obstacleTries = 0;
           do {
             testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
             double obstacleChance = 0.08 + rng.nextDouble() * 0.08;
             if (_currentLevel >= 75 && _currentLevel < 90) {
               obstacleChance = 0.08 + 0.08 * ((_currentLevel - 75) / 14.0);
+            } else if (_currentLevel >= 90) {
+              // Rotation band sits above the top of the 75-90 ramp.
+              obstacleChance = 0.16 + rng.nextDouble() * 0.06;
             }
             for (int i = 0; i < testGrid.length; i++) {
               if (i == _seedCell) continue;
@@ -307,7 +333,14 @@ class _ColorFloodScreenState extends State<ColorFloodScreen> {
                 testGrid[i] = _numColors;
               }
             }
-          } while (!_isFloodConnected(testGrid, _gridSize, _numColors));
+            connected = _isFloodConnected(testGrid, _gridSize, _numColors);
+            obstacleTries++;
+          } while (!connected && obstacleTries < 30);
+          if (!connected) {
+            // Never spin forever on an unlucky density: fall back to a plain
+            // board for this attempt rather than looping.
+            testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
+          }
         } else {
           testGrid = List.generate(_gridSize * _gridSize, (_) => rng.nextInt(_numColors));
         }

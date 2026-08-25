@@ -297,29 +297,64 @@ class TrailCatalog {
     return isEarnedByClears(styleId, clears);
   }
 
-  /// Evaluates star totals and lifetime clears to find any star-locked trails
-  /// newly earned and not yet notified.
-  static Future<List<({String id, String name, String emoji})>> checkStarUnlocks() async {
+  // COGNIQ-FIX:trail-toast
+  /// Display name and emoji for every trail that unlocks itself, in the order
+  /// a player meets them.
+  ///
+  /// The three clear-count trails used to live in HintManager, announced by
+  /// `globalCount == 30 || globalCount == 100 || globalCount == 250` with no
+  /// "already told them" flag. Exact equality means a single missed tick loses
+  /// the toast forever: kill the app between the count being written and the
+  /// toast rendering, or advance the count by more than one, and the milestone
+  /// is behind you. The trail itself was always safe -- [isEarnedByClears] is a
+  /// `>=` -- so the player kept it and was simply never told they had it.
+  ///
+  /// They live here rather than there so there is ONE unlock-notification
+  /// mechanism: a threshold test plus the per-style `trail_unlocked_toast_<id>`
+  /// flag, which is the pattern the star trails were already using correctly.
+  static const Map<String, ({String name, String emoji})> _unlockToastData = {
+    'accent': (name: 'Game Accent', emoji: '🎯'),
+    'sparkle': (name: 'Sparkle Stars', emoji: '✨'),
+    'pastel': (name: 'Pastel Glow', emoji: '🌸'),
+    'morning_mist': (name: 'Morning Mist', emoji: '🌫️'),
+    'tide_line': (name: 'Tide Line', emoji: '🌊'),
+  };
+
+  // COGNIQ-FIX:trail-toast
+  /// Every trail newly earned for free and not yet announced.
+  ///
+  /// Safe to call as often as you like and from anywhere: [isEarnedFree] is a
+  /// threshold that can only go false -> true, and the SharedPreferences flag is
+  /// what makes each trail announce exactly once. Nothing here can be missed by
+  /// arriving late, which is the whole point of the change.
+  static Future<List<({String id, String name, String emoji})>>
+      checkTrailUnlocks() async {
     final prefs = await SharedPreferences.getInstance();
     final stars = StarCounts.fromPrefs(prefs);
     final clears = prefs.getInt(PrefsKeys.globalLevelClearedCount) ?? 0;
     final newlyUnlocked = <({String id, String name, String emoji})>[];
 
-    const starTrailData = <String, ({String name, String emoji})>{
-      'morning_mist': (name: 'Morning Mist', emoji: '🌫️'),
-      'tide_line': (name: 'Tide Line', emoji: '🌊'),
-    };
-
-    for (final entry in starTrailData.entries) {
+    for (final entry in _unlockToastData.entries) {
       final styleId = entry.key;
+      // Same key string as before -- other code reads it.
       final key = 'trail_unlocked_toast_$styleId';
       if (prefs.getBool(key) == true) continue;
 
-      if (isEarnedByStars(styleId: styleId, stars: stars, clears: clears)) {
+      // One predicate for both families: clear-count trails resolve to
+      // `clears >= required`, star trails to their star/clears routes.
+      if (isEarnedFree(styleId: styleId, clears: clears, stars: stars)) {
         await prefs.setBool(key, true);
-        newlyUnlocked.add((id: styleId, name: entry.value.name, emoji: entry.value.emoji));
+        newlyUnlocked.add(
+            (id: styleId, name: entry.value.name, emoji: entry.value.emoji));
       }
     }
     return newlyUnlocked;
   }
+
+  /// Kept under the name daily_challenge_manager already calls. It now covers
+  /// the clear-count trails too, which is correct: a daily clear raises the same
+  /// global clear count, so that call site always had reason to notice an
+  /// `accent`/`sparkle`/`pastel` unlock and previously could not.
+  static Future<List<({String id, String name, String emoji})>>
+      checkStarUnlocks() => checkTrailUnlocks();
 }

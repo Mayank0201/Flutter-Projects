@@ -412,6 +412,8 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
     Set<String> activeMods = {};
     bool isSmallGrid = false;
 
+    // Board size only. These thresholds are difficulty tuning, NOT a modifier
+    // gate -- the modifier gate lives in its own block below.
     if (!_isDailyMode && levelIndex >= 30) { // not-a-modifier-gate
       if (levelIndex >= 75) {
         gridSize = 8 + ((levelIndex - 75) % 2);
@@ -420,15 +422,6 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       } else {
         gridSize = 6;
       }
-      isSmallGrid = (gridSize <= 5);
-      activeMods = RotationEngine.getActiveModifiers(
-        gameId: 'zip',
-        levelIndex: levelIndex,
-        pool: kGridPathModifierPool,
-        minActive: 2,
-        maxActive: 3,
-        smallGrid: isSmallGrid,
-      );
     } else if (levelIndex < 5) {
       gridSize = 3;
     } else if (levelIndex < 15) {
@@ -437,6 +430,22 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       gridSize = 5;
     } else {
       gridSize = 6;
+    }
+
+    isSmallGrid = (gridSize <= 5);
+
+    // COGNIQ-FIX:mod-start-early
+    // Modifier selection is gated on the per-game start level in RotationEngine,
+    // never on a literal 30. Hardcoding 30 here made the map value unreachable.
+    if (!_isDailyMode && RotationEngine.hasModifiers('zip', levelIndex)) {
+      activeMods = RotationEngine.getActiveModifiers(
+        gameId: 'zip',
+        levelIndex: levelIndex,
+        pool: kGridPathModifierPool,
+        minActive: 2,
+        maxActive: 3,
+        smallGrid: isSmallGrid,
+      );
     }
 
     if (_forcedModifier != null) {
@@ -462,20 +471,25 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       // level from 30 to 74 resolved to a flat 8. // not-a-modifier-gate
       final int band = levelIndex >= 75 ? 2 : (levelIndex >= 50 ? 1 : 0);
       waypointCount = minWaypoints + band + (levelIndex % 2); // 8-9, 9-10, 10-11
-
-      if (activeMods.contains('waypointSparsity')) {
-        // Sparse must be strictly sparser than the level's own baseline, and must
-        // still respect the floor -- otherwise it is a no-op.
-        waypointCount = (waypointCount - 2).clamp(minWaypoints, waypointCount);
-      }
     } else if (levelIndex < 5) {
       waypointCount = 2 + (levelIndex ~/ 2);
     } else if (levelIndex < 15) {
-      waypointCount = 3 + ((levelIndex - 5) ~/ 3);
+      // COGNIQ-FIX:curve-plateau
+      // Was `3 + ((levelIndex - 5) ~/ 3)` -> 3..6, every value at or under the
+      // floor of 6, so levels 5-14 were TEN identical 6-waypoint boards.
+      // Expressed relative to minWaypoints it now climbs 6,6,6,7,7,7,8,8,8,9.
+      waypointCount = minWaypoints + ((levelIndex - 5) ~/ 3);
     } else if (levelIndex < 30) {
-      waypointCount = 5 + ((levelIndex - 15) ~/ 4);
+      // COGNIQ-FIX:curve-plateau
+      // Was `5 + ((levelIndex - 15) ~/ 4)` -> 5..7 against a floor of 7, so
+      // levels 15-26 were TWELVE identical boards. Now climbs 7 -> 11.
+      waypointCount = minWaypoints + ((levelIndex - 15) ~/ 3);
     } else {
-      waypointCount = 6 + ((levelIndex - 30) ~/ 5);
+      // Daily-mode path for level >= 30 (gridSize 6, floor 8). Was
+      // `6 + ((levelIndex - 30) ~/ 5)`, which stayed under the floor until
+      // level 40 and flattened daily levels 30-39.
+      // COGNIQ-FIX:curve-plateau
+      waypointCount = minWaypoints + ((levelIndex - 30) ~/ 5);
     }
 
     if (levelIndex >= 5) {
@@ -484,6 +498,22 @@ class _GridPathScreenState extends State<GridPathScreen> with SingleTickerProvid
       }
     }
     waypointCount = waypointCount.clamp(2, (gridSize * gridSize) - 2);
+
+    // COGNIQ-FIX:mod-deadeffect
+    // waypointSparsity used to sit inside the `levelIndex >= 30` branch AND
+    // clamp its floor to minWaypoints, so on every level whose baseline already
+    // equalled minWaypoints it removed nothing at all. It now lives outside the
+    // level-30 branch (so it works from the map's start level onwards) and is
+    // applied after the floor, with its own lower bound one below minWaypoints
+    // but never under 4 -- guaranteeing it always removes at least one waypoint.
+    if (activeMods.contains('waypointSparsity') && waypointCount > 4) {
+      final int sparseFloor = (minWaypoints - 1) < 4 ? 4 : (minWaypoints - 1);
+      int sparse = waypointCount - 2;
+      if (sparse < sparseFloor) sparse = sparseFloor;
+      if (sparse >= waypointCount) sparse = waypointCount - 1;
+      if (sparse < 4) sparse = 4;
+      waypointCount = sparse;
+    }
 
     List<(int, int)> path = [];
     final successfulWalls = <String>{};

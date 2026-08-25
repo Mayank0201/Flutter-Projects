@@ -81,6 +81,21 @@ class _MasyuScreenState extends State<MasyuScreen> {
   bool get _modsOn =>
       !_playDailyMode && RotationEngine.hasModifiers('masyu', _currentLevel);
 
+  // COGNIQ-FIX:mod-deadeffect
+  // `zoom` had no implementation at all: `_isZoomActive` was declared and read
+  // nowhere, and there was no InteractiveViewer in the file, so the banner
+  // promised "Grid is magnified with pan-and-scan navigation" and nothing
+  // happened. Implemented here the way Star Battle does it -- a fixed 1.4x
+  // InteractiveViewer plus a Draw/Scroll toggle, because the board is drawn
+  // with pan gestures and panning cannot share them with drawing.
+  bool _isPanMode = false;
+
+  /// Held in state rather than rebuilt inside build(): a fresh controller on
+  /// every frame would leak one per rebuild and snap the player's pan position
+  /// back to the start whenever the board changed.
+  final TransformationController _zoomController =
+      TransformationController(Matrix4.identity()..scale(1.4));
+
   bool _timeBonusEarned = false;
 
   // Drag loop variables
@@ -129,6 +144,7 @@ class _MasyuScreenState extends State<MasyuScreen> {
   void dispose() {
     _gameTimer?.cancel();
     _dragPositionNotifier.dispose();
+    _zoomController.dispose();
     super.dispose();
   }
 
@@ -285,6 +301,12 @@ class _MasyuScreenState extends State<MasyuScreen> {
         _activeModifiers.add(_dailyModifierType);
       }
     }
+
+    // COGNIQ-FIX:mod-deadeffect
+    // A fresh board starts in Draw mode and centred, so a pan left over from
+    // the previous level cannot swallow the first stroke on this one.
+    _isPanMode = false;
+    _zoomController.value = Matrix4.identity()..scale(1.4);
 
     _hiddenPearls.clear();
     if (_isHiddenPearlsActive) {
@@ -1141,44 +1163,103 @@ class _MasyuScreenState extends State<MasyuScreen> {
                             ),
                           ),
                         ],
-                        RepaintBoundary(
-                          child: Container(
-                            width: boardSize,
-                            height: boardSize,
-                            decoration: BoxDecoration(
-                              color: context.bgCard,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: context.textMuted.withAlpha(30)),
-                            ),
-                            child: FogOverlay(
-                              // Also honours the campaign 'fog' modifier, not
-                              // just the daily one.
-                              enabled: _isFogActive,
-                              radius: cellSpacing * _dailyRadius,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: GestureDetector(
-                                  onPanStart: (d) => _onPanStart(d, cellSpacing, origin, boardSize),
-                                  onPanUpdate: (d) => _onPanUpdate(d, cellSpacing, origin, boardSize),
-                                  onPanEnd: _onPanEnd,
-                                  child: CustomPaint(
-                                    size: Size(boardSize, boardSize),
-                                    painter: _MasyuPainter(
-                                      hiddenPearls: _hiddenPearls,
-                                      gridSize: _gridSize,
-                                      grid: _grid,
-                                      activeEdges: _activeEdges,
-                                      cellSpacing: cellSpacing,
-                                      origin: origin,
-                                      dragPath: _dragPath,
-                                      dragPosition: _dragPositionNotifier,
-                                      hintIdx: _hintIdx,
+                        // COGNIQ-FIX:mod-deadeffect
+                        // Wrap, not Row: the pair is wider than a small phone,
+                        // and both chips have to stay tappable for `zoom` to
+                        // be playable at all.
+                        if (_isZoomActive) ...[
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 12,
+                            runSpacing: 8,
+                            children: [
+                              ChoiceChip(
+                                label: Text('Draw Loop', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                                selected: !_isPanMode,
+                                onSelected: (val) => setState(() => _isPanMode = !val),
+                                selectedColor: AppTheme.dustyMauve.withOpacity(0.2),
+                              ),
+                              ChoiceChip(
+                                label: Text('Scroll Grid', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                                selected: _isPanMode,
+                                onSelected: (val) => setState(() => _isPanMode = val),
+                                selectedColor: AppTheme.dustyMauve.withOpacity(0.2),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        Builder(
+                          builder: (context) {
+                            Widget boardWidget = RepaintBoundary(
+                              child: Container(
+                                width: boardSize,
+                                height: boardSize,
+                                decoration: BoxDecoration(
+                                  color: context.bgCard,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: context.textMuted.withAlpha(30)),
+                                ),
+                                child: FogOverlay(
+                                  // Also honours the campaign 'fog' modifier, not
+                                  // just the daily one.
+                                  enabled: _isFogActive,
+                                  radius: cellSpacing * _dailyRadius,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: GestureDetector(
+                                      // COGNIQ-FIX:mod-deadeffect
+                                      // In Scroll mode the drag belongs to the
+                                      // InteractiveViewer below, so the loop
+                                      // handlers step aside.
+                                      onPanStart: _isPanMode
+                                          ? null
+                                          : (d) => _onPanStart(d, cellSpacing, origin, boardSize),
+                                      onPanUpdate: _isPanMode
+                                          ? null
+                                          : (d) => _onPanUpdate(d, cellSpacing, origin, boardSize),
+                                      onPanEnd: _isPanMode ? null : _onPanEnd,
+                                      child: CustomPaint(
+                                        size: Size(boardSize, boardSize),
+                                        painter: _MasyuPainter(
+                                          hiddenPearls: _hiddenPearls,
+                                          gridSize: _gridSize,
+                                          grid: _grid,
+                                          activeEdges: _activeEdges,
+                                          cellSpacing: cellSpacing,
+                                          origin: origin,
+                                          dragPath: _dragPath,
+                                          dragPosition: _dragPositionNotifier,
+                                          hintIdx: _hintIdx,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
+                            );
+
+                            // COGNIQ-FIX:mod-deadeffect
+                            // The magnification `zoom` advertises. Scale is
+                            // pinned so the board cannot be zoomed back out to
+                            // a size the modifier was meant to deny.
+                            if (_isZoomActive) {
+                              boardWidget = SizedBox(
+                                width: boardSize,
+                                height: boardSize,
+                                child: InteractiveViewer(
+                                  panEnabled: _isPanMode,
+                                  scaleEnabled: false,
+                                  minScale: 1.4,
+                                  maxScale: 1.4,
+                                  transformationController: _zoomController,
+                                  child: boardWidget,
+                                ),
+                              );
+                            }
+                            return boardWidget;
+                          },
                         ),
                       ],
                     ),

@@ -1224,20 +1224,6 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       } else {
         n = 10;
       }
-      // `silence` must never join this list: `ratchet` judges a star the
-      // instant it lands, `silence` defers every judgement to a Submit.
-      final pool = List<String>.from(kStarBattleModifierPool);
-      if (n > 7) {
-        pool.add('twoStarMode');
-      }
-      _activeModifiers = RotationEngine.getActiveModifiers(
-        gameId: 'queens',
-        levelIndex: _levelIndex,
-        pool: pool,
-        minActive: 2,
-        maxActive: 4,
-        smallGrid: (n <= 6),
-      );
     } else {
       if (_levelIndex < 5) {
         n = 5;
@@ -1254,7 +1240,28 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
       }
     }
 
-    if (_activeModifiers.contains('glitch')) {
+    // COGNIQ-FIX:mod-start-early
+    // Modifier selection is gated on RotationEngine's per-game start level
+    // (via _modsOn -> RotationEngine.hasModifiers), never on a literal 30.
+    // The board-size bands above keep their own thresholds.
+    if (_modsOn) {
+      // `silence` must never join this list: `ratchet` judges a star the
+      // instant it lands, `silence` defers every judgement to a Submit.
+      final pool = List<String>.from(kStarBattleModifierPool);
+      if (n > 7) {
+        pool.add('twoStarMode');
+      }
+      _activeModifiers = RotationEngine.getActiveModifiers(
+        gameId: 'queens',
+        levelIndex: _levelIndex,
+        pool: pool,
+        minActive: 2,
+        maxActive: 4,
+        smallGrid: (n <= 6),
+      );
+    }
+
+    if (_isGlitchActive) {
       _glitchTimer = Timer.periodic(const Duration(milliseconds: 500), (t) {
         if (mounted) {
           setState(() {
@@ -1269,7 +1276,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
         : RotationEngine.getDeterminism('queens', _levelIndex);
 
     _level = generateProceduralLevel(n, rand);
-    if (_activeModifiers.contains('mirror')) {
+    if (_isMirrorActive) {
       final mirroredRegions = List.generate(_level.regions.length, (r) => List<int>.from(_level.regions[r].reversed));
       _level = QueensLevel(n: _level.n, regions: mirroredRegions);
     }
@@ -1802,7 +1809,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                         ),
                         const SizedBox(height: 10),
                       ],
-                      if (_activeModifiers.contains('zoom')) ...[
+                      if (_isZoomActive) ...[
                         // Wrap, not Row: the pair is wider than a small phone,
                         // and both chips have to stay tappable for `zoom` to
                         // be playable at all.
@@ -1835,7 +1842,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                               borderRadius: BorderRadius.circular(12),
                               child: RepaintBoundary(
                                 child: Transform.translate(
-                                  offset: (_activeModifiers.contains('glitch') && _glitchTick)
+                                  offset: (_isGlitchActive && _glitchTick)
                                       ? Offset((Random().nextDouble() - 0.5) * 8, (Random().nextDouble() - 0.5) * 8)
                                       : Offset.zero,
                                   child: GestureDetector(
@@ -1946,7 +1953,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                                                   Color(0xFF63242F), // Dark Muted Rose
                                                   Color(0xFF1E293B), // Dark Muted Slate
                                                 ];
-                                                final regionColor = (_activeModifiers.contains('glitch') && _glitchTick)
+                                                final regionColor = (_isGlitchActive && _glitchTick)
                                                     ? (context.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))
                                                     : (context.isDarkMode 
                                                         ? regionColorsDark[regionId % regionColorsDark.length]
@@ -2049,7 +2056,7 @@ class _StarBattleScreenState extends State<StarBattleScreen> {
                               ),
                             );
 
-                            if (_activeModifiers.contains('zoom')) {
+                            if (_isZoomActive) {
                               boardWidget = SizedBox(
                                 width: maxDim,
                                 height: maxDim,

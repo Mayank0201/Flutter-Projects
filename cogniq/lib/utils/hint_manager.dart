@@ -174,38 +174,19 @@ class HintManager {
     }
 
     // COGNIQ-FIX:trail-toast
-    // Check and trigger swipe trail unlock toasts (milestones ladder: 30, 100, 250)
-    if (globalCount == 30 || globalCount == 100 || globalCount == 250) {
-      String name = "";
-      String emoji = "";
-      String styleId = "";
-      
-      if (globalCount == 30) {
-        name = "Game Accent";
-        emoji = "🎯";
-        styleId = "accent";
-      } else if (globalCount == 100) {
-        name = "Sparkle Stars";
-        emoji = "✨";
-        styleId = "sparkle";
-      } else if (globalCount == 250) {
-        name = "Pastel Glow";
-        emoji = "🌸";
-        styleId = "pastel";
-      }
-
+    // Was two mechanisms. This one tested `globalCount == 30 || == 100 || == 250`
+    // with no "already notified" flag, so a milestone that ticked past while the
+    // app was being killed -- or a count that ever advanced by more than one --
+    // was gone for good; the player kept the trail (isEarnedByClears is a `>=`)
+    // and was simply never told. There is now a single call, and TrailCatalog
+    // answers it with a threshold test plus a per-style
+    // `trail_unlocked_toast_<id>` flag, so nothing can be missed by arriving
+    // late and nothing can be announced twice.
+    final newTrails = await TrailCatalog.checkTrailUnlocks();
+    if (newTrails.isNotEmpty) {
       final context = navigatorKey.currentContext;
       if (context != null && context.mounted) {
-        TrailUnlockToast.show(context, name, emoji, styleId);
-      }
-    }
-
-    // Also check for lifetime clears route of star trails (400, 700)
-    final newStarTrails = await TrailCatalog.checkStarUnlocks();
-    if (newStarTrails.isNotEmpty) {
-      final context = navigatorKey.currentContext;
-      if (context != null && context.mounted) {
-        for (final t in newStarTrails) {
+        for (final t in newTrails) {
           TrailUnlockToast.show(context, t.name, t.emoji, t.id);
         }
       }

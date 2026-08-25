@@ -650,7 +650,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
                         // Wrapping rather than replacing keeps every gesture inside
                         // the grid working unchanged.
                         child: _ZoomWrap(
-                          enabled: _isModActive('zoom'),
+                          enabled: _isZoomActive,
                           child: RepaintBoundary(
                           child: Container(
                             width: maxBoardSide,
@@ -661,7 +661,7 @@ class _KakuroScreenState extends State<KakuroScreen> {
                               border: Border.all(color: context.textMuted.withAlpha(40)),
                             ),
                             child: FogOverlay(
-                              enabled: _isModActive('fog'),
+                              enabled: _isFogActive,
                               radius: (maxBoardSide / _gridSize) * _dailyRadius,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),

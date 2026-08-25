@@ -610,7 +610,7 @@ class _HitoriScreenState extends State<HitoriScreen> {
                               // Wrapping rather than replacing keeps every tap
                               // handler intact.
                               _ZoomWrap(
-                                enabled: _isModActive('zoom'),
+                                enabled: _isZoomActive,
                                 child: RepaintBoundary(
                                   child: Container(
                                     width: boardSize,
@@ -621,7 +621,7 @@ class _HitoriScreenState extends State<HitoriScreen> {
                                       border: Border.all(color: context.textMuted.withAlpha(40)),
                                     ),
                                     child: FogOverlay(
-                                      enabled: _isModActive('fog'),
+                                      enabled: _isFogActive,
                                       radius: (boardSize / _gridSize) * _dailyRadius,
                                       child: ClipRRect(
                                         borderRadius: BorderRadius.circular(16),

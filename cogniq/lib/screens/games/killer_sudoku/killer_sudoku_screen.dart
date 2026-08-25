@@ -157,8 +157,12 @@ class _KillerSudokuScreenState extends State<KillerSudokuScreen> {
     switch (mod) {
       case 'cageSize':
         return 'Cages are larger and combine more cells.';
+      // COGNIQ-FIX:mod-desc-copy
+      // Said "Fewer cage sums are provided upfront", which describes
+      // `wildcard`. This modifier changes `numGivens` -- the digits already
+      // filled in on the board -- and never touches a sum.
       case 'clueThinning':
-        return 'Fewer cage sums are provided upfront.';
+        return 'Fewer digits are filled in for you at the start.';
       case 'timer':
         return 'Solve the puzzle before the timer runs out.';
       case 'spy':
@@ -229,12 +233,18 @@ class _KillerSudokuScreenState extends State<KillerSudokuScreen> {
       } else if (_currentLevel < 30) { // not-a-modifier-gate
         _gridSize = 6;
         maxCageSize = 4;
-        // Givens thin out across the tier: 2, 1, then none.
-        numGivens = max(0, 2 - ((_currentLevel - 16) ~/ 5));
+        // COGNIQ-FIX:mod-deadeffect
+        // Givens thin out across the tier: 2, then 1. The ramp used to bottom
+        // out at none from level 26 on, which left `clueThinning` -- whose
+        // whole job is to take a given away -- with nothing to remove on
+        // levels 26-49. One given is now the campaign floor, so the modifier
+        // always has something to strip and the levels it is absent from stay
+        // distinguishable from the ones it is on.
+        numGivens = max(1, 2 - ((_currentLevel - 16) ~/ 5));
       } else if (_currentLevel < 50) {
         _gridSize = 6;
         maxCageSize = 5;
-        numGivens = 0;
+        numGivens = 1; // COGNIQ-FIX:mod-deadeffect (was 0; see the tier above)
       } else {
         _gridSize = 9;
         maxCageSize = 4;
@@ -263,11 +273,25 @@ class _KillerSudokuScreenState extends State<KillerSudokuScreen> {
       if (_forcedModifier != null) {
         _activeModifiers = {_forcedModifier!};
       }
+      // COGNIQ-FIX:mod-inverted
+      // Was an absolute `maxCageSize = _gridSize == 9 ? 5 : 4`, which sat at
+      // or below the tier baseline: on levels 16-29 the baseline was already
+      // 4, so the modifier was a no-op, and on levels 30-49 the baseline was
+      // 5, so it SHRANK cages to 4 and made the level easier -- the opposite
+      // of what "Cages are larger" promises. It is now relative to whatever
+      // the level would have had, so it can only ever grow a cage.
       if (_isModActive('cageSize')) {
-        maxCageSize = _gridSize == 9 ? 5 : 4;
+        final int cageCap = _gridSize <= 4 ? 4 : 6;
+        maxCageSize = min(cageCap, maxCageSize + 1);
       }
+      // COGNIQ-FIX:mod-deadeffect
+      // Was an absolute `numGivens = 0`, which the ramp had already reached on
+      // its own from level 26 up, so across levels 26-49 the modifier changed
+      // nothing. It now takes one given away from whatever the level would
+      // have had, and the ramp above keeps a floor of one given so there is
+      // always one to take.
       if (_isModActive('clueThinning')) {
-        numGivens = 0;
+        numGivens = max(0, numGivens - 1);
       }
     }
 

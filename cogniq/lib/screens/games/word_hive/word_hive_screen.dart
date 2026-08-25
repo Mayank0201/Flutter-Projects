@@ -481,7 +481,13 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   bool _isModActive(String name) {
     if (_forcedModifier == name) return true;
     if (_playDailyMode) return _dailyModifierType == name;
-    return _levelIndex >= RotationEngine.modifierStartLevel('wordhive') &&
+    // COGNIQ-FIX:mod-active-helper
+    // Was 'wordhive', which is not a key in RotationEngine's start-level map,
+    // so it silently fell back to the default of 15 while `_modsOn` and
+    // `getActiveModifiers` both use 'spellingbee' (8). On levels 12-14 the
+    // engine filled `_activeModifiers` and the banner announced a modifier,
+    // yet every gameplay getter below returned false.
+    return _levelIndex >= RotationEngine.modifierStartLevel('spellingbee') &&
         _activeModifiers.contains(name);
   }
 
@@ -489,6 +495,7 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
   bool get _isWhisper => _foundWords.length < 5 && _isModActive('whisper');
   bool get _isSpy => _isModActive('spy');
   bool get _isEndgame => _isModActive('timer');
+  bool get _isMinimal => _isModActive('minimal');
   bool get _hasWhisperAndTimer => _isModActive('whisper') && _isModActive('timer');
 
   /// `momentum`: the combo chain for the level currently on screen.
@@ -803,7 +810,8 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
 
     setState(() {
       _hintCount = newCount;
-      final bool isMinimal = _activeModifiers.contains('minimal');
+      // COGNIQ-FIX:mod-getters
+      final bool isMinimal = _isMinimal;
       final clue = (_isWhisper || isMinimal) ? '?' : targetWord!.substring(0, 1).toUpperCase();
       _message = isMinimal
           ? 'Hint: Try a word with ${targetWord!.length} letters'
@@ -839,9 +847,14 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       if (_forcedModifier != null) {
         _activeModifiers = {_forcedModifier!};
       }
-      if (_activeModifiers.contains('whisper') && _activeModifiers.contains('timer')) {
-        _activeModifiers.remove('timer');
-      }
+      // COGNIQ-FIX:mod-deadeffect
+      // `whisper` + `timer` used to be broken up here by dropping 'timer',
+      // which made `_hasWhisperAndTimer` -- and the two compensations built
+      // for it, the shorter minimum word length and the target cap of 8 --
+      // permanently unreachable. The combination is allowed to stand now, so
+      // those compensations are the thing that keeps it fair rather than dead
+      // code. `_isWhisper` also stops hiding the centre letter after five
+      // finds, so the pair is hard rather than unfair.
     } else {
       _activeModifiers = {};
       if (_playDailyMode && _dailyModifierType.isNotEmpty) {
@@ -876,7 +889,8 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
       _spyScrambledWords = [];
     }
 
-    if (_isModActive('timer')) {
+    // COGNIQ-FIX:mod-getters
+    if (_isEndgame) {
       _timeLeft = 45 + (_targetCount * 15);
       _initialTime = _timeLeft;
       _timeBonusEarned = true;
@@ -1178,27 +1192,43 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
         title: const GameTitle('Word Hive'),
         centerTitle: true,
         actions: [
+          // COGNIQ-FIX:layout-overflow
+          // The app bar row overflowed by 21px at 320px wide once the `timer`
+          // modifier started firing this deep in the curve: the countdown is
+          // ~66px of unflexed width competing with the hint button, the
+          // overflow menu and the level chip. Flexible + scaleDown makes the
+          // countdown the thing that gives way -- it shrinks to fit instead of
+          // shoving the row past the right edge, and stays on screen either
+          // way. Same shape as star_battle_screen.dart.
           if (_timeLeft >= 0)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Center(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.timer,
-                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
-                      size: 16,
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Align(
+                  alignment: Alignment.center,
+                  widthFactor: 1,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.timer,
+                          color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$_timeLeft s',
+                          style: GoogleFonts.spaceGrotesk(
+                            color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$_timeLeft s',
-                      style: GoogleFonts.spaceGrotesk(
-                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -1296,26 +1326,65 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                _playDailyMode && _dailyModifierType == 'minimal'
-                    ? 'Find hidden words (min $_minWordLength letters) containing "${_level.centerLetter}"'
+                // COGNIQ-FIX:mod-deadeffect
+                // Was `_playDailyMode && _dailyModifierType == 'minimal'`, so
+                // the count stayed on screen in free play even though the
+                // banner promised it was hidden -- pool selection only runs
+                // when `_modsOn`, which requires `!_playDailyMode`. The helper
+                // covers both modes.
+                _isMinimal
+                    ? 'Find hidden words (min $_minWordLength letters) containing "${_isWhisper ? '?' : _level.centerLetter}"'
                     : 'Find $_targetCount words (min $_minWordLength letters) containing "${_isWhisper ? '?' : _level.centerLetter}"',
                 style: GoogleFonts.outfit(color: accentColor, fontSize: context.scale(13), fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 20),
               // Guessed words scrollable area taking all remaining upper space
+              //
+              // COGNIQ-FIX:layout-overflow
+              // This Column ran 29px past the bottom of a 320x568 phone once
+              // two modifiers were live at the same time: the banner grew to
+              // five lines (103px) and the found-words Expanded had already
+              // been squeezed to zero height, so there was nothing left to
+              // give. The words list and the modifier banner now share one
+              // scrollable region, so the two blocks that grow with the level
+              // are the ones that scroll -- the hive, the guess field and the
+              // backspace button stay pinned where the player expects them,
+              // and no banner text is truncated.
+              //
+              // minHeight + spaceBetween keeps the old look on a normal phone:
+              // while the region is taller than its contents the Column
+              // stretches to fill it and the banner sits at the bottom of it,
+              // exactly where it used to; only once the contents no longer fit
+              // does anything actually scroll.
               Expanded(
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: SingleChildScrollView(
-                    child: Wrap(
+                child: LayoutBuilder(
+                  builder: (context, viewport) => SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: viewport.maxHeight),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Wrap(
                       spacing: 12,
                       runSpacing: 10,
                       alignment: WrapAlignment.center,
                       children: List.generate(
-                        _playDailyMode && _dailyModifierType == 'minimal'
-                            ? _foundWords.length
-                            : _targetCount,
+                        // COGNIQ-FIX:mod-deadeffect
+                        // Same daily-only test as above: in free play the row
+                        // of empty slots still counted out the target for the
+                        // player. Only the words actually found are shown when
+                        // `minimal` is active, in either mode.
+                        //
+                        // `spy` is the exception, and it can only be drawn
+                        // alongside `minimal` in free play: its scrambled
+                        // targets ARE the puzzle, so blanking the row would
+                        // leave nothing to decode. `minimal` still hides the
+                        // number in the heading above when the two coincide.
+                        _isMinimal && !_isSpy ? _foundWords.length : _targetCount,
                         (index) {
                           final list = _foundWords.toList();
                         final hasWord = index < list.length;
@@ -1344,37 +1413,53 @@ class _WordHiveScreenState extends State<WordHiveScreen> {
                           ),
                         );
                       }),
+                            ),
+                          ),
+                          // COGNIQ-FIX:layout-overflow
+                          // Banner and momentum meter moved inside the
+                          // scrollable region above: they are what grows as
+                          // more modifiers go live, so they are what has to
+                          // yield on a short screen rather than pushing the
+                          // hive off the bottom of the page.
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 16),
+                              if (_modifierBannerText.isNotEmpty) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: Text(
+                                    _modifierBannerText,
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: accentColor.withOpacity(0.9),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              // `momentum` has to be *visible* while it is
+                              // running, not just paid out at the end
+                              // (remember.md E2 section 8). A Wrap on its own
+                              // row, so the chip can never overflow a sibling.
+                              if (_isModActive('momentum')) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: Wrap(
+                                    alignment: WrapAlignment.center,
+                                    children: [MomentumMeter(controller: _momentum)],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              if (_modifierBannerText.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Text(
-                    _modifierBannerText,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: accentColor.withOpacity(0.9),
-                    ),
-                  ),
-                ),
-              ],
-              // `momentum` has to be *visible* while it is running, not just
-              // paid out at the end (remember.md E2 section 8). A Wrap on its
-              // own row, so the chip can never overflow a sibling.
-              if (_isModActive('momentum')) ...[
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Wrap(
-                    alignment: WrapAlignment.center,
-                    children: [MomentumMeter(controller: _momentum)],
-                  ),
-                ),
-              ],
               // Message / Display Current Guess
               Column(
                 mainAxisSize: MainAxisSize.min,

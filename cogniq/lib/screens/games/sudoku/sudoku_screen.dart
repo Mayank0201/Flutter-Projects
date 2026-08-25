@@ -523,13 +523,22 @@ class _SudokuScreenState extends State<SudokuScreen> {
       } else if (size == 6) {
         targetFilled = max(11, 14 - ((index - 30) ~/ 4));
       } else {
-        if (index >= 90) {
-          targetFilled = 17;
-        } else {
-          targetFilled = max(17, 25 - ((index - 45) ~/ 3));
-        }
+        // COGNIQ-FIX:curve-regression
+        // Was `max(17, 25 - ((index - 45) ~/ 3))`. For levels 30-44 the dividend
+        // is negative and Dart's `~/` truncates toward zero, so `(30-45) ~/ 3`
+        // is -5 and level 30 handed out THIRTY clues -- five MORE than level 29
+        // -- not recovering to 25 until level 43. Anchoring the ramp at 30
+        // instead of 45 keeps the dividend non-negative, so the count can only
+        // fall. 25 at level 30 matches what level 29 gives (see the `index < 40`
+        // arm below), one clue is removed every 5 levels, and the floor of 17 --
+        // the minimum a 9x9 needs for a unique solution -- is reached at level
+        // 70. The old `index >= 90 -> 17` special case is folded in: from level
+        // 70 the raw value is already at or below the floor, so `max` pins it
+        // there for every level above, which is exactly what that branch did.
+        targetFilled = max(17, 25 - ((index - 30) ~/ 5));
       }
-      if (_isModActive('clueThinning')) {
+      // COGNIQ-FIX:mod-getters
+      if (_isClueThinningActive) {
         targetFilled = max(4, targetFilled - (size == 4 ? 1 : size == 6 ? 2 : 3));
       }
     } else if (size == 9) {
@@ -631,7 +640,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
     // announces "+5s"/"-10s" per digit. RotationEngine enumerates every pair,
     // so keeping them out of the pool cannot keep them apart; drop the partner
     // here instead, and let the caption show only what actually ran.
-    if (_activeModifiers.contains('silence')) {
+    // COGNIQ-FIX:mod-getters
+    if (_silent) {
       _activeModifiers.remove('eclipse');
       _activeModifiers.remove('time_warp');
     }
@@ -655,10 +665,11 @@ class _SudokuScreenState extends State<SudokuScreen> {
     _recallCorrectSelections.clear();
     _lockedRecallCells.clear();
     
-    final bool hasTimeWarp = _forcedModifier == 'time_warp' ||
-        (_playDailyMode && _dailyModifierType == 'time_warp') ||
-        (_modsOn && _activeModifiers.contains('time_warp'));
-    if (hasTimeWarp) {
+    // COGNIQ-FIX:mod-getters
+    // Hand-rolled copy of the getter, which is exactly what the getter exists to
+    // stop: `_activeModifiers` is only ever populated when `_modsOn`, so the two
+    // read identically.
+    if (_isTimeWarpActive) {
       _warpTimeLeft = 90;
       _warpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (!mounted || _won || _gameOver) {
@@ -683,7 +694,10 @@ class _SudokuScreenState extends State<SudokuScreen> {
       _gameTimer?.cancel();
       _timeLeft = -1;
       _timeBonusEarned = false;
-      if (_isEndgame && _activeModifiers.contains('timer')) {
+      // COGNIQ-FIX:mod-getters
+      // `_isEndgame` IS `_isModActive('timer')`; the extra `contains` was a
+      // second, weaker copy of the same test.
+      if (_isEndgame) {
         _timeLeft = _level.size == 4 ? 60 : (_level.size == 6 ? 120 : 240);
         _initialTime = _timeLeft;
         _timeBonusEarned = true;
@@ -876,10 +890,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
       AudioManager.playClick();
     });
     
-    final bool isTimeWarp = _forcedModifier == 'time_warp' ||
-        (_playDailyMode && _dailyModifierType == 'time_warp') ||
-        (_modsOn && _activeModifiers.contains('time_warp'));
-    if (isTimeWarp) {
+    // COGNIQ-FIX:mod-getters
+    if (_isTimeWarpActive) {
       if (num == targetVal) {
         _warpTimeLeft = (_warpTimeLeft + 5).clamp(0, 300);
         _message = '+5 Seconds!';
@@ -894,10 +906,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
       }
     }
     
-    final bool isGlitch = _forcedModifier == 'glitch' ||
-        (_playDailyMode && _dailyModifierType == 'glitch') ||
-        (_modsOn && _activeModifiers.contains('glitch'));
-    if (isGlitch) {
+    // COGNIQ-FIX:mod-getters
+    if (_isGlitchActive) {
       // Under `silence` the swap must not double as a correctness tell, so it
       // counts placements rather than correct placements. The board still
       // shuffles just as often.
@@ -1276,14 +1286,23 @@ class _SudokuScreenState extends State<SudokuScreen> {
                           size: 22,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          _isScanPhase
-                              ? 'SCAN PHASE: Memorize $_recallTargetCount cells! $_blackoutCountdown s'
-                              : 'RECALL PHASE: Place $_recallTargetCount numbers! ($_recallPlacedCount/$_recallTargetCount)',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: context.scale(16),
-                            fontWeight: FontWeight.bold,
-                            color: _isScanPhase ? Colors.amber : Colors.redAccent,
+                        // COGNIQ-FIX:curve-regression
+                        // Unflexed, this Row overflowed by 264px the moment the
+                        // rotation put `eclipse` on a level without `silence` to
+                        // strip it -- the caption is a full sentence with two
+                        // interpolated counts in it and nothing was allowed to
+                        // wrap. Flexible lets it take a second line instead.
+                        Flexible(
+                          child: Text(
+                            _isScanPhase
+                                ? 'SCAN PHASE: Memorize $_recallTargetCount cells! $_blackoutCountdown s'
+                                : 'RECALL PHASE: Place $_recallTargetCount numbers! ($_recallPlacedCount/$_recallTargetCount)',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: context.scale(16),
+                              fontWeight: FontWeight.bold,
+                              color: _isScanPhase ? Colors.amber : Colors.redAccent,
+                            ),
                           ),
                         ),
                       ],
@@ -1476,7 +1495,8 @@ class _SudokuScreenState extends State<SudokuScreen> {
                           ),
                         );
 
-                        if (_forcedModifier == 'zoom' || (_playDailyMode && _dailyModifierType == 'zoom') || (_modsOn && _activeModifiers.contains('zoom'))) {
+                        // COGNIQ-FIX:mod-getters
+                        if (_isZoomActive) {
                           boardWidget = SizedBox(
                             width: context.scale(boardScale),
                             height: context.scale(boardScale),

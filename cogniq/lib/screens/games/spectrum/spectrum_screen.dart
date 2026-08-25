@@ -112,7 +112,17 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
 
   /// Modifiers now begin at a per-game level chosen in RotationEngine
   /// rather than a flat level 30 for every game.
-  bool get _modsOn => !_isDailyMode && RotationEngine.hasModifiers('spectrum', _levelIndex);
+  // COGNIQ-FIX:mod-getters
+  // 'hue' throughout, matching lib/models/game_info.dart and the id this file
+  // already uses for prefs, hints and theming. It previously said 'spectrum'
+  // here and in getActiveModifiers but 'hue' in modifierStartLevel; both
+  // spellings are aliased in RotationEngine's map so nothing was broken, but one
+  // file speaking two names for one game is how a real mismatch gets in later.
+  //
+  // The `getDeterminism` seeds below stay 'spectrum'/'spectrum_retry<n>' on
+  // purpose: those strings are RNG seeds, not identifiers, and renaming one
+  // regenerates every board the player has ever seen.
+  bool get _modsOn => !_isDailyMode && RotationEngine.hasModifiers('hue', _levelIndex);
 
   // COGNIQ-FIX:mod-active-helper
   bool _isModActive(String name) {
@@ -204,29 +214,40 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
       return;
     }
     if (!_isDailyMode && _levelIndex >= 30) { // not-a-modifier-gate
-      if (_levelIndex >= 80) {
-        _rows = 14;
-        _cols = 8;
-      } else if (_levelIndex >= 60 && _levelIndex < 80) {
-        // Stage 4: Progressive grid size
-        int tier = (_levelIndex - 60) ~/ 5;
-        if (tier == 0) {
-          _rows = 9; _cols = 7;
-        } else if (tier == 1) {
-          _rows = 11; _cols = 7;
-        } else if (tier == 2) {
-          _rows = 12; _cols = 8;
-        } else {
-          _rows = 14; _cols = 8;
-        }
-      } else if (_levelIndex >= 45 && _levelIndex < 60) {
+      // COGNIQ-FIX:curve-plateau
+      // The old ladder went backwards twice and stood still once. Levels 25-29
+      // hand out a 9x7 (63 tiles) from tier 5 of the switch below; level 30 then
+      // dropped the player to 8 rows, and the `>= 45 && < 60` arm and the
+      // trailing `else` BOTH hardcoded 8x8 -- one board for levels 30-59, thirty
+      // flat levels. Level 60 then went to 9x7, another shrink (64 -> 63 tiles).
+      //
+      // This ladder only ever grows, counted in tiles, and every band differs
+      // from its neighbours -- including the two stage bands the old code
+      // collapsed: stage 2 (distractor cards, 30-44) is 10x7 and stage 3
+      // (three-colour mixing, 45-59) is 11x7. The top two rungs are the 15x8 and
+      // 16x8 boards that the `default:` arm of the switch below builds; they
+      // were previously unreachable in free play because every level >= 30 is
+      // intercepted here, so rather than delete that arm they are now reachable
+      // from both directions. 16x8 = 128 tiles is the ceiling, matching the
+      // switch's own `clamp(14, 16)`.
+      if (_levelIndex >= 90) {
+        _rows = 16; _cols = 8; // 128
+      } else if (_levelIndex >= 80) {
+        _rows = 15; _cols = 8; // 120
+      } else if (_levelIndex >= 75) {
+        _rows = 14; _cols = 8; // 112
+      } else if (_levelIndex >= 70) {
+        _rows = 13; _cols = 8; // 104
+      } else if (_levelIndex >= 65) {
+        _rows = 12; _cols = 8; // 96
+      } else if (_levelIndex >= 60) {
+        _rows = 12; _cols = 7; // 84
+      } else if (_levelIndex >= 45) {
         // Stage 3: Three-color mixing
-        _rows = 8;
-        _cols = 8;
+        _rows = 11; _cols = 7; // 77
       } else {
         // Stage 2: Distractor cards
-        _rows = 8;
-        _cols = 8;
+        _rows = 10; _cols = 7; // 70
       }
       return;
     }
@@ -244,13 +265,18 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         _rows = 7;
         _cols = 7;
         break;
+      // COGNIQ-FIX:curve-plateau
+      // Cases 3 and 4 (levels 15-19 and 20-24) were both 8x8 = 64 tiles, so ten
+      // levels ran with an identical board. Case 5 then went to 9x7 = 63, a
+      // shrink. Tile count now climbs 49 -> 56 -> 60 -> 63 and hands over to the
+      // level-30 ladder at 70 without ever going backwards.
       case 3:
         _rows = 8;
-        _cols = 8;
+        _cols = 7;
         break;
       case 4:
-        _rows = 8;
-        _cols = 8;
+        _rows = 10;
+        _cols = 6;
         break;
       case 5:
         _rows = 9;
@@ -269,6 +295,10 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
         _cols = 8;
         break;
       default:
+        // COGNIQ-FIX:curve-plateau
+        // Kept, not deleted: daily play is not intercepted by the branch above,
+        // so this arm is the one that sizes a high-level daily board. Free play
+        // now reaches 15x8 and 16x8 through the levels >= 30 ladder instead.
         final extraTiers = tier - 9;
         _rows = (14 + extraTiers).clamp(14, 16);
         _cols = 8;
@@ -314,7 +344,7 @@ class _SpectrumScreenState extends State<SpectrumScreen> {
     if (_modsOn) {
       bool isSmallGrid = (_rows * _cols <= 16);
       _activeModifiers = RotationEngine.getActiveModifiers(
-        gameId: 'spectrum',
+        gameId: 'hue', // COGNIQ-FIX:mod-getters
         levelIndex: _levelIndex,
         pool: kSpectrumModifierPool,
         minActive: 2,

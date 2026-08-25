@@ -255,7 +255,7 @@ class _CipherDecoderScreenState extends State<CipherDecoderScreen> {
       _isLoading = false;
     });
 
-    if (_isModActive('timer')) {
+    if (_isEndgame) {
       _timeLeft = 45 + board.wordCount * 20;
       _initialTime = _timeLeft;
       _timeBonusEarned = true;

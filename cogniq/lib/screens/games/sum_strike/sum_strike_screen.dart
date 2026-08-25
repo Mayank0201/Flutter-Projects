@@ -115,11 +115,11 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
   });
 
   void _momentumCorrect() {
-    if (_isModActive('momentum')) _momentum.correct();
+    if (_isMomentumActive) _momentum.correct();
   }
 
   void _momentumMistake() {
-    if (_isModActive('momentum')) _momentum.mistake();
+    if (_isMomentumActive) _momentum.mistake();
   }
   final Set<int> _hiddenRowTargets = {};
   final Set<int> _hiddenColTargets = {};
@@ -468,7 +468,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
     // and 'denseStrike' it works on curated boards too. It used to live inside
     // the generated-only branch, which is why it did nothing on the ~170
     // hand-authored levels that make up most of the endgame.
-    if (_activeModifiers.contains('whisper')) {
+    if (_isWhisperActive) {
       final randSelect = RotationEngine.getDeterminism('sumstrike_whisper', _currentLevel);
       final rowIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
       final colIndices = List.generate(_gridSize, (i) => i)..shuffle(randSelect);
@@ -741,7 +741,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
       // paid, never a second full award. See widgets/momentum_meter.dart. A x1
       // average pays 0, so an unchained clear is worth exactly what it always
       // was. This is additive to — and independent of — the speed bonus below.
-      if (_isModActive('momentum')) {
+      if (_isMomentumActive) {
         final bonus = _momentum.bonusPoints;
         if (bonus > 0) {
           await PointManager.addPoints(bonus);
@@ -961,27 +961,43 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                   }
                 : null,
           ),
+          // COGNIQ-FIX:layout-overflow
+          // The app bar row overflowed by 7px at 320px wide once the `timer`
+          // modifier started firing this deep in the curve: the countdown adds
+          // ~66px of unflexed width next to the hint button, the Rules button
+          // and the level chip. Flexible + scaleDown makes the countdown the
+          // thing that gives way -- it shrinks to fit instead of shoving the
+          // row past the right edge, and stays on screen either way. Same
+          // shape as star_battle_screen.dart.
           if (_timeLeft >= 0)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Center(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.timer,
-                      color: _timeLeft <= 15 ? Colors.red : Colors.amber,
-                      size: 16,
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Align(
+                  alignment: Alignment.center,
+                  widthFactor: 1,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.timer,
+                          color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$_timeLeft s',
+                          style: GoogleFonts.spaceGrotesk(
+                            color: _timeLeft <= 15 ? Colors.red : Colors.amber,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$_timeLeft s',
-                      style: GoogleFonts.spaceGrotesk(
-                        color: _timeLeft <= 15 ? Colors.red : Colors.amber,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -1059,7 +1075,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                         // `momentum` must be visible while it runs, not only
                         // paid at the end. Its own Wrap row, so the chip cannot
                         // overflow a sibling at 320px.
-                        if (_isModActive('momentum')) ...[
+                        if (_isMomentumActive) ...[
                           Padding(
                             padding: const EdgeInsets.only(bottom: 12.0),
                             child: Wrap(
@@ -1117,7 +1133,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          isMatch || !_activeModifiers.contains('whisper') || !_hiddenColTargets.contains(c) ? '$target' : '?',
+                                          isMatch || !_isWhisperActive || !_hiddenColTargets.contains(c) ? '$target' : '?',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,
@@ -1151,7 +1167,7 @@ class _SumStrikeScreenState extends State<SumStrikeScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          isMatch || !_activeModifiers.contains('whisper') || !_hiddenRowTargets.contains(r) ? '$target' : '?',
+                                          isMatch || !_isWhisperActive || !_hiddenRowTargets.contains(r) ? '$target' : '?',
                                           style: GoogleFonts.spaceGrotesk(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,

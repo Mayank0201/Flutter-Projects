@@ -78,6 +78,14 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
   bool get _isMemorizeTimerActive => _isModActive('memorizeTimer');
   bool get _isEndgame => _isModActive('timer');
 
+  // COGNIQ-FIX:mod-deadeffect
+  /// The board transform is live whenever a transform was actually rolled for
+  /// this level. It used to be gated on [_isEndgame] ('timer'), which is not in
+  /// this game's modifier pool, so in free play the transform was computed and
+  /// then never applied. _transformType is only non-zero when boardTransform
+  /// (or the daily mirror) is genuinely active, so this is the honest gate.
+  bool get _transformApplies => _transformType != 0;
+
   int get _gridN {
     if (!_playDailyMode && _currentLevel >= 30) { // not-a-modifier-gate
       int base = _currentLevel >= 80 ? 6 + ((_currentLevel - 80) % 2) : 7;
@@ -274,7 +282,13 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
       _distractorDots = [];
 
       if (!_playDailyMode && _currentLevel >= 30) { // not-a-modifier-gate
-        targetLength = (5 + (_currentLevel % 3)).clamp(5, 8);
+        // COGNIQ-FIX:curve-regression
+        // The pre-30 ramp (3 + level ~/ 2) ends at 17 dots on level 29, so the
+        // level-30 formula has to start at 17 and keep climbing. It now adds a
+        // dot every 5 levels and caps at 24, which stays well inside the 7x7
+        // (49 dot) board used for levels 30-79. Monotonic in _currentLevel.
+        targetLength = (17 + ((_currentLevel - 30) ~/ 5)).clamp(17, 24);
+        targetLength = targetLength.clamp(3, n * n);
         if (_isBoardTransformActive) {
           _transformType = 1 + rng.nextInt(3); // CW, 180, or Mirror
         }
@@ -421,7 +435,8 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
 
   int _getHitDot(Offset localPos) {
     final total = _gridN * _gridN;
-    final hitRadius = _spacing * 0.35;
+    // COGNIQ-FIX:patternlock-autofill
+    final hitRadius = _spacing * 0.42;
     for (int idx = 0; idx < total; idx++) {
       double dist = (localPos - _dotCenter(idx)).distance;
       if (dist < hitRadius) {
@@ -429,6 +444,39 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
       }
     }
     return -1;
+  }
+
+  // COGNIQ-FIX:patternlock-autofill
+  /// Greatest common divisor on non-negative ints. gcd(0, x) == x.
+  int _gcdInt(int a, int b) {
+    while (b != 0) {
+      final t = a % b;
+      a = b;
+      b = t;
+    }
+    return a;
+  }
+
+  // COGNIQ-FIX:patternlock-autofill
+  /// Every dot that lies exactly ON the straight line between [from] and [to],
+  /// in travel order, excluding both endpoints. Pure integer lattice maths: for
+  /// a step (dr, dc) with g = gcd(|dr|, |dc|), the interior lattice points are
+  /// (r1 + k*dr/g, c1 + k*dc/g) for k = 1..g-1. Returns empty when g <= 1.
+  List<int> _dotsBetween(int from, int to) {
+    final n = _gridN;
+    final r1 = from ~/ n;
+    final c1 = from % n;
+    final dr = (to ~/ n) - r1;
+    final dc = (to % n) - c1;
+    final g = _gcdInt(dr.abs(), dc.abs());
+    if (g <= 1) return const <int>[];
+    final stepR = dr ~/ g;
+    final stepC = dc ~/ g;
+    final result = <int>[];
+    for (int k = 1; k < g; k++) {
+      result.add((r1 + k * stepR) * n + (c1 + k * stepC));
+    }
+    return result;
   }
 
   void _onPanStart(DragStartDetails d) {
@@ -449,8 +497,19 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
     final idx = _getHitDot(d.localPosition);
     if (idx != -1) {
       if (!_userPattern.contains(idx)) {
+        // COGNIQ-FIX:patternlock-autofill
+        // A fast drag only samples a handful of points, so dots the player
+        // visually swiped through used to be skipped. Fill in every dot on the
+        // straight line from the last selected dot to this one, in order,
+        // before appending the newly hit dot. One haptic for the whole batch.
+        final List<int> filler = _userPattern.isEmpty
+            ? const <int>[]
+            : _dotsBetween(_userPattern.last, idx)
+                .where((mid) => !_userPattern.contains(mid))
+                .toList();
         settingsNotifier.hapticTap();
         setState(() {
+          _userPattern.addAll(filler);
           _userPattern.add(idx);
         });
       } else if (_userPattern.length >= 2 && idx == _userPattern[_userPattern.length - 2]) {
@@ -468,7 +527,8 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
 
     if (_userPattern.isEmpty) return;
 
-    final targetPattern = (_isEndgame || (_playDailyMode && _transformType > 0))
+    // COGNIQ-FIX:mod-deadeffect
+    final targetPattern = _transformApplies
         ? _targetPattern.map((idx) => _transformIndex(idx, _gridN, _transformType)).toList()
         : _targetPattern;
 
@@ -707,7 +767,8 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
     settingsNotifier.hapticTap();
 
     bool isPrefix = true;
-    final target = (_isEndgame || (_playDailyMode && _transformType > 0))
+    // COGNIQ-FIX:mod-deadeffect
+    final target = _transformApplies
         ? _targetPattern.map((idx) => _transformIndex(idx, _gridN, _transformType)).toList()
         : _targetPattern;
 
@@ -751,6 +812,42 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
       backgroundColor: AppTheme.accentFor('pattern_lock'),
       duration: const Duration(milliseconds: 1500),
     ));
+  }
+
+  // COGNIQ-FIX:patternlock-peek
+  /// "Show again": costs one hint and re-shows the full target pattern for
+  /// 1.5s. Implemented by flipping _isMemorizing back on and restarting
+  /// _memorizeTimer, so the existing painter/dot branches and the existing
+  /// input guards do all the work. The in-progress trace is deliberately kept.
+  Future<void> _usePeek() async {
+    if (_isSuccess || _isMemorizing) return;
+    if (_hintCount <= 0) return;
+
+    settingsNotifier.hapticTap();
+
+    // Cancel first, otherwise the memorize-phase timer and this one fight over
+    // _isMemorizing.
+    _memorizeTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _isMemorizing = true;
+      });
+    }
+    _memorizeTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() {
+          _isMemorizing = false;
+        });
+      }
+    });
+
+    await HintManager.useHint('pattern_lock');
+    final hCount = await HintManager.getHints('pattern_lock');
+    if (mounted) {
+      setState(() {
+        _hintCount = hCount;
+      });
+    }
   }
 
   void _showRules() {
@@ -808,6 +905,18 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
                     }
                   }
                 : null,
+          ),
+          // COGNIQ-FIX:patternlock-peek
+          IconButton(
+            tooltip: 'Show again (1 hint)',
+            icon: Icon(
+              Icons.visibility_outlined,
+              size: 20,
+              color: (!_isSuccess && !_isMemorizing && _hintCount > 0)
+                  ? context.textMuted
+                  : context.textMuted.withOpacity(0.35),
+            ),
+            onPressed: (!_isSuccess && !_isMemorizing && _hintCount > 0) ? _usePeek : null,
           ),
           if (_timeLeft >= 0)
             Padding(
@@ -867,7 +976,8 @@ class _PatternLockScreenState extends State<PatternLockScreen> {
                             color: _isMemorizing ? Colors.amber : context.textPrimary,
                           ),
                         ),
-                        if ((_isEndgame || _playDailyMode) && _transformType > 0) ...[
+                        // COGNIQ-FIX:mod-deadeffect
+                        if (_transformApplies) ...[
                           const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

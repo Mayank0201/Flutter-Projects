@@ -117,7 +117,17 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
 
   /// Modifiers now begin at a per-game level chosen in RotationEngine
   /// rather than a flat level 30 for every game.
-  bool get _modsOn => !_isDailyMode && RotationEngine.hasModifiers('oddcolorout', _levelIndex);
+  // COGNIQ-FIX:mod-getters
+  // 'oddcolor' throughout, matching lib/models/game_info.dart and the id this
+  // file already uses for prefs, hints and theming. It previously said
+  // 'oddcolorout' here and in getActiveModifiers but 'oddcolor' in
+  // modifierStartLevel; both are aliased in RotationEngine's map, so this
+  // removes an inconsistency rather than a live bug.
+  //
+  // The `getDeterminism` seeds below stay 'oddcolorout'/'oddcolorout_retry<n>':
+  // those strings are RNG seeds, not identifiers, and renaming one regenerates
+  // every board the player has ever seen.
+  bool get _modsOn => !_isDailyMode && RotationEngine.hasModifiers('oddcolor', _levelIndex);
 
   @override
   void initState() {
@@ -146,16 +156,25 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
   int get _gridSide {
     if (_isDailyMode && _dailyModifierType == 'chaos') return 2;
     if (_isDailyMode && _dailyModifierType == 'hidden_rule') return 3;
-    if (!_isDailyMode && _levelIndex >= 90) {
-      return 5 + ((_levelIndex - 90) % 5); // Rotates 5x5 to 9x9
-    }
     if (_levelIndex < 2) return 2; // 2x2
     if (_levelIndex < 5) return 3; // 3x3
     if (_levelIndex < 10) return 4; // 4x4
     if (_levelIndex < 16) return 5; // 5x5
     if (_levelIndex < 23) return 6; // 6x6
     if (_levelIndex < 30) return 7; // 7x7
-    return 9; // 9x9 max from level 30 to 89 // not-a-modifier-gate
+    // COGNIQ-FIX:curve-plateau
+    // The board used to stop at 9x9 for levels 30-89 and then RUN BACKWARDS:
+    // `5 + ((_levelIndex - 90) % 5)` dropped a level-90 player from a 9x9 to a
+    // 5x5 and cycled 5->9 forever, so level 90 was easier than level 89 and the
+    // game had no net progression at all past 30. The ladder keeps climbing
+    // instead, and stops at 11 rather than continuing: the board is laid out at
+    // `min(screenWidth - 32, 420)` px with 6px gutters, so an 11x11 tile is
+    // about 26px on a 375pt phone and a 12x12 about 23px. Below ~25px picking
+    // out a single tile stops being a perception test and starts being a
+    // fat-finger test, which is not the difficulty this game is measuring.
+    if (_levelIndex < 45) return 9; // 9x9
+    if (_levelIndex < 65) return 10; // 10x10
+    return 11; // 11x11 -- the cap, set by tap-target size // not-a-modifier-gate
   }
 
   void _generateLevelColors({bool keepPosition = false, bool keepTimer = false}) {
@@ -209,7 +228,7 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
     if (!_isDailyMode) {
       if (_modsOn) {
         var activeMods = RotationEngine.getActiveModifiers(
-          gameId: 'oddcolorout',
+          gameId: 'oddcolor', // COGNIQ-FIX:mod-getters
           levelIndex: _levelIndex,
           pool: ['hueChannel', 'noise', 'gradient', 'timer', 'monochrome', 'whisper', 'prism', 'eclipse', 'fog'],
           minActive: 2,
@@ -237,14 +256,35 @@ class _OddColorOutScreenState extends State<OddColorOutScreen> with SingleTicker
       _oddColor = HSLColor.fromAHSL(1.0, oddHue, saturation, lightness).toColor();
     } else {
       if (!_isDailyMode && _levelIndex >= 30) { // not-a-modifier-gate
-        delta = 0.04 * (30.0 / (30.0 + (_levelIndex - 30)));
-        if (delta < 0.035) delta = 0.035;
+        // COGNIQ-FIX:curve-plateau
+        // Was `0.04 * (30 / (30 + (level - 30)))` -- i.e. 1.2/level -- clamped
+        // at 0.035. That clamp bit at level 35 (raw 0.034286), so every level
+        // from 35 on shipped an IDENTICAL colour delta: 55 flat levels.
+        //
+        // A straight ramp instead, because it is obviously monotonic and its
+        // endpoint is readable: 0.040 at level 30 (continuous with the pre-30
+        // curve, which ends on exactly 0.040 at level 29), falling 0.00025 per
+        // level, reaching the floor at level 118.
+        //
+        // Floor 0.018 rather than the JND itself. An HSL lightness step of
+        // ~0.010 is roughly the just-noticeable difference for a mid-lightness
+        // patch, but that is a lab number -- on a phone at half brightness, on
+        // OLED, or in daylight it is a coin flip rather than a puzzle. 0.018
+        // also sits deliberately ABOVE the `whisper` modifier's 0.015 so that
+        // whisper stays the hardest thing on screen; see the clamp below.
+        delta = 0.040 - (_levelIndex - 30) * 0.00025;
+        if (delta < 0.018) delta = 0.018;
       } else {
         delta = 0.10 - (_levelIndex / 29.0) * 0.06;
         if (delta < 0.035) delta = 0.035;
       }
       if (_isModActive('whisper')) {
-        delta = 0.015;
+        // COGNIQ-FIX:curve-plateau
+        // `min`, not assignment. Once the base curve is allowed past 0.035 a
+        // flat `delta = 0.015` would eventually be LARGER than the level's own
+        // delta, so the "exceptionally faint" modifier would hand the player an
+        // easier tile than not having it. Whisper may only ever tighten.
+        delta = min(delta, 0.015);
       }
       double oddLightness = lightness;
       double oddSaturation = saturation;

@@ -211,7 +211,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
 
   /// Modifiers now begin at a per-game level chosen in RotationEngine
   /// rather than a flat level 30 for every game.
-  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('mines', _levelIndex);
+  bool get _modsOn => !_playDailyMode && RotationEngine.hasModifiers('minesweeper', _levelIndex);
 
   @override
   void initState() {
@@ -362,13 +362,26 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _timeLeft = -1;
     _timeBonusEarned = false;
 
+    // Board difficulty only (grid size + mine count). These thresholds are
+    // difficulty tuning, NOT a modifier gate.
     bool isHighLevel = !_playDailyMode && _levelIndex >= 30; // not-a-modifier-gate
     if (isHighLevel) {
       _gridSize = (10 + ((_levelIndex - 30) ~/ 4)).clamp(10, 16);
       final double maxMines = ((_gridSize * _gridSize) - 9) * 0.28;
       _mineCount = (_gridSize * _gridSize * 0.22).floor().clamp(12, maxMines.floor());
+    } else {
+      _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
+      final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
+      _mineCount = (3 + (_levelIndex * 1.2).floor()).clamp(3, maxMines.floor());
+    }
+
+    // COGNIQ-FIX:mod-start-early
+    // Modifier selection is gated on RotationEngine's per-game start level
+    // (via _modsOn -> RotationEngine.hasModifiers), never on a literal 30.
+    _activeModifiers = {};
+    if (_modsOn) {
       _activeModifiers = RotationEngine.getActiveModifiers(
-        gameId: 'mines',
+        gameId: 'minesweeper',
         levelIndex: _levelIndex,
         pool: kMineFinderModifierPool,
         minActive: 2,
@@ -378,11 +391,6 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
       if (_forcedModifier != null) {
         _activeModifiers = {_forcedModifier!};
       }
-    } else {
-      _gridSize = (5 + (_levelIndex ~/ 3)).clamp(5, 16);
-      final double maxMines = ((_gridSize * _gridSize) - 9) * 0.25;
-      _mineCount = (3 + (_levelIndex * 1.2).floor()).clamp(3, maxMines.floor());
-      _activeModifiers = {};
     }
 
     _mines = List.generate(_gridSize, (_) => List.filled(_gridSize, false));
@@ -395,7 +403,7 @@ class _MineFinderScreenState extends State<MineFinderScreen> {
     _message = '';
     _submitAttempts = 3;
 
-    if (isHighLevel && _activeModifiers.contains('timer')) {
+    if (_isEndgame) {
       _timeLeft = 35 + (_gridSize * 9);
       _initialTime = _timeLeft;
       _timeBonusEarned = true;

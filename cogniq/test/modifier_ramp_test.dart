@@ -37,7 +37,7 @@ void main() {
 
   test('bridges starts far earlier than the old flat level 30', () {
     expect(RotationEngine.modifierStartLevel('bridges'), lessThan(30));
-    expect(RotationEngine.modifierStartLevel('bridges'), 10);
+    expect(RotationEngine.modifierStartLevel('bridges'), 6);
   });
 
   test('intensity ramps 1 -> 2 -> 3 rather than jumping', () {
