@@ -57,6 +57,7 @@ MARKERS=(
   "mod-active-helper|screens/games|generic _isModActive in each game screen"
   "mod-getters|screens/games|hard-disabled per-modifier getters removed"
   "mod-desc-copy||modifier description copy rewritten"
+  "review-prompt|utils/review_prompt_manager.dart|in-app review prompt with 5-gate safety"
 )
 
 # Markers for the 8 groups. These do not exist yet - add one when you close a
@@ -157,7 +158,7 @@ count_at_most() {
 verify_root() {
   root="$1"
   VFAIL=0
-  G1_F=0; G2_F=0; G3_F=0; G4_F=0; G5_F=0; G6_F=0; G7_F=0; G8_F=0
+  G1_F=0; G2_F=0; G3_F=0; G4_F=0; G5_F=0; G6_F=0; G7_F=0; G8_F=0; G9_F=0
   lib="$root/lib"
   gameinfo="$lib/models/game_info.dart"
   rot="$lib/utils/rotation_engine.dart"
@@ -573,10 +574,64 @@ verify_root() {
     fi
   done
 
+  # -- 14. GROUP 9 - in-app review prompt -----------------------------------
+  head2 "14. Group 9 - In-App Review prompt (Change G)"
+
+  # 9.1 in_app_review in pubspec.yaml
+  if grep -qE 'in_app_review:' "$root/pubspec.yaml" 2>/dev/null; then
+    pass "9.1 in_app_review present in pubspec.yaml"
+  else
+    fail "9.1 in_app_review missing from pubspec.yaml"
+    gbump 9
+  fi
+
+  # 9.2 review-prompt marker present
+  n=$(grep -rl "$PREFIX"review-prompt "$lib" --include='*.dart' 2>/dev/null | grep -c . || true)
+  if [ "$n" -gt 0 ]; then
+    pass "9.2 COGNIQ-FIX:review-prompt marker present ($n file(s))"
+  else
+    fail "9.2 COGNIQ-FIX:review-prompt marker missing"
+    gbump 9
+  fi
+
+  # 9.3 requestReview() not called from main.dart or any initState
+  hits=$(grep -rnE 'requestReview\(' "$lib/main.dart" 2>/dev/null | strip_comments || true)
+  if [ -z "$hits" ]; then
+    pass "9.3 requestReview() not called on app launch in main.dart"
+  else
+    fail "9.3 requestReview() called on app launch in main.dart:"
+    printf '%s\n' "$hits" | indent
+    gbump 9
+  fi
+
+  # 9.4 90-day cooldown constant
+  rpm="$lib/utils/review_prompt_manager.dart"
+  if [ -f "$rpm" ]; then
+    if grep -qE 'Duration\(days: *90\)' "$rpm" 2>/dev/null; then
+      pass "9.4 90-day cooldown present"
+    else
+      fail "9.4 90-day cooldown missing from review_prompt_manager.dart"
+      gbump 9
+    fi
+
+    # 9.5 timestamp set before requestReview
+    ts_line=$(grep -nE 'setInt.*reviewPromptLastShown' "$rpm" 2>/dev/null | head -1 | cut -d: -f1)
+    req_line=$(grep -nE 'review\.requestReview' "$rpm" 2>/dev/null | head -1 | cut -d: -f1)
+    if [ -n "$ts_line" ] && [ -n "$req_line" ] && [ "$ts_line" -lt "$req_line" ]; then
+      pass "9.5 reviewPromptLastShown timestamp set before requestReview()"
+    else
+      fail "9.5 reviewPromptLastShown timestamp must be set before requestReview()"
+      gbump 9
+    fi
+  else
+    fail "9.4/9.5 review_prompt_manager.dart not found"
+    gbump 9
+  fi
+
   # -- verdict -------------------------------------------------------------
   head2 "Group status"
   gclear=0
-  for i in 1 2 3 4 5 6 7 8; do
+  for i in 1 2 3 4 5 6 7 8 9; do
     eval "c=\$G${i}_F"
     if [ "$c" -eq 0 ]; then
       printf '  %sclear%s  group %s\n' "$GRN" "$RST" "$i"
@@ -585,14 +640,14 @@ verify_root() {
       printf '  %sopen %s  group %s  (%s issue(s))\n' "$RED" "$RST" "$i" "$c"
     fi
   done
-  printf '  %s%s of 8 groups clear%s\n' "$BLD" "$gclear" "$RST"
+  printf '  %s%s of 9 groups clear%s\n' "$BLD" "$gclear" "$RST"
 
   if [ "$VFAIL" -eq 0 ]; then
     printf '\n  %sVERSION OK%s  %s\n' "$GRN" "$RST" "$label"
-    printf '  %sPASS%s  %s (%s) - 8/8 groups clear\n' "$GRN" "$RST" "$label" "$ver" >> "$SUMFILE"
+    printf '  %sPASS%s  %s (%s) - 9/9 groups clear\n' "$GRN" "$RST" "$label" "$ver" >> "$SUMFILE"
   else
     printf '\n  %s%s FAILURE(S)%s  %s\n' "$RED" "$VFAIL" "$RST" "$label"
-    printf '  %sFAIL%s  %s (%s) - %s problem(s), %s/8 groups clear\n' \
+    printf '  %sFAIL%s  %s (%s) - %s problem(s), %s/9 groups clear\n' \
       "$RED" "$RST" "$label" "$ver" "$VFAIL" "$gclear" >> "$SUMFILE"
     OVERALL=1
   fi

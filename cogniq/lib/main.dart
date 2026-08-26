@@ -48,6 +48,7 @@ import 'utils/prefs_keys.dart';
 import 'utils/zen_mode.dart';
 import 'utils/analytics/analytics.dart';
 import 'utils/streak_manager.dart';
+import 'utils/review_prompt_manager.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
@@ -87,6 +88,14 @@ void main() async {
     await StreakManager.reconcile();
   } catch (e) {
     debugPrint('StreakManager reconcile failed: $e');
+  }
+
+  // Counts distinct calendar days the app has been opened for in-app review gating.
+  // COGNIQ-FIX:review-prompt
+  try {
+    await ReviewPromptManager.recordAppOpen();
+  } catch (e) {
+    debugPrint('ReviewPromptManager recordAppOpen failed: $e');
   }
 
   try {

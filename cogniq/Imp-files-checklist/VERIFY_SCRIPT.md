@@ -25,7 +25,7 @@ Companion to `backport.md` (which says *what* to change) and
 ```
 
 Exit `0` = all versions clean. Exit `1` = at least one FAIL. Ends with a per-version
-summary line and an `N of 8 groups clear` count.
+summary line and an `N of 9 groups clear` count.
 
 Git Bash on Windows. No dependencies beyond grep/sed/awk/find.
 
@@ -176,11 +176,15 @@ lower start levels, because it's the guard that keeps modifiers off tiny boards.
 
 ### Section 13 — group markers
 
-Lists the six group markers as `pending` or `PASS`. Turns green as you close groups.
+Lists the group markers as `pending` or `PASS`. Turns green as you close groups.
+
+### Section 14 — Group 9: In-App Review Prompt (Change G)
+
+Checks that `in_app_review` is in `pubspec.yaml`, the `COGNIQ-FIX:review-prompt` marker is present, `requestReview()` is not called from launch or `initState`, the 90-day cooldown is present, and `reviewPromptLastShown` is stamped before requesting review.
 
 ### Verdict
 
-Per-group `clear` / `open (N issues)`, then `N of 8 groups clear`, then the usual
+Per-group `clear` / `open (N issues)`, then `N of 9 groups clear`, then the usual
 version PASS/FAIL. The summary at the end carries the group count per version, so
 running it across all 8 bundles tells you at a glance how far each one has come.
 

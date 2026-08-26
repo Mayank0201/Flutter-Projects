@@ -10,6 +10,7 @@ import 'prefs_keys.dart';
 import 'seasonal_event_manager.dart';
 import 'zen_mode.dart';
 import 'trail_catalog.dart';
+import 'review_prompt_manager.dart';
 
 class HintManager {
   static final Map<String, bool> _hintUsedThisLevel = {};
@@ -205,6 +206,10 @@ class HintManager {
         }
       }
     }
+
+    // Request Google Play review prompt at moments of earned satisfaction.
+    // COGNIQ-FIX:review-prompt
+    ReviewPromptManager.maybeRequestReview();
 
     return false;
   }

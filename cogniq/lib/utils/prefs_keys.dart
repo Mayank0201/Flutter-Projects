@@ -97,6 +97,12 @@ class PrefsKeys {
   static const String spectrumMidCBR = 'spectrum_mid_cBR';
   static const String spectrumMidLayout = 'spectrum_mid_layout';
 
+  // Review prompt
+  // COGNIQ-FIX:review-prompt
+  static const String reviewPromptLastShown = 'review_prompt_last_shown';
+  static const String distinctDaysOpened = 'distinct_days_opened';
+  static const String lastOpenDate = 'last_open_date';
+
   // Dynamic Key Helpers
   static const String hasSeenShuffleTutorial = 'has_seen_shuffle_tutorial';
   static const String shownDailyChallengePopupV1 = 'shown_daily_challenge_popup_v1';

@@ -16,6 +16,7 @@ Backport all three changes to the 8 unshipped bundles, using git as the mechanis
 | **D** — trail toast | `COGNIQ_FIXES_DAILY_TRAIL_GRIDPATH.md` | §2 *"Trail unlock toast missing on the star path"* | the missing call, the 3 things to get right, the Perfect Day dialog collision |
 | **E** — Grid Path | `COGNIQ_FIXES_DAILY_TRAIL_GRIDPATH.md` | §3 *"Grid Path: dead difficulty code"* | the floor arithmetic, the `waypointSparsity` no-op table, the patch, the soak spec |
 | **F** — Colour Link + Chimp | `3_GAME_FIXES_FOR_1.8.3.md` | whole file | before/after for both games |
+| **G** — In-App Review Prompt | `REVIEW_PROMPT_FIXES.md` | whole file | `in_app_review` package, 5-gate `ReviewPromptManager`, app-open tracker, win hook |
 
 Two cross-file rules worth knowing before you start:
 
@@ -101,6 +102,7 @@ Every branch needs **all six** of these. The first three are the big ones; the l
 | D | **Trail unlock toast on the star path** | `COGNIQ_FIXES…md` §2 | 1 call |
 | E | **Grid Path floor + `waypointSparsity` no-op** | `COGNIQ_FIXES…md` §3 | ~6 lines |
 | F | **Colour Link curve + Chimp cliff** | `3_GAME_FIXES_FOR_1.8.3.md` | ~2 blocks |
+| G | **In-App Review Prompt (5 gates)** | `REVIEW_PROMPT_FIXES.md` | 1 package, 1 helper, 2 call sites |
 
 Notes on the small three:
 
@@ -199,7 +201,7 @@ Upload **+69 first** and let it sit in internal testing before pushing the rest.
 
 ## Definition of done, per bundle
 
-**Changes:** ☐ C ☐ A ☐ B ☐ D ☐ E ☐ F
+**Changes:** ☐ C ☐ A ☐ B ☐ D ☐ E ☐ F ☐ G
 
 **Build:** ☐ conflicts resolved · ☐ `flutter analyze` 0 errors · ☐ `flutter test` green · ☐ `.aab` verified · ☐ build number bumped · ☐ zipped with 4 md files · ☐ `NOTES.md` line added
 
