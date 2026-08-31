@@ -130,4 +130,39 @@ class ShowService {
     );
     return ShowProgress.fromJson(_unwrap(response.data) as Map<String, dynamic>);
   }
+
+  // ratings go through the polymorphic table. targetId is our own id, not the
+  // tmdb one: showId for a show, seasonId for a season, both of which come back
+  // in the progress response.
+  Future<void> rate({
+    required String targetType,
+    required int targetId,
+    required double score,
+    String? comment,
+  }) async {
+    await dio.put("/ratings", data: {
+      "targetType": targetType,
+      "targetId": targetId,
+      "score": score,
+      if (comment != null && comment.isNotEmpty) "comment": comment,
+    });
+  }
+
+  Future<void> deleteRating(String targetType, int targetId) async {
+    await dio.delete("/ratings/$targetType/$targetId");
+  }
+
+  // average, count, and this user's own score if they left one
+  Future<({double average, int count, double? mine})> ratingSummary(
+    String targetType,
+    int targetId,
+  ) async {
+    final response = await dio.get("/ratings/$targetType/$targetId/summary");
+    final data = _unwrap(response.data) as Map<String, dynamic>;
+    return (
+      average: ((data["averageRating"] ?? 0) as num).toDouble(),
+      count: ((data["ratingCount"] ?? 0) as num).toInt(),
+      mine: (data["myRating"] as num?)?.toDouble(),
+    );
+  }
 }

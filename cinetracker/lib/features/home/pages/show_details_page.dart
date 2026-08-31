@@ -35,6 +35,9 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
   final Set<int> _pendingSeasons = {};
   // which season to open once the page has loaded, used by "up next"
   int? _expandSeason;
+  double? _myRating;
+  double _averageRating = 0;
+  int _ratingCount = 0;
 
   @override
   void initState() {
@@ -54,6 +57,7 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
         _progress = progress;
         _loading = false;
       });
+      _loadRating(progress.showId);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -143,6 +147,73 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
       if (!mounted) return;
       _snack("Could not change the status.");
     }
+  }
+
+  Future<void> _loadRating(int showId) async {
+    try {
+      final summary = await _service.ratingSummary("SHOW", showId);
+      if (!mounted) return;
+      setState(() {
+        _averageRating = summary.average;
+        _ratingCount = summary.count;
+        _myRating = summary.mine;
+      });
+    } catch (e) {
+      // a missing rating summary should not stop the page rendering
+    }
+  }
+
+  Future<void> _rate(double score) async {
+    final progress = _progress;
+    if (progress == null) return;
+    try {
+      await _service.rate(
+        targetType: "SHOW",
+        targetId: progress.showId,
+        score: score,
+      );
+      await _loadRating(progress.showId);
+      if (!mounted) return;
+      _snack("Rated $score");
+    } catch (e) {
+      if (!mounted) return;
+      _snack("Could not save that rating.");
+    }
+  }
+
+  // half stars, same 0.5 steps the backend enforces
+  void _openRatingSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Rate this show",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 14),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 4,
+                children: List.generate(10, (i) {
+                  final score = (i + 1) * 0.5;
+                  return ChoiceChip(
+                    label: Text(score.toString()),
+                    selected: _myRating == score,
+                    onSelected: (_) {
+                      Navigator.pop(sheetContext);
+                      _rate(score);
+                    },
+                  );
+                }),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _snack(String message) {
@@ -279,6 +350,25 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
                 Text("All caught up"),
               ],
             ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _openRatingSheet,
+                icon: Icon(
+                  _myRating == null ? Icons.star_border_rounded : Icons.star_rounded,
+                  size: 18,
+                ),
+                label: Text(_myRating == null ? "Rate" : "Your rating  $_myRating"),
+              ),
+              const SizedBox(width: 12),
+              if (_ratingCount > 0)
+                Text(
+                  "$_averageRating  ($_ratingCount)",
+                  style: theme.textTheme.bodySmall,
+                ),
+            ],
+          ),
           if (progress.overview.isNotEmpty) ...[
             const SizedBox(height: 18),
             Text("Overview", style: theme.textTheme.titleSmall),
