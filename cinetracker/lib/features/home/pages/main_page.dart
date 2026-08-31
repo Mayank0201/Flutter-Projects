@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'home_page.dart';
-import 'movie_search_page.dart';
 import 'profile_page.dart';
-import 'discovery_page.dart';
+import 'show_search_page.dart';
+import 'shows_home_page.dart';
 
+// bottom nav. the movie tabs (HomePage, MovieSearchPage, DiscoveryPage) are
+// still in the codebase and still work, they are just not routed to any more
+// now that the app is tv first.
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -16,9 +18,8 @@ class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = const [
-    HomePage(),
-    MovieSearchPage(),
-    DiscoveryPage(),
+    ShowsHomePage(),
+    ShowSearchPage(),
     ProfilePage(),
   ];
 
@@ -47,11 +48,6 @@ class _MainPageState extends State<MainPage> {
             icon: Icon(Icons.search_rounded),
             activeIcon: Icon(Icons.search_rounded),
             label: 'Search',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.explore_outlined),
-            activeIcon: Icon(Icons.explore_rounded),
-            label: 'Discover',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline_rounded),

@@ -32,7 +32,11 @@ class MovieResolver extends StatefulWidget {
 }
 
 class _MovieResolverState extends State<MovieResolver> {
-  static final Map<int, Movie> _movieCache = {};
+  // keyed by "movie-<id>", not the bare id. a show id and a movie id can be the
+  // same number, and a bare int key would serve the wrong poster and title.
+  static final Map<String, Movie> _movieCache = {};
+
+  static String _cacheKey(int movieId) => "movie-$movieId";
 
   String? _resolvedTitle;
   String? _resolvedPosterUrl;
@@ -72,8 +76,8 @@ class _MovieResolverState extends State<MovieResolver> {
     }
 
     // Check static cache first
-    if (_movieCache.containsKey(widget.movieId)) {
-      final cached = _movieCache[widget.movieId]!;
+    if (_movieCache.containsKey(_cacheKey(widget.movieId))) {
+      final cached = _movieCache[_cacheKey(widget.movieId)]!;
       _resolvedTitle = cached.title;
       _resolvedPosterUrl = cached.poster;
       _resolvedReleaseYear = cached.releaseYear;
@@ -95,7 +99,7 @@ class _MovieResolverState extends State<MovieResolver> {
   Future<void> _fetchMovieFromTmdb() async {
     try {
       final movie = await TMDBService().getMovieDetails(widget.movieId);
-      _movieCache[widget.movieId] = movie;
+      _movieCache[_cacheKey(widget.movieId)] = movie;
       if (mounted) {
         setState(() {
           _resolvedTitle = movie.title;

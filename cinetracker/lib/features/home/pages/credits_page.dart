@@ -55,7 +55,7 @@ class CreditsPage extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              "1.0.1",
+              "1.2.0",
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),

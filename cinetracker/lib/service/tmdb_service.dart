@@ -34,6 +34,23 @@ class TMDBService {
     _apiService.clearToken();
   }
 
+  // some endpoints answer with the payload directly and some wrap it in
+  // ApiResponse. unwrap either, otherwise a change on the backend gives us an
+  // empty list and a blank screen with nothing in the logs.
+  static dynamic _unwrap(dynamic raw) {
+    if (raw is Map<String, dynamic> && raw.containsKey("data")) {
+      return raw["data"];
+    }
+    return raw;
+  }
+
+  static List _resultsOf(dynamic raw) {
+    final data = _unwrap(raw);
+    if (data is Map) return (data["results"] as List?) ?? const [];
+    if (data is List) return data;
+    return const [];
+  }
+
   Future<List<Movie>> getPopularMovies() async {
     final response = await dio.get(
       "/movie/popular",
@@ -42,9 +59,7 @@ class TMDBService {
 
     debugPrint("POPULAR RESPONSE: ${response.data}");
 
-    final List data = response.data["results"] ?? [];
-
-    return data.map((e) => Movie.fromBackendJson(e)).toList();
+    return _resultsOf(response.data).map((e) => Movie.fromBackendJson(e)).toList();
   }
 
   Future<List<Map<String, dynamic>>> getGenres() async {
@@ -52,7 +67,7 @@ class TMDBService {
 
     debugPrint("GENRE RESPONSE: ${response.data}");
 
-    return List<Map<String, dynamic>>.from(response.data);
+    return List<Map<String, dynamic>>.from(_unwrap(response.data) as List? ?? const []);
   }
 
   Future<List<Movie>> getMoviesByGenre(String genreId) async {
@@ -63,9 +78,7 @@ class TMDBService {
 
     debugPrint("GENRE MOVIES RESPONSE: ${response.data}");
 
-    final List data = response.data["results"] ?? [];
-
-    return data.map((e) => Movie.fromBackendJson(e)).toList();
+    return _resultsOf(response.data).map((e) => Movie.fromBackendJson(e)).toList();
   }
 
   Future<List<Movie>> searchMovies(String query) async {
@@ -76,9 +89,7 @@ class TMDBService {
 
     debugPrint("SEARCH RESPONSE: ${response.data}");
 
-    final List data = response.data["results"] ?? [];
-
-    return data.map((e) => Movie.fromBackendJson(e)).toList();
+    return _resultsOf(response.data).map((e) => Movie.fromBackendJson(e)).toList();
   }
 
   Future<Movie> getMovieDetails(int movieId) async {
