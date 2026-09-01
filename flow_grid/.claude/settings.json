@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "PowerShell(flutter:*)",
+      "PowerShell(dart:*)",
+      "PowerShell(git ls-tree:*)",
+      "PowerShell(& .\\dev\\run.ps1:*)",
+      "PowerShell(& .\\dev\\analyze.ps1:*)",
+      "Bash(flutter:*)",
+      "Bash(dart:*)",
+      "Bash(git ls-tree:*)"
+    ]
+  }
+}

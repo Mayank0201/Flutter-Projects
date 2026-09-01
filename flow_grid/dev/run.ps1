@@ -1,8 +1,9 @@
-# dev/run.ps1 — wrapper for `flutter run` against the local SDK install.
+# dev/run.ps1 - wrapper for `flutter run`.
 # Usage:
-#   .\dev\run.ps1                  → flutter run -d chrome  --web-port 9494
-#   .\dev\run.ps1 web-server       → flutter run -d web-server --web-port 9494 (no auto-launch)
-#   .\dev\run.ps1 chrome -- --release  → forwards extra args after --
+#   .\dev\run.ps1                      -> flutter run -d chrome --web-port 9494
+#   .\dev\run.ps1 web-server           -> same, without auto-launching a browser
+#   .\dev\run.ps1 windows              -> desktop run (no --web-port)
+#   .\dev\run.ps1 chrome --release     -> trailing args are forwarded to flutter
 
 param(
     [string]$Device = "chrome",
@@ -11,13 +12,19 @@ param(
     [string[]]$Extra
 )
 
-$flutterBin = "C:\Users\AI Intern\flutter-sdk\flutter\bin"
-$projectDir = "C:\Users\AI Intern\Documents\Flutter-Projects\flow_grid"
+. "$PSScriptRoot\_env.ps1"
 
-$env:Path = "$flutterBin;$env:Path"
-Set-Location $projectDir
+$flutter = Resolve-SdkTool -Name 'flutter'
 
-$args = @('run', '-d', $Device, '--web-port', "$Port")
-if ($Extra) { $args += $Extra }
+Push-Location $ProjectDir
+try {
+    $runArgs = @('run', '-d', $Device)
+    if ($Device -in @('chrome', 'edge', 'web-server')) {
+        $runArgs += @('--web-port', "$Port")
+    }
+    if ($Extra) { $runArgs += $Extra }
 
-& "$flutterBin\flutter.bat" @args
+    & $flutter @runArgs
+} finally {
+    Pop-Location
+}

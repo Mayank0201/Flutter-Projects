@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local, machine-specific Claude Code overrides (shared settings live in
+# .claude/settings.json)
+.claude/settings.local.json
+
+# Analyzer / run-log dumps - regenerate with `.\dev\analyze.ps1`
+/analysis*.txt
+/analyze_out.txt
+/final_check.txt
+/log_tail.txt

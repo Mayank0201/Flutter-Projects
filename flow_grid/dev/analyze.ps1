@@ -1,21 +1,24 @@
-# dev/analyze.ps1 — wrapper for `dart analyze` against the local SDK install.
+# dev/analyze.ps1 - wrapper for `flutter analyze`.
 # Usage:
-#   .\dev\analyze.ps1                        → dart analyze (full project)
-#   .\dev\analyze.ps1 lib/game/foo.dart      → analyze a single path
-#   .\dev\analyze.ps1 lib/ -- --fatal-infos  → forwards extra args after --
+#   .\dev\analyze.ps1                       -> analyze the whole project
+#   .\dev\analyze.ps1 lib\game              -> analyze a single path
+#   .\dev\analyze.ps1 lib --fatal-infos     -> trailing args are forwarded to flutter
 
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Targets
 )
 
-$flutterBin = "C:\Users\AI Intern\flutter-sdk\flutter\bin"
-$projectDir = "C:\Users\AI Intern\Documents\Flutter-Projects\flow_grid"
+. "$PSScriptRoot\_env.ps1"
 
-$env:Path = "$flutterBin;$env:Path"
-Set-Location $projectDir
+$flutter = Resolve-SdkTool -Name 'flutter'
 
-$args = @('analyze')
-if ($Targets) { $args += $Targets }
+Push-Location $ProjectDir
+try {
+    $analyzeArgs = @('analyze')
+    if ($Targets) { $analyzeArgs += $Targets }
 
-& "$flutterBin\dart.bat" @args
+    & $flutter @analyzeArgs
+} finally {
+    Pop-Location
+}
