@@ -42,13 +42,24 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
       filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
       child: DefaultTextStyle(
         style: GoogleFonts.outfit(decoration: TextDecoration.none),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.75),
+        // Fade the scrim in on the same timeline as the card below, instead
+        // of the backdrop popping in a frame before the card starts
+        // animating — a calmer, single unified entrance.
+        child: TweenAnimationBuilder<double>(
+          duration: const Duration(milliseconds: 400),
+          tween: Tween<double>(begin: 0.0, end: 1.0),
+          curve: Curves.easeOut,
+          builder: (context, scrimValue, child) => Container(
+            color: Colors.black.withValues(
+              alpha: 0.75 * scrimValue.clamp(0.0, 1.0),
+            ),
+            child: child,
+          ),
           child: Center(
             child: TweenAnimationBuilder<double>(
               duration: const Duration(milliseconds: 500),
               tween: Tween<double>(begin: 0.0, end: 1.0),
-              curve: Curves.easeOutBack,
+              curve: Curves.easeOut,
               builder: (context, value, child) {
                 return Opacity(
                   opacity: value.clamp(0.0, 1.0),
@@ -67,12 +78,14 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                       color: const Color(0xFF13151A).withValues(alpha: 0.95),
                       borderRadius: BorderRadius.circular(32),
                       border: Border.all(
-                        color: const Color(0xFFE74C3C).withValues(alpha: 0.3),
+                        color: const Color(0xFF7C8591).withValues(alpha: 0.3),
                         width: 1.5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFE74C3C).withValues(alpha: 0.15),
+                          color: const Color(
+                            0xFF7C8591,
+                          ).withValues(alpha: 0.15),
                           blurRadius: 30,
                           spreadRadius: 2,
                         ),
@@ -87,17 +100,20 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                           Container(
                             height: 6,
                             width: double.infinity,
-                            color: const Color(0xFFE74C3C),
+                            color: const Color(0xFF7C8591),
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 40,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 // Title / Icon
                                 const Icon(
                                   Icons.error_outline,
-                                  color: Color(0xFFE74C3C),
+                                  color: Color(0xFF7C8591),
                                   size: 48,
                                 ),
                                 const SizedBox(height: 16),
@@ -106,7 +122,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                   style: GoogleFonts.outfit(
                                     fontSize: 30,
                                     fontWeight: FontWeight.w300,
-                                    color: const Color(0xFFE74C3C),
+                                    color: const Color(0xFF7C8591),
                                     letterSpacing: 4,
                                   ),
                                 ),
@@ -122,7 +138,10 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                 ),
                                 const SizedBox(height: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: Colors.white.withValues(alpha: 0.05),
                                     borderRadius: BorderRadius.circular(6),
@@ -132,7 +151,9 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                     style: GoogleFonts.outfit(
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white.withValues(alpha: 0.6),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.6,
+                                      ),
                                       letterSpacing: 2,
                                     ),
                                   ),
@@ -143,7 +164,9 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                 if (widget.game.newHighScore) ...[
                                   Container(
                                     width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
                                     margin: const EdgeInsets.only(bottom: 24),
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
@@ -155,13 +178,16 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                       ),
                                       border: Border.symmetric(
                                         horizontal: BorderSide(
-                                          color: Colors.amber.withValues(alpha: 0.4),
+                                          color: Colors.amber.withValues(
+                                            alpha: 0.4,
+                                          ),
                                           width: 1,
                                         ),
                                       ),
                                     ),
                                     child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         const Icon(
                                           Icons.emoji_events,
@@ -187,7 +213,11 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                 Row(
                                   children: [
                                     Expanded(
-                                      child: _buildStatCard('Score', '${widget.game.score}', isPrimary: true),
+                                      child: _buildStatCard(
+                                        'Score',
+                                        '${widget.game.score}',
+                                        isPrimary: true,
+                                      ),
                                     ),
                                     const SizedBox(width: 16),
                                     Expanded(
@@ -203,11 +233,17 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                 Row(
                                   children: [
                                     Expanded(
-                                      child: _buildStatCard('Weeks Survived', '${widget.game.week}'),
+                                      child: _buildStatCard(
+                                        'Weeks Survived',
+                                        '${widget.game.week}',
+                                      ),
                                     ),
                                     const SizedBox(width: 16),
                                     Expanded(
-                                      child: _buildStatCard('Deliveries', '${widget.game.totalDeliveries}'),
+                                      child: _buildStatCard(
+                                        'Deliveries',
+                                        '${widget.game.totalDeliveries}',
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -218,17 +254,24 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                 GestureDetector(
                                   onTap: () {
                                     widget.game.overlays.remove('gameOver');
-                                    widget.game.startGame(resume: false, mapType: widget.game.selectedMapType);
+                                    widget.game.startGame(
+                                      resume: false,
+                                      mapType: widget.game.selectedMapType,
+                                    );
                                   },
                                   child: Container(
                                     width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.white,
                                       borderRadius: BorderRadius.circular(12),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.white.withValues(alpha: 0.1),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.1,
+                                          ),
                                           blurRadius: 10,
                                           offset: const Offset(0, 4),
                                         ),
@@ -256,12 +299,16 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                   },
                                   child: Container(
                                     width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.transparent,
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
-                                        color: Colors.white.withValues(alpha: 0.12),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.12,
+                                        ),
                                       ),
                                     ),
                                     child: Center(
@@ -270,7 +317,9 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                         style: GoogleFonts.outfit(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
-                                          color: Colors.white.withValues(alpha: 0.6),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.6,
+                                          ),
                                           letterSpacing: 2,
                                         ),
                                       ),
@@ -293,20 +342,25 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
     );
   }
 
-  Widget _buildStatCard(String label, String value, {bool isPrimary = false, bool isHighScore = false}) {
+  Widget _buildStatCard(
+    String label,
+    String value, {
+    bool isPrimary = false,
+    bool isHighScore = false,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
       decoration: BoxDecoration(
         color: isPrimary
-            ? const Color(0xFFE74C3C).withValues(alpha: 0.08)
+            ? const Color(0xFF7C8591).withValues(alpha: 0.08)
             : Colors.white.withValues(alpha: 0.02),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isHighScore
               ? Colors.amber.withValues(alpha: 0.3)
               : isPrimary
-                  ? const Color(0xFFE74C3C).withValues(alpha: 0.2)
-                  : Colors.white.withValues(alpha: 0.05),
+              ? const Color(0xFF7C8591).withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.05),
           width: 1,
         ),
       ),
@@ -334,8 +388,8 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
               color: isHighScore
                   ? Colors.amber
                   : isPrimary
-                      ? const Color(0xFFE74C3C)
-                      : Colors.white,
+                  ? const Color(0xFF7C8591)
+                  : Colors.white,
             ),
           ),
         ],

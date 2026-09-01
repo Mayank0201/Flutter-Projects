@@ -23,13 +23,30 @@ import 'emergency_manager.dart';
 import 'utils/performance_logger.dart';
 import 'car_pool.dart';
 
-
-
 enum GamePhase { menu, playing, paused, gameOver, weeklyUpgrade }
 
-enum BuildTool { road, bridge, tunnel, trafficLight, smartJunction, expressLane, erase, inspect, upgradeRoad, busStop, busLane, oneWay, metroTrack, elevatedRail, highway, metroStation, priorityIntersection }
+enum BuildTool {
+  road,
+  bridge,
+  tunnel,
+  trafficLight,
+  smartJunction,
+  expressLane,
+  erase,
+  inspect,
+  upgradeRoad,
+  busStop,
+  busLane,
+  oneWay,
+  metroTrack,
+  elevatedRail,
+  highway,
+  metroStation,
+  priorityIntersection,
+}
 
-class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, ScrollDetector {
+class FlowGridGame extends FlameGame
+    with ScaleDetector, MouseMovementDetector, ScrollDetector {
   GridManager? gridManager;
   GridRenderer? gridRenderer;
 
@@ -44,14 +61,18 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   final ValueNotifier<int> weekNotifier = ValueNotifier<int>(1);
   final ValueNotifier<double> weekProgressNotifier = ValueNotifier<double>(0.0);
   final ValueNotifier<double> satisfactionNotifier = ValueNotifier<double>(1.0);
-  final ValueNotifier<TrafficPhase> trafficPhaseNotifier = ValueNotifier<TrafficPhase>(TrafficPhase.calm);
-  
-  
+  final ValueNotifier<TrafficPhase> trafficPhaseNotifier =
+      ValueNotifier<TrafficPhase>(TrafficPhase.calm);
+
   final ValueNotifier<int> roadInventoryNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> tunnelInventoryNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> bridgeInventoryNotifier = ValueNotifier<int>(0);
-  final ValueNotifier<int> trafficLightInventoryNotifier = ValueNotifier<int>(0);
-  final ValueNotifier<int> smartJunctionInventoryNotifier = ValueNotifier<int>(0);
+  final ValueNotifier<int> trafficLightInventoryNotifier = ValueNotifier<int>(
+    0,
+  );
+  final ValueNotifier<int> smartJunctionInventoryNotifier = ValueNotifier<int>(
+    0,
+  );
   final ValueNotifier<int> expressLaneInventoryNotifier = ValueNotifier<int>(0);
   final ValueNotifier<bool> canUndoNotifier = ValueNotifier<bool>(false);
 
@@ -70,7 +91,18 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   double get elapsedTime => _elapsedTime;
   final Map<String, List<GridPosition>> _pathCache = {};
 
+  // [FIX] Coalesces rapid-fire topology-change notifications (e.g. dragging
+  // out N tiles of road in one gesture fires onTopologyChanged once per
+  // tile) into a single per-car recalculatePath() pass per frame, instead of
+  // running the full recalculation — and its expensive smooth-path rebuild —
+  // once per car per edited tile. This was the dominant source of the
+  // build-time jitter: with many cars on screen, a 10-tile drag meant every
+  // car's path (and spline) was rebuilt 10 times in the same frame for no
+  // additional benefit, since only the final topology state matters.
+  bool _topologyDirty = false;
+
   List<String> weeklyOptions = [];
+
   /// Scaled road count awarded this week — increases every 3 weeks.
   int weeklyBaseRoads = 20;
 
@@ -78,7 +110,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   final Map<String, RoadOccupancy> occupancyMap = {};
 
   RoadOccupancy getOrCreateOccupancy(GridPosition pos) {
-    final key = pos.side != null ? "${pos.x},${pos.y},${pos.side!.name}" : "${pos.x},${pos.y}";
+    final key = pos.side != null
+        ? "${pos.x},${pos.y},${pos.side!.name}"
+        : "${pos.x},${pos.y}";
     return occupancyMap.putIfAbsent(key, () {
       final cell = gridManager?.getCell(pos.x, pos.y);
       final occupancy = RoadOccupancy();
@@ -115,9 +149,10 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   late ProgressionDirector progressionDirector;
   late DistrictPlanner districtPlanner;
   late EventManager eventManager;
-  
+
   // Weather & Event simulation variables
-  String? activeEvent; // 'blizzard', 'dustStorm', 'animalCrossing', 'drawbridgeOpen', 'flashFlood'
+  String?
+  activeEvent; // 'blizzard', 'dustStorm', 'animalCrossing', 'drawbridgeOpen', 'flashFlood'
   double eventTimer = 0.0;
   double nextEventCooldown = 25.0; // Trigger the first event after 25s
   double eventDuration = 0.0;
@@ -142,10 +177,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   //
   // On a landscape phone (~2.0 aspect) the height drives the size — the
   // aspect-fit in _syncSpawnBounds expands the half-width to hh*screenAspect.
-  static const int _initialActiveHalfWidth = 7;    // Week 1: 14 cells wide (base, before aspect-fit)
-  static const int _initialActiveHalfHeight = 5;   // Week 1: 10 cells tall
-  static const int _weeklyActiveExpansionX = 2;    // +4 width per week
-  static const int _weeklyActiveExpansionY = 1;    // +2 height per week
+  static const int _initialActiveHalfWidth =
+      7; // Week 1: 14 cells wide (base, before aspect-fit)
+  static const int _initialActiveHalfHeight = 5; // Week 1: 10 cells tall
+  static const int _weeklyActiveExpansionX = 2; // +4 width per week
+  static const int _weeklyActiveExpansionY = 1; // +2 height per week
 
   bool previewMode = false;
   double smoothWeek = 1.0;
@@ -155,28 +191,42 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
   int get _activeHalfWidth {
     final maxHalf = (gridCols - 4) ~/ 2;
-    return min(maxHalf, _initialActiveHalfWidth + (week - 1) * _weeklyActiveExpansionX);
+    return min(
+      maxHalf,
+      _initialActiveHalfWidth + (week - 1) * _weeklyActiveExpansionX,
+    );
   }
 
   int get _activeHalfHeight {
     final maxHalf = (gridRows - 4) ~/ 2;
-    return min(maxHalf, _initialActiveHalfHeight + (week - 1) * _weeklyActiveExpansionY);
+    return min(
+      maxHalf,
+      _initialActiveHalfHeight + (week - 1) * _weeklyActiveExpansionY,
+    );
   }
 
   double get smoothActiveHalfWidth {
     final maxHalf = (gridCols - 4) / 2.0;
-    return min(maxHalf, _initialActiveHalfWidth.toDouble() + (smoothWeek - 1.0) * _weeklyActiveExpansionX);
+    return min(
+      maxHalf,
+      _initialActiveHalfWidth.toDouble() +
+          (smoothWeek - 1.0) * _weeklyActiveExpansionX,
+    );
   }
 
   double get smoothActiveHalfHeight {
     final maxHalf = (gridRows - 4) / 2.0;
-    return min(maxHalf, _initialActiveHalfHeight.toDouble() + (smoothWeek - 1.0) * _weeklyActiveExpansionY);
+    return min(
+      maxHalf,
+      _initialActiveHalfHeight.toDouble() +
+          (smoothWeek - 1.0) * _weeklyActiveExpansionY,
+    );
   }
 
   math.Point<double> getSmoothActiveHalfDimensions() {
     double hw = smoothActiveHalfWidth;
     double hh = smoothActiveHalfHeight;
-    
+
     if (size.x > 100 && size.y > 100) {
       const double padding = 16.0;
       final screenW = size.x - hudPanelWidth - (2 * padding);
@@ -265,13 +315,13 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   List<CarComponent> get cars => _cars;
   final List<GridPosition> _dragPath = [];
   List<GridPosition> previewPath = [];
-  
+
   GridPosition? expressLanePendingStart;
   GridPosition? expressLaneDraggingEnd;
 
-  bool get _isDeferredTool => 
-      activeTool == BuildTool.road || 
-      activeTool == BuildTool.bridge || 
+  bool get _isDeferredTool =>
+      activeTool == BuildTool.road ||
+      activeTool == BuildTool.bridge ||
       activeTool == BuildTool.tunnel ||
       activeTool == BuildTool.erase;
 
@@ -289,11 +339,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   // ── Game-over cinematic transition ───────────────────────────────────────────
   bool _gameOverTransitioning = false;
   double _gameOverTransitionTimer = 0.0;
-  static const double _gameOverZoomInDuration = 1.8; // seconds before overlay shows
+  static const double _gameOverZoomInDuration =
+      1.8; // seconds before overlay shows
   static const double _gameOverZoomMultiplier = 2.5;
 
   final PerformanceLogger perfLogger = PerformanceLogger();
-  
 
   final CarPool carPool = CarPool();
 
@@ -304,13 +354,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   // the rendered car from looking squished when the component is square.
   double vehicleSpriteAspect = 1.0;
 
-  
   // Tiered Tick Rates
   double _logicTickTimer = 0;
   double _simTickTimer = 0;
   double _metricsTickTimer = 0;
   double _spawnTickTimer = 0;
-  
+
   // Input Polish
   Vector2? _panStartPixel;
   // Drag threshold in screen pixels. At a typical mobile zoom (~0.6) a single
@@ -337,8 +386,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     debugPrint("[BOOT] onLoad complete, added mainMenu");
   }
 
-
   Future<void> _loadVehicleSprites() async {
+    // 'normal_vehicles.png' is a flat, minimal rounded-capsule car (no cabin
+    // block, no wheel nubs, no heavy outline) — the toy-car-looking cabin/
+    // wheel design tested earlier ('vehicles_option_a.png') was rejected as
+    // too cartoonish; this matches the game's calmer, Mini-Motorways-style
+    // aesthetic instead.
     final image = await images.load('normal_vehicles.png');
     const cols = 6;
     final cellW = image.width / cols;
@@ -346,23 +399,30 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     vehicleSpriteAspect = cellH / cellW;
     vehicleSprites.clear();
     for (int i = 0; i < cols; i++) {
-      vehicleSprites.add(Sprite(
-        image,
-        srcPosition: Vector2(i * cellW, 0),
-        srcSize: Vector2(cellW, cellH),
-      ));
+      vehicleSprites.add(
+        Sprite(
+          image,
+          srcPosition: Vector2(i * cellW, 0),
+          srcSize: Vector2(cellW, cellH),
+        ),
+      );
     }
-    debugPrint('[BOOT] loaded ${vehicleSprites.length} vehicle sprites '
-        '(cell ${cellW.toStringAsFixed(1)}x${cellH.toStringAsFixed(1)})');
+    debugPrint(
+      '[BOOT] loaded ${vehicleSprites.length} vehicle sprites '
+      '(cell ${cellW.toStringAsFixed(1)}x${cellH.toStringAsFixed(1)})',
+    );
   }
 
-
-  void startGame({required bool resume, MapType mapType = MapType.zen, int slotIndex = 0}) async {
+  void startGame({
+    required bool resume,
+    MapType mapType = MapType.zen,
+    int slotIndex = 0,
+  }) async {
     _initialSyncDone = false;
     _spawnAttempts = 0;
     currentSlotIndex = slotIndex;
     selectedMapType = mapType;
-    
+
     // Reset core state
     _undoStack.clear();
     canUndoNotifier.value = false;
@@ -385,20 +445,56 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     _cars.clear();
     children.whereType<CarComponent>().forEach((c) => c.removeFromParent());
-    world.children.whereType<CarComponent>().forEach((c) => c.removeFromParent());
+    world.children.whereType<CarComponent>().forEach(
+      (c) => c.removeFromParent(),
+    );
     children.whereType<GridRenderer>().forEach((r) => r.removeFromParent());
-    world.children.whereType<GridRenderer>().forEach((r) => r.removeFromParent());
-    
+    world.children.whereType<GridRenderer>().forEach(
+      (r) => r.removeFromParent(),
+    );
+    // Tear down any previous run's managers before replacing them below — otherwise
+    // every restart ("Play Again", Resume, New Game) leaves the old EventManager/
+    // TransitManager/EmergencyManager instances alive and still ticking in the
+    // component tree, so their event/emergency/bus simulations silently stack up
+    // (duplicate score deltas, duplicate emergency spawns, etc.) run after run.
+    children.whereType<EventManager>().forEach((c) => c.removeFromParent());
+    children.whereType<TransitManager>().forEach((c) => c.removeFromParent());
+    children.whereType<EmergencyManager>().forEach((c) => c.removeFromParent());
+
     if (resume) {
       final save = await SaveManager.loadGame(slotIndex: slotIndex);
       if (save != null) {
         gridCols = save['gridCols'] ?? 16;
         gridRows = save['gridRows'] ?? 10;
         selectedMapType = MapType.values[save['mapType'] ?? 0];
-        gridManager = GridManager(gridCols, gridRows, selectedMapType: selectedMapType, initTerrain: false);
-        
+        gridManager = GridManager(
+          gridCols,
+          gridRows,
+          selectedMapType: selectedMapType,
+          initTerrain: false,
+        );
+
         // Restore Grid, Inventories, Driveways, and Demand State Unifiedly
         gridManager!.loadFromSave(save);
+
+        // Restore per-house car-count bookkeeping (previously written on save but
+        // never read back, silently resetting on every load).
+        houseCarCounts
+          ..clear()
+          ..addAll(SaveManager.loadHouseCarCounts(save));
+
+        // Restore in-flight vehicles (previously serialized on save but never read
+        // back, so every car/bus/emergency vehicle silently vanished on resume).
+        final restoredCars = SaveManager.loadCars(
+          save,
+          cellSize: cellSize,
+          offsetX: boardOffsetX,
+          offsetY: boardOffsetY,
+        );
+        for (final car in restoredCars) {
+          _cars.add(car);
+          world.add(car);
+        }
 
         // Restore Metadata
         week = save['week'] ?? 1;
@@ -409,10 +505,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         weekTimer = (save['weekTimer'] as num?)?.toDouble() ?? 0;
         _elapsedTime = (save['elapsedTime'] as num?)?.toDouble() ?? 0;
         activeColorCount = save['activeColorCount'] ?? 1;
-        userZoomMultiplier = (save['userZoomMultiplier'] as num?)?.toDouble() ?? 1.0;
+        userZoomMultiplier =
+            (save['userZoomMultiplier'] as num?)?.toDouble() ?? 1.0;
 
         // Camera
-        camera.viewfinder.zoom = (save['cameraZoom'] as num?)?.toDouble() ?? 1.0;
+        camera.viewfinder.zoom =
+            (save['cameraZoom'] as num?)?.toDouble() ?? 1.0;
         camera.viewfinder.position = Vector2(
           (save['cameraPosX'] as num?)?.toDouble() ?? 0.0,
           (save['cameraPosY'] as num?)?.toDouble() ?? 0.0,
@@ -428,7 +526,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       gridCols = 48;
       gridRows = 36;
       gridManager = GridManager(gridCols, gridRows, selectedMapType: mapType);
-      
+
       final generator = MapGeneratorFactory.getGenerator(mapType);
       gridManager!.roads = generator.config.startingRoads;
       gridManager!.tunnels = generator.config.startingTunnels;
@@ -436,6 +534,14 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       gridManager!.trafficLights = generator.config.startingTrafficLights;
       gridManager!.smartJunctions = generator.config.startingSmartJunctions;
       gridManager!.expressLanes = generator.config.startingExpressLanes;
+
+      // DEBUG: guarantee at least one of each advanced tool at game start so
+      // traffic-light/smart-junction/express-lane behavior can be tested
+      // immediately without waiting to earn them through play. Remove before
+      // shipping — this is only for local QA.
+      gridManager!.trafficLights = max(gridManager!.trafficLights, 1);
+      gridManager!.smartJunctions = max(gridManager!.smartJunctions, 1);
+      gridManager!.expressLanes = max(gridManager!.expressLanes, 1);
 
       // Initial Camera
       _syncCameraCenter(instant: true);
@@ -456,16 +562,29 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     spawnController!.onBuildingSpawned = (pos) {
       gridRenderer?.registerSpawnAnimation(pos);
       if (GameConstants.debugInfrastructure) {
-        debugPrint('[BREADCRUMB] Building spawned at coordinate: (${pos.x}, ${pos.y})');
+        debugPrint(
+          '[BREADCRUMB] Building spawned at coordinate: (${pos.x}, ${pos.y})',
+        );
       }
     };
-    spawnController!.onLog = (msg) => debugPrint('[SPAWN] $msg');
-    debugPrint("[SPAWN_MANAGER_INIT] SpawnController created and scoring initialized");
+    // SpawnController fires this on every spawn attempt/rejection across every
+    // relaxation stage — unconditionally this produced hundreds of console writes
+    // per second while the spawn search was active, a real cost in debug/profile
+    // builds. Gate it behind the same debug flag as the rest of the verbose logs.
+    spawnController!.onLog = (msg) {
+      if (GameConstants.debugInfrastructure) debugPrint('[SPAWN] $msg');
+    };
+    debugPrint(
+      "[SPAWN_MANAGER_INIT] SpawnController created and scoring initialized",
+    );
     gridRenderer = GridRenderer(gridManager: gridManager!, cellSize: cellSize);
     world.add(gridRenderer!);
-    
+
     // Initialize Managers with valid references
-    eventManager = EventManager(gridManager: gridManager!, districtPlanner: districtPlanner);
+    eventManager = EventManager(
+      gridManager: gridManager!,
+      districtPlanner: districtPlanner,
+    );
     transitManager = TransitManager();
     emergencyManager = EmergencyManager();
     progressionDirector = ProgressionDirector(spawnController!);
@@ -477,7 +596,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         progressionDirector.registerUnlockedColor(i, 1);
       }
       if (GameConstants.debugInfrastructure) {
-        debugPrint('[BREADCRUMB] Game loaded from slot $slotIndex. Week: $week, Score: $score, Active Colors: $activeColorCount.');
+        debugPrint(
+          '[BREADCRUMB] Game loaded from slot $slotIndex. Week: $week, Score: $score, Active Colors: $activeColorCount.',
+        );
       }
     } else {
       if (GameConstants.debugInfrastructure) {
@@ -485,20 +606,32 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       }
     }
 
-    // Add components to the game tree
-    add(eventManager);
-    add(transitManager);
-    add(emergencyManager);
+    // Add components to the game tree.
+    // LOWKEY MVP: eventManager (road-blocking city events like floods/storms),
+    // transitManager (buses), and emergencyManager (emergency-vehicle events)
+    // are intentionally never added to the component tree — their `update()`
+    // never runs, so they can never trigger anything. They're still
+    // instantiated above so any code reading their (permanently empty) state
+    // (e.g. `activeEvents`) keeps working without null checks everywhere.
+    // This keeps the core loop to just: houses, destinations, plain cars,
+    // roads/tunnels/bridges/signals — closer to Mini Motorways' scope.
     debugPrint("[WORLD_INIT] Components added to game tree");
 
     // Connect callbacks
     gridManager!.onTopologyChanged = () {
       _pathCache.clear();
-      for (final car in List.of(_cars)) {
-        car.recalculatePath();
-      }
+      // Defer the actual per-car recalculation to the top of the next
+      // update() tick — see _topologyDirty. Multiple edits in the same
+      // frame (a multi-tile drag) collapse into a single recalculation pass.
+      _topologyDirty = true;
     };
-    gridManager!.isStagedBuilding = (x, y) => spawnController?.isStagedBuildingPosition(x, y) ?? false;
+    gridManager!.isStagedBuilding = (x, y) =>
+        spawnController?.isStagedBuildingPosition(x, y) ?? false;
+    // [FIX] See GridManager.onSignalPhaseChanged's doc comment -- without
+    // this, a traffic light's drawn phase (baked into the cached per-chunk
+    // Picture) never refreshed when the phase actually flipped.
+    gridManager!.onSignalPhaseChanged = (x, y) =>
+        gridRenderer?.markInfrastructureDirty(x, y);
 
     phase = GamePhase.playing;
     paused = false;
@@ -513,7 +646,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     _pendingInitialSpawn = true;
 
     _updateInventoryNotifiers();
-    
+
     // Manage Overlays
     overlays.remove('mainMenu');
     overlays.remove('mapSelection');
@@ -568,7 +701,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       gridManager!.expressLanes += 1;
     } else if (option == 'doubleRoads') {
       gridManager!.roads += base + 10;
-    // ── Gamble outcomes ──────────────────────────────────────────────────────
+      // ── Gamble outcomes ──────────────────────────────────────────────────────
     } else if (option == 'gamble_jackpot') {
       gridManager!.roads += 50;
       gridManager!.tunnels += 1;
@@ -601,7 +734,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     trafficLightInventoryNotifier.value = gridManager!.trafficLights;
     smartJunctionInventoryNotifier.value = gridManager!.smartJunctions;
     expressLaneInventoryNotifier.value = gridManager!.expressLanes;
-    
+
     weekNotifier.value = week;
     weekProgressNotifier.value = weekProgress;
     scoreNotifier.value = score;
@@ -626,6 +759,16 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   void update(double dt) {
     super.update(dt);
 
+    // Flush any topology changes accumulated since the last tick (see
+    // _topologyDirty) as a single recalculation pass, regardless of how many
+    // individual tiles were edited since then.
+    if (_topologyDirty) {
+      _topologyDirty = false;
+      for (final car in List.of(_cars)) {
+        car.recalculatePath();
+      }
+    }
+
     if (smoothWeek < week) {
       smoothWeek = min(week.toDouble(), smoothWeek + dt * 0.4);
       _syncSpawnBounds();
@@ -642,7 +785,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       camera.viewfinder.zoom = _targetZoom;
       _syncCameraCenter(instant: true);
       _initialSyncDone = true;
-      debugPrint("[SYNC] Initial camera and spawn bounds synchronized with size: $size");
+      debugPrint(
+        "[SYNC] Initial camera and spawn bounds synchronized with size: $size",
+      );
 
       _tryInitialSpawn();
     }
@@ -653,12 +798,21 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     _debugLogTimer += dt;
     if (_debugLogTimer > 5.0) {
-      debugPrint("[UPDATE_LOOP_ACTIVE] phase: $phase, paused: $paused, week: $week, zoom: ${camera.viewfinder.zoom.toStringAsFixed(3)}, targetZoom: ${_targetZoom.toStringAsFixed(3)}, activeArea: [${spawnController?.minSpawnX}..${spawnController?.maxSpawnX}, ${spawnController?.minSpawnY}..${spawnController?.maxSpawnY}]");
+      if (GameConstants.debugInfrastructure) {
+        debugPrint(
+          "[UPDATE_LOOP_ACTIVE] phase: $phase, paused: $paused, week: $week, zoom: ${camera.viewfinder.zoom.toStringAsFixed(3)}, targetZoom: ${_targetZoom.toStringAsFixed(3)}, activeArea: [${spawnController?.minSpawnX}..${spawnController?.maxSpawnX}, ${spawnController?.minSpawnY}..${spawnController?.maxSpawnY}]",
+        );
+      }
       _debugLogTimer = 0;
     }
-    
-    if (phase != GamePhase.playing || paused || _gameOverTransitioning || timeScale == 0.0) return;
-    
+
+    if (phase != GamePhase.playing ||
+        paused ||
+        _gameOverTransitioning ||
+        timeScale == 0.0) {
+      return;
+    }
+
     final safeDt = dt.clamp(0.0, 0.05);
     final scaledDt = safeDt * timeScale;
     _elapsedTime += scaledDt;
@@ -709,7 +863,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   }
 
   void _checkGameOver() {
-    if (_gameOverTransitioning) return; // already transitioning, don't re-trigger
+    if (_gameOverTransitioning) {
+      return; // already transitioning, don't re-trigger
+    }
     final gm = gridManager;
     if (gm == null) return;
     for (final dest in gm.destinations) {
@@ -730,18 +886,21 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // entire update() loop, which means _updateCameraSmoothing never ticks
     // and _finishGameOverTransition is never called. Instead we use the
     // _gameOverTransitioning flag to suppress game-logic tiers below.
-    focusCameraOnGridPosition(overflowDest, zoomMultiplier: _gameOverZoomMultiplier);
+    focusCameraOnGridPosition(
+      overflowDest,
+      zoomMultiplier: _gameOverZoomMultiplier,
+    );
   }
 
   void _finishGameOverTransition() async {
     _gameOverTransitioning = false;
     clearCameraFocus();
     userZoomMultiplier = 1.0;
-    
+
     // Save high score and clear slot (permadeath)
     newHighScore = await SaveManager.updateHighScore(selectedMapType, score);
     await SaveManager.clearSave(slotIndex: currentSlotIndex);
-    
+
     phase = GamePhase.gameOver;
     overlays.remove('hud');
     overlays.add('gameOver');
@@ -751,10 +910,10 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   void _rebuildSpatialGrid() {
     carGrid.clear();
     gridWidth = gridManager?.cols ?? 100;
-    
+
     // Viewport Culling: Only update and index cars that are visible
     final viewport = camera.visibleWorldRect;
-    
+
     // Remove arrived cars and return them to the pool
     final toRemove = <CarComponent>[];
     for (final car in _cars) {
@@ -771,7 +930,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         carPool.returnCar(car);
         continue;
       }
-      
+
       // Basic culling: If car is far from viewport, skip detailed indexing
       // (Position check is very cheap)
       if (!viewport.inflate(cellSize * 4).contains(car.position.toOffset())) {
@@ -782,12 +941,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       final key = pos.x + pos.y * gridWidth;
       carGrid.putIfAbsent(key, () => []).add(car);
     }
-    
+
     if (toRemove.isNotEmpty) {
       _cars.removeWhere((c) => toRemove.contains(c));
     }
   }
-
 
   void _updateCameraSmoothing(double dt) {
     // ── Game-over cinematic transition ─────────────────────────────────────────
@@ -796,7 +954,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       // Smoothly lerp the viewfinder toward the focus target
       if (_cameraFocusTarget != null) {
         final t = 1.0 - pow(0.005, dt).toDouble(); // smooth exponential lerp
-        camera.viewfinder.position += (_cameraFocusTarget! - camera.viewfinder.position) * t;
+        camera.viewfinder.position +=
+            (_cameraFocusTarget! - camera.viewfinder.position) * t;
       }
       // Lerp zoom in.
       // NOTE: _targetZoom already incorporates userZoomMultiplier which was set
@@ -818,38 +977,45 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       final maxChange = 0.3 * dt;
       final oldZoom = camera.viewfinder.zoom;
       camera.viewfinder.zoom += delta.clamp(-maxChange, maxChange);
-      if (GameConstants.debugInfrastructure && (camera.viewfinder.zoom - oldZoom).abs() > 0.01) {
-        debugPrint('[BREADCRUMB] Zoom changed: ${camera.viewfinder.zoom.toStringAsFixed(2)}x');
+      if (GameConstants.debugInfrastructure &&
+          (camera.viewfinder.zoom - oldZoom).abs() > 0.01) {
+        debugPrint(
+          '[BREADCRUMB] Zoom changed: ${camera.viewfinder.zoom.toStringAsFixed(2)}x',
+        );
       }
       _syncCameraCenter(dt: dt);
       _syncSpawnBounds();
     }
   }
+
   void _updateTrafficSimulation(double dt) {
     if (gridManager == null) return;
 
     for (final housePos in gridManager!.houses) {
       final key = "${housePos.x},${housePos.y}";
       double timer = gridManager!.getHouseCarTimer(housePos) + dt;
-      
+
       if (timer >= GameConstants.carSpawnInterval) {
         // Try to spawn
         final dest = _findDestination(housePos);
         if (dest != null) {
           final start = gridManager!.buildingDriveways[key];
           final end = gridManager!.buildingDriveways["${dest.x},${dest.y}"];
-          
+
           if (start != null && end != null) {
             final path = Pathfinder.findPath(gridManager!, start, end);
             if (path != null) {
-              final colorIndex = gridManager!.getCell(housePos.x, housePos.y).colorIndex ?? 0;
+              final colorIndex =
+                  gridManager!.getCell(housePos.x, housePos.y).colorIndex ?? 0;
 
               // Buildings aren't pathfinder nodes (they're not passable), so
               // splice them onto the ends here. The `side` makes the car park
               // at the building's door (where the driveway stub meets the body)
               // instead of the cell center, which looks correct for both the
               // small house sprites and the larger destinations.
-              final houseEntry = gridManager!.getCell(housePos.x, housePos.y).entrySide;
+              final houseEntry = gridManager!
+                  .getCell(housePos.x, housePos.y)
+                  .entrySide;
               final destEntry = gridManager!.getCell(dest.x, dest.y).entrySide;
               final fullPath = <GridPosition>[
                 if (houseEntry != null)
@@ -875,11 +1041,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
               );
               _cars.add(car);
               world.add(car);
-              
+
               // Claim the demand!
               final destKey = "${dest.x},${dest.y}";
-              gridManager!.claimedDemand[destKey] = (gridManager!.claimedDemand[destKey] ?? 0) + 1;
-              
+              gridManager!.claimedDemand[destKey] =
+                  (gridManager!.claimedDemand[destKey] ?? 0) + 1;
+
               timer = 0;
             }
           }
@@ -894,17 +1061,16 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     final targets = gridManager!.destinations.where((d) {
       final cell = gridManager!.getCell(d.x, d.y);
       if (cell.colorIndex != houseCell.colorIndex) return false;
-      
+
       final key = "${d.x},${d.y}";
       final demandVal = gridManager!.demand[key] ?? 0;
       final claimedVal = gridManager!.claimedDemand[key] ?? 0;
       return demandVal > claimedVal;
     }).toList();
-    
+
     if (targets.isEmpty) return null;
     return targets[Random().nextInt(targets.length)];
   }
-
 
   int _spawnAttempts = 0;
 
@@ -913,7 +1079,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     if (gridManager == null || spawnController == null) return;
 
     // If the world already has a district (e.g. resumed save), we're done.
-    if (gridManager!.houses.isNotEmpty || gridManager!.destinations.isNotEmpty) {
+    if (gridManager!.houses.isNotEmpty ||
+        gridManager!.destinations.isNotEmpty) {
       _pendingInitialSpawn = false;
       _spawnAttempts = 0;
       return;
@@ -921,11 +1088,15 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     _spawnAttempts++;
     final spawned = spawnController!.spawnInitialPair(0);
-    debugPrint('[SPAWN] attempt #$_spawnAttempts spawnInitialPair(0)=$spawned, '
+    if (GameConstants.debugInfrastructure) {
+      debugPrint(
+        '[SPAWN] attempt #$_spawnAttempts spawnInitialPair(0)=$spawned, '
         'houses=${gridManager!.houses.length}, '
         'destinations=${gridManager!.destinations.length}, '
         'bounds=(${spawnController!.minSpawnX}..${spawnController!.maxSpawnX}, '
-        '${spawnController!.minSpawnY}..${spawnController!.maxSpawnY})');
+        '${spawnController!.minSpawnY}..${spawnController!.maxSpawnY})',
+      );
+    }
 
     if (spawned) {
       // Keep the camera on grid center (= active-region center) so the playable
@@ -940,7 +1111,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // SpawnController failed too many times — drop a guaranteed minimal district
     // manually so the player always has something to work with.
     if (_spawnAttempts >= 3) {
-      debugPrint('[SPAWN] SpawnController failed $_spawnAttempts times. Forcing manual district.');
+      if (GameConstants.debugInfrastructure) {
+        debugPrint(
+          '[SPAWN] SpawnController failed $_spawnAttempts times. Forcing manual district.',
+        );
+      }
       if (_forceManualDistrict(0)) {
         _pendingInitialSpawn = false;
         _spawnAttempts = 0;
@@ -967,13 +1142,20 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     // Sanity check: all four target cells (building + its driveway) must be empty.
     final spots = <GridPosition>[
-      destPos, destPos.getNeighbor(Direction.west),
-      house1Pos, house1Pos.getNeighbor(Direction.east),
-      house2Pos, house2Pos.getNeighbor(Direction.east),
+      destPos,
+      destPos.getNeighbor(Direction.west),
+      house1Pos,
+      house1Pos.getNeighbor(Direction.east),
+      house2Pos,
+      house2Pos.getNeighbor(Direction.east),
     ];
     for (final s in spots) {
       if (!gm.isValid(s.x, s.y) || !gm.grid[s.y][s.x].isEmpty) {
-        debugPrint('[SPAWN] Manual district aborted: cell ${s.key} is not empty');
+        if (GameConstants.debugInfrastructure) {
+          debugPrint(
+            '[SPAWN] Manual district aborted: cell ${s.key} is not empty',
+          );
+        }
         return false;
       }
     }
@@ -983,7 +1165,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       gm.placeDestination(destPos.x, destPos.y, colorIndex, Direction.west);
       gridRenderer?.registerSpawnAnimation(destPos);
       final destDw = destPos.getNeighbor(Direction.west);
-      gm.placeRoad(destDw.x, destDw.y, owner: InfrastructureOwner.systemGenerated);
+      gm.placeRoad(
+        destDw.x,
+        destDw.y,
+        owner: InfrastructureOwner.systemGenerated,
+      );
       gm.connectBuilding(destPos.x, destPos.y, destDw.x, destDw.y);
 
       // House 1 + driveway
@@ -1003,12 +1189,18 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     // Register cluster center so later progression logic doesn't try to re-spawn color 0.
     spawnController?.clusterCenters[colorIndex] = destPos;
-    spawnController?.residentialCenters[colorIndex] =
-        GridPosition((house1Pos.x + house2Pos.x) ~/ 2, (house1Pos.y + house2Pos.y) ~/ 2);
+    spawnController?.residentialCenters[colorIndex] = GridPosition(
+      (house1Pos.x + house2Pos.x) ~/ 2,
+      (house1Pos.y + house2Pos.y) ~/ 2,
+    );
 
     gridRenderer?.markDirty();
-    debugPrint('[SPAWN] Manual district committed at dest=${destPos.key}, '
-        'houses=[${house1Pos.key}, ${house2Pos.key}]');
+    if (GameConstants.debugInfrastructure) {
+      debugPrint(
+        '[SPAWN] Manual district committed at dest=${destPos.key}, '
+        'houses=[${house1Pos.key}, ${house2Pos.key}]',
+      );
+    }
     return true;
   }
 
@@ -1020,7 +1212,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // active-region center.
     if (_cameraFocusTarget != null) {
       final t = instant ? 1.0 : (1.0 - pow(0.001, dt).toDouble());
-      camera.viewfinder.position += (_cameraFocusTarget! - camera.viewfinder.position) * t;
+      camera.viewfinder.position +=
+          (_cameraFocusTarget! - camera.viewfinder.position) * t;
       return;
     }
 
@@ -1042,9 +1235,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       final minY = math.max(2.0, cy - hh);
       final w = hw * 2.0 * cellSize;
       final h = hh * 2.0 * cellSize;
-      
-      final targetX = (boardOffsetX + minX * cellSize) - ((screenW / zoom) - w) / 2;
-      final targetY = (boardOffsetY + minY * cellSize) - ((screenH / zoom) - h) / 2;
+
+      final targetX =
+          (boardOffsetX + minX * cellSize) - ((screenW / zoom) - w) / 2;
+      final targetY =
+          (boardOffsetY + minY * cellSize) - ((screenH / zoom) - h) / 2;
       target = Vector2(targetX, targetY);
     } else {
       final gridW = gridCols * cellSize;
@@ -1066,7 +1261,10 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   /// Smoothly pan and zoom the camera to centre on [pos] (grid coordinates).
   /// [zoomMultiplier] scales the current game zoom — 1.0 keeps the normal
   /// gameplay zoom, 2.5 zooms in for e.g. the game-over cinematic.
-  void focusCameraOnGridPosition(GridPosition pos, {double zoomMultiplier = 1.0}) {
+  void focusCameraOnGridPosition(
+    GridPosition pos, {
+    double zoomMultiplier = 1.0,
+  }) {
     final worldX = boardOffsetX + pos.x * cellSize + cellSize / 2;
     final worldY = boardOffsetY + pos.y * cellSize + cellSize / 2;
     final zoom = (zoomMultiplier > 0.0 ? zoomMultiplier : 1.0);
@@ -1098,20 +1296,34 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     week++;
     for (final dest in gridManager!.destinations) {
       final key = "${dest.x},${dest.y}";
-      gridManager!.destinationAges[key] = (gridManager!.destinationAges[key] ?? 0) + 1;
+      gridManager!.destinationAges[key] =
+          (gridManager!.destinationAges[key] ?? 0) + 1;
       gridRenderer?.markDirty(dest.x, dest.y);
     }
     _syncSpawnBounds();
-    MapGeneratorFactory.getGenerator(selectedMapType).generateExpansion(gridManager!, week);
+    MapGeneratorFactory.getGenerator(
+      selectedMapType,
+    ).generateExpansion(gridManager!, week);
 
     // Road count scales up every 3 weeks (20 → 25 → 30 → ...)
     weeklyBaseRoads = 20 + (week ~/ 3) * 5;
 
-    final options = <String>['doubleRoads', 'trafficLights', 'smartJunction', 'expressLane'];
+    // Restored per user request: the "Choose Your Reward" screen was
+    // removed during the lowkey pass (replaced with an automatic road
+    // top-up), but after playing more with it gone the player asked for it
+    // back — the pause-and-choose moment between weeks is wanted after all.
+    final options = <String>[
+      'doubleRoads',
+      'trafficLights',
+      'smartJunction',
+      'expressLane',
+    ];
     if (selectedMapType == MapType.nile || selectedMapType == MapType.delta) {
       options.add('bridges');
     }
-    if (selectedMapType == MapType.andes || selectedMapType == MapType.savanna || selectedMapType == MapType.arctic) {
+    if (selectedMapType == MapType.andes ||
+        selectedMapType == MapType.savanna ||
+        selectedMapType == MapType.arctic) {
       options.add('tunnels');
     }
 
@@ -1129,20 +1341,20 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
   /// Roll the gamble outcome. Returns a key that is passed back to applyUpgrade.
   String rollGamble() {
     final r = Random().nextDouble();
-    if (r < 0.08) return 'jackpot';   //  8% — massive haul
-    if (r < 0.28) return 'bigwin';    // 20% — great deal
-    if (r < 0.58) return 'win';       // 30% — solid win
-    if (r < 0.83) return 'bust';      // 25% — scraps
-    return 'disaster';                 // 17% — painful
+    if (r < 0.08) return 'jackpot'; //  8% — massive haul
+    if (r < 0.28) return 'bigwin'; // 20% — great deal
+    if (r < 0.58) return 'win'; // 30% — solid win
+    if (r < 0.83) return 'bust'; // 25% — scraps
+    return 'disaster'; // 17% — painful
   }
 
   void _syncSpawnBounds() {
     if (spawnController == null || gridManager == null) return;
-    
+
     // Base active half-dimensions for the current week
     int hw = _activeHalfWidth;
     int hh = _activeHalfHeight;
-    
+
     // Adjust to match the viewport aspect ratio to eliminate black bars.
     // Keep this padding in sync with _targetZoom so the active region's aspect
     // matches the screen rect the camera is fitting it into.
@@ -1177,17 +1389,20 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     spawnController!.maxSpawnY = min(gridManager!.rows - 3, cy + hh - 1);
   }
 
-
   /// Returns true if [pos] is inside the current active region — used to block
   /// player builds outside the playable area until weekly expansions open it up.
   bool _isInActiveArea(GridPosition pos) {
     if (spawnController == null) return true;
     return pos.x >= spawnController!.minSpawnX &&
-           pos.x <= spawnController!.maxSpawnX &&
-           pos.y >= spawnController!.minSpawnY &&
-           pos.y <= spawnController!.maxSpawnY;
+        pos.x <= spawnController!.maxSpawnX &&
+        pos.y >= spawnController!.minSpawnY &&
+        pos.y <= spawnController!.maxSpawnY;
   }
-  List<GridPosition> _interpolateAdjacentCells(GridPosition start, GridPosition end) {
+
+  List<GridPosition> _interpolateAdjacentCells(
+    GridPosition start,
+    GridPosition end,
+  ) {
     final result = <GridPosition>[];
     int cx = start.x;
     int cy = start.y;
@@ -1220,8 +1435,11 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
     final oldZoom = camera.viewfinder.zoom;
     camera.viewfinder.zoom = _targetZoom;
-    if (GameConstants.debugInfrastructure && (camera.viewfinder.zoom - oldZoom).abs() > 0.01) {
-      debugPrint('[BREADCRUMB] Zoom changed manually (scroll): ${camera.viewfinder.zoom.toStringAsFixed(2)}x');
+    if (GameConstants.debugInfrastructure &&
+        (camera.viewfinder.zoom - oldZoom).abs() > 0.01) {
+      debugPrint(
+        '[BREADCRUMB] Zoom changed manually (scroll): ${camera.viewfinder.zoom.toStringAsFixed(2)}x',
+      );
     }
 
     final worldFocalAfter = camera.viewfinder.globalToLocal(screenFocal);
@@ -1267,31 +1485,37 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       }
 
       if (_scaleStartPixel == null || _initialCameraPos == null) return;
-      
+
       final screenFocal = info.eventPosition.global;
       // 1. Convert screen focal point to world before zooming
       final worldFocalBefore = camera.viewfinder.globalToLocal(screenFocal);
 
       // 2. Handle Zoom
       final newZoom = (_initialZoom * info.raw.scale).clamp(0.2, 5.0);
-      if (GameConstants.debugInfrastructure && (camera.viewfinder.zoom - newZoom).abs() > 0.01) {
-        debugPrint('[BREADCRUMB] Zoom changed manually (pinch): ${newZoom.toStringAsFixed(2)}x');
+      if (GameConstants.debugInfrastructure &&
+          (camera.viewfinder.zoom - newZoom).abs() > 0.01) {
+        debugPrint(
+          '[BREADCRUMB] Zoom changed manually (pinch): ${newZoom.toStringAsFixed(2)}x',
+        );
       }
       camera.viewfinder.zoom = newZoom;
       userZoomMultiplier = (newZoom / _baseZoom).clamp(0.2, 5.0);
-      
+
       // 3. Convert screen focal point to world after zooming
       final worldFocalAfter = camera.viewfinder.globalToLocal(screenFocal);
 
       // 4. Handle Pan & Focal-point correction to prevent jumps
       final deltaPixel = screenFocal - _scaleStartPixel!;
-      camera.viewfinder.position = _initialCameraPos! - deltaPixel / camera.viewfinder.zoom;
-      
+      camera.viewfinder.position =
+          _initialCameraPos! - deltaPixel / camera.viewfinder.zoom;
+
       // Correct viewfinder position so the focal point doesn't slide
       camera.viewfinder.position += (worldFocalBefore - worldFocalAfter);
     } else {
-      if (phase != GamePhase.playing || paused || _panStartPixel == null) return;
-      
+      if (phase != GamePhase.playing || paused || _panStartPixel == null) {
+        return;
+      }
+
       final currentPos = info.eventPosition.global;
       if (!_isDragging) {
         if (_panStartPixel!.distanceTo(currentPos) < dragThreshold) return;
@@ -1352,7 +1576,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
             } else if (last != pos) {
               final steps = _interpolateAdjacentCells(last, pos);
               for (final step in steps) {
-                if (gridManager!.isValid(step.x, step.y) && !_dragPath.contains(step)) {
+                if (gridManager!.isValid(step.x, step.y) &&
+                    !_dragPath.contains(step)) {
                   final stepCell = gridManager!.getCell(step.x, step.y);
                   final isTerrainOrCorridor =
                       stepCell.type == CellType.mountain ||
@@ -1387,7 +1612,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         if (expressLanePendingStart != null && expressLaneDraggingEnd != null) {
           executeUndoableAction(() {
             final placed = gridManager!.placeExpressLane(
-                expressLanePendingStart!, expressLaneDraggingEnd!);
+              expressLanePendingStart!,
+              expressLaneDraggingEnd!,
+            );
             if (placed) {
               _updateInventoryNotifiers();
               onStateChanged?.call();
@@ -1471,7 +1698,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
       // Count active edges touching this tile
       int edgeCount = 0;
-      for (final d in const [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      for (final d in const [
+        [0, -1],
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+      ]) {
         final nx = pos.x + d[0];
         final ny = pos.y + d[1];
         if (gm.isValid(nx, ny) && gm.hasEdge(pos.x, pos.y, nx, ny)) {
@@ -1486,7 +1718,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         gm.activeEdges.removeWhere((e) {
           final parts = e.split('|');
           if (parts.length != 2) return false;
-          return parts[0] == '${pos.x},${pos.y}' || parts[1] == '${pos.x},${pos.y}';
+          return parts[0] == '${pos.x},${pos.y}' ||
+              parts[1] == '${pos.x},${pos.y}';
         });
         gm.infrastructure.remove(pos);
         // Refund the inventory cost for this tile
@@ -1533,9 +1766,21 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
       bool ok;
       if (extendingTunnel && nextCell.type == CellType.mountain) {
-        ok = gridManager!.placeTunnel(next.x, next.y, from: from, isExtension: true, consumeRoad: true);
+        ok = gridManager!.placeTunnel(
+          next.x,
+          next.y,
+          from: from,
+          isExtension: true,
+          consumeRoad: true,
+        );
       } else if (!extendingTunnel && nextCell.type == CellType.water) {
-        ok = gridManager!.placeBridge(next.x, next.y, from: from, isExtension: true, consumeRoad: true);
+        ok = gridManager!.placeBridge(
+          next.x,
+          next.y,
+          from: from,
+          isExtension: true,
+          consumeRoad: true,
+        );
       } else if (nextCell.isEmpty) {
         gridManager!.placeRoad(next.x, next.y, from: from);
         break;
@@ -1554,9 +1799,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     if (cell.type == CellType.mountain || cell.isTunnel) {
       // If the previous drag cell is already a tunnel/bridge, treat this as an
       // extension so the proximity check in _placeTransitCorridor doesn't
-      // reject the rest of a multi-cell mountain crossing. Extensions also
-      // consume a road tile — otherwise one tunnel ticket would buy an
-      // arbitrarily long chain of tunnels for free.
+      // reject the rest of a multi-cell mountain crossing. Extensions are free
+      // (per the tutorial) — grid_manager's 4-tile max corridor length is what
+      // bounds a single tunnel/bridge ticket, not a per-tile road charge.
       bool isExtension = false;
       final lp = _lastPlacedPos;
       if (lp != null && gridManager!.isValid(lp.x, lp.y)) {
@@ -1574,8 +1819,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     }
     // Otherwise, if we're continuing from a tunnel/bridge cell, this is the exit:
     // lay a normal road so the tunnel actually connects to the road network.
-    if (_lastPlacedPos != null && gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
-      final fromCell = gridManager!.getCell(_lastPlacedPos!.x, _lastPlacedPos!.y);
+    if (_lastPlacedPos != null &&
+        gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
+      final fromCell = gridManager!.getCell(
+        _lastPlacedPos!.x,
+        _lastPlacedPos!.y,
+      );
       if (fromCell.isTunnel || fromCell.isBridge) {
         gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
       }
@@ -1600,8 +1849,12 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       );
       return;
     }
-    if (_lastPlacedPos != null && gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
-      final fromCell = gridManager!.getCell(_lastPlacedPos!.x, _lastPlacedPos!.y);
+    if (_lastPlacedPos != null &&
+        gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
+      final fromCell = gridManager!.getCell(
+        _lastPlacedPos!.x,
+        _lastPlacedPos!.y,
+      );
       if (fromCell.isTunnel || fromCell.isBridge) {
         gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
       }
@@ -1622,7 +1875,9 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     // Terrain (mountain/water) and existing tunnels/bridges can be acted on
     // anywhere, so a road drag can dig its own tunnel through a nearby
     // mountain even if that mountain is outside the current playable border.
-    if (activeTool != BuildTool.erase && !isTerrainOrCorridor && !_isInActiveArea(pos)) {
+    if (activeTool != BuildTool.erase &&
+        !isTerrainOrCorridor &&
+        !_isInActiveArea(pos)) {
       return;
     }
 
@@ -1633,7 +1888,8 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
         // having to switch tools mid-gesture.
         if (cell.type == CellType.mountain || cell.isTunnel) {
           _placeTunnelOrExit(pos);
-        } else if ((cell.type == CellType.water || cell.isBridge) && selectedMapType != MapType.arctic) {
+        } else if ((cell.type == CellType.water || cell.isBridge) &&
+            selectedMapType != MapType.arctic) {
           _placeBridgeOrExit(pos);
         } else {
           gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
@@ -1660,7 +1916,7 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
 
   void _handleSingleClick(GridPosition pos) {
     if (gridManager == null || !gridManager!.isValid(pos.x, pos.y)) return;
-    
+
     switch (activeTool) {
       case BuildTool.trafficLight:
         gridManager!.toggleTrafficLight(pos.x, pos.y);
@@ -1678,6 +1934,16 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
       case BuildTool.inspect:
         selectedInfrastructure = pos;
         onStateChanged?.call();
+        break;
+      case BuildTool.road:
+      case BuildTool.tunnel:
+      case BuildTool.bridge:
+        // These tools are explicitly "click and drag" per the tutorial — a
+        // bare click with no drag has no `from` to connect to, so it used to
+        // fall through to _handleBuild and place a disconnected, isolated
+        // road/tunnel/bridge tile (charging a road for a useless stub) any
+        // time the player clicked without meaning to drag. Do nothing here;
+        // only an actual drag gesture should place these.
         break;
       default:
         _handleBuild(pos);
@@ -1747,10 +2013,18 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
     gridRenderer?.markDirty();
     _pathCache.clear();
     onStateChanged?.call();
-    canUndoNotifier.value = false; // Cap at 1 step undo, so gray out immediately
+    canUndoNotifier.value =
+        false; // Cap at 1 step undo, so gray out immediately
   }
 
   void _updateMapSpecificEvents(double dt) {
+    // LOWKEY MVP: map-specific road-blocking hazards (blizzard/dust storm/
+    // flash flood/drawbridge) are disabled — they read as a "big feature"
+    // more than the calm, low-drama Mini Motorways feel we're going for.
+    // Terrain variety (ice roads, mountains, water) stays; only the
+    // road-blocking weather EVENTS are turned off.
+    return;
+    // ignore: dead_code
     if (gridManager == null) return;
     final random = math.Random();
 
@@ -1789,7 +2063,10 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
             for (int y = 0; y < gridManager!.rows; y++) {
               for (int x = 0; x < gridManager!.cols; x++) {
                 final cell = gridManager!.grid[y][x];
-                if (cell.isRoad && !cell.isTunnel && !cell.isBridge && cell.owner == InfrastructureOwner.player) {
+                if (cell.isRoad &&
+                    !cell.isTunnel &&
+                    !cell.isBridge &&
+                    cell.owner == InfrastructureOwner.player) {
                   validRoads.add(GridPosition(x, y));
                 }
               }
@@ -1843,13 +2120,22 @@ class FlowGridGame extends FlameGame with ScaleDetector, MouseMovementDetector, 
             for (int y = 0; y < gridManager!.rows; y++) {
               for (int x = 0; x < gridManager!.cols; x++) {
                 final cell = gridManager!.grid[y][x];
-                if (cell.isRoad && !cell.isTunnel && !cell.isBridge && cell.owner == InfrastructureOwner.player) {
+                if (cell.isRoad &&
+                    !cell.isTunnel &&
+                    !cell.isBridge &&
+                    cell.owner == InfrastructureOwner.player) {
                   // Check neighbors for water
                   bool adjacentToWater = false;
-                  for (final dir in [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+                  for (final dir in [
+                    [0, -1],
+                    [1, 0],
+                    [0, 1],
+                    [-1, 0],
+                  ]) {
                     final nx = x + dir[0];
                     final ny = y + dir[1];
-                    if (gridManager!.isValid(nx, ny) && gridManager!.grid[ny][nx].type == CellType.water) {
+                    if (gridManager!.isValid(nx, ny) &&
+                        gridManager!.grid[ny][nx].type == CellType.water) {
                       adjacentToWater = true;
                       break;
                     }

@@ -46,7 +46,10 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1A1A1A),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 2),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    width: 2,
+                  ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.5),
@@ -78,66 +81,48 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                       ),
                     ),
                     const SizedBox(height: 32),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _MapCard(
-                            title: 'ZEN',
-                            description: 'Balanced baseline terrain. Ideal for training. Standard mechanics and layouts.',
-                            icon: Icons.unfold_more,
-                            color: Colors.blueAccent,
-                            highScore: _highScores[MapType.zen] ?? 0,
-                            onTap: () => _startGame(context, MapType.zen),
-                          ),
-                          const SizedBox(width: 16),
-                          _MapCard(
-                            title: 'ANDES',
-                            description: 'Terracotta canyons and mountain pockets. Restricts expansions, requiring strategic valley connections.',
-                            icon: Icons.landscape,
-                            color: Colors.orangeAccent,
-                            highScore: _highScores[MapType.andes] ?? 0,
-                            onTap: () => _startGame(context, MapType.andes),
-                          ),
-                          const SizedBox(width: 16),
-                          _MapCard(
-                            title: 'NILE',
-                            description: 'Wide central river dividing fertile banks. Heavy reliance on water crossings and bridge management.',
-                            icon: Icons.waves,
-                            color: Colors.cyanAccent,
-                            highScore: _highScores[MapType.nile] ?? 0,
-                            onTap: () => _startGame(context, MapType.nile),
-                          ),
-                          const SizedBox(width: 16),
-                          _MapCard(
-                            title: 'ARCTIC',
-                            description: 'Frozen Tundra. Features: Ice Roads over lakes (40% slower, 0 bridge cost), and periodic Blizzards that drop vehicle speed to 60%.',
-                            icon: Icons.ac_unit,
-                            color: Colors.lightBlueAccent,
-                            highScore: _highScores[MapType.arctic] ?? 0,
-                            onTap: () => _startGame(context, MapType.arctic),
-                          ),
-                          const SizedBox(width: 16),
-                          _MapCard(
-                            title: 'SAVANNA',
-                            description: 'Dusty grasslands. Features: Unpaved Dirt Roads (20% slower), wild Gazelle Crossings blocking lanes, and blinding Dust Storms.',
-                            icon: Icons.terrain,
-                            color: Colors.amberAccent,
-                            highScore: _highScores[MapType.savanna] ?? 0,
-                            onTap: () => _startGame(context, MapType.savanna),
-                          ),
-                          const SizedBox(width: 16),
-                          _MapCard(
-                            title: 'DELTA',
-                            description: 'River wetlands. Features: Periodic Drawbridges blocking lanes, and Flash Floods that temporarily submerge and close roads.',
-                            icon: Icons.water,
-                            color: Colors.tealAccent,
-                            highScore: _highScores[MapType.delta] ?? 0,
-                            onTap: () => _startGame(context, MapType.delta),
-                          ),
-                        ],
-                      ),
+                    // LOWKEY MVP: only 3 maps now (Zen/Andes/Nile) — they fit
+                    // comfortably in a plain wrapping row, so the horizontal
+                    // scroll carousel (drag/wheel handling, custom scroll
+                    // behavior, scrollbar) that maps 4-6 needed is no longer
+                    // necessary. Arctic/Savanna/Delta's enum values,
+                    // generators, and rendering code are left intact (just
+                    // unreachable from here) so they can come back later
+                    // without rebuilding anything — see MapType in
+                    // map_generator.dart.
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 16,
+                      runSpacing: 16,
+                      children: [
+                        _MapCard(
+                          title: 'ZEN',
+                          description:
+                              'Balanced baseline terrain. Ideal for training. Standard mechanics and layouts.',
+                          icon: Icons.unfold_more,
+                          color: Colors.blueAccent,
+                          highScore: _highScores[MapType.zen] ?? 0,
+                          onTap: () => _startGame(context, MapType.zen),
+                        ),
+                        _MapCard(
+                          title: 'ANDES',
+                          description:
+                              'Terracotta canyons and mountain pockets. Restricts expansions, requiring strategic valley connections.',
+                          icon: Icons.landscape,
+                          color: Colors.orangeAccent,
+                          highScore: _highScores[MapType.andes] ?? 0,
+                          onTap: () => _startGame(context, MapType.andes),
+                        ),
+                        _MapCard(
+                          title: 'NILE',
+                          description:
+                              'Wide central river dividing fertile banks. Heavy reliance on water crossings and bridge management.',
+                          icon: Icons.waves,
+                          color: Colors.cyanAccent,
+                          highScore: _highScores[MapType.nile] ?? 0,
+                          onTap: () => _startGame(context, MapType.nile),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 32),
                     TextButton(
@@ -204,15 +189,20 @@ class _MapCardState extends State<_MapCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
           width: 220,
           height: 360,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: _isHovered ? widget.color.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
+            color: _isHovered
+                ? widget.color.withValues(alpha: 0.1)
+                : Colors.white.withValues(alpha: 0.03),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: _isHovered ? widget.color : Colors.white.withValues(alpha: 0.1),
+              color: _isHovered
+                  ? widget.color
+                  : Colors.white.withValues(alpha: 0.1),
               width: 2,
             ),
           ),
@@ -222,7 +212,9 @@ class _MapCardState extends State<_MapCard> {
               Icon(
                 widget.icon,
                 size: 60,
-                color: _isHovered ? widget.color : Colors.white.withValues(alpha: 0.2),
+                color: _isHovered
+                    ? widget.color
+                    : Colors.white.withValues(alpha: 0.2),
               ),
               const SizedBox(height: 18),
               Text(
@@ -237,7 +229,10 @@ class _MapCardState extends State<_MapCard> {
               const SizedBox(height: 8),
               // High Score Badge
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(6),
@@ -252,13 +247,19 @@ class _MapCardState extends State<_MapCard> {
                     Icon(
                       Icons.emoji_events,
                       size: 12,
-                      color: widget.highScore > 0 ? Colors.amberAccent : Colors.white.withValues(alpha: 0.3),
+                      color: widget.highScore > 0
+                          ? Colors.amberAccent
+                          : Colors.white.withValues(alpha: 0.3),
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      widget.highScore > 0 ? 'BEST: ${widget.highScore}' : 'BEST: --',
+                      widget.highScore > 0
+                          ? 'BEST: ${widget.highScore}'
+                          : 'BEST: --',
                       style: TextStyle(
-                        color: widget.highScore > 0 ? Colors.white.withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.4),
+                        color: widget.highScore > 0
+                            ? Colors.white.withValues(alpha: 0.9)
+                            : Colors.white.withValues(alpha: 0.4),
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1,
@@ -280,7 +281,10 @@ class _MapCardState extends State<_MapCard> {
               const Spacer(),
               if (_isHovered)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: widget.color,
                     borderRadius: BorderRadius.circular(8),

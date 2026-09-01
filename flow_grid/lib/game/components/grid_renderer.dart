@@ -20,77 +20,170 @@ class GridRenderer extends PositionComponent
   double offsetY;
 
   ui.Picture? _terrainPicture;
-  
+
   // Task 1: Chunked Render Cache
   final Map<int, _RenderChunk> _chunks = {};
-  
+
+  // [PERF] Mountains are stored as a flat, unindexed
+  // `List<MountainCluster>` on GridManager (each cluster a `Set<GridPosition>`
+  // with no spatial bucketing). _drawMountains used to loop over EVERY
+  // cluster/cell in the whole map on every single chunk rebuild, just to
+  // filter down to the handful of cells that actually fall in that one
+  // chunk -- O(total mountain cells) of wasted work per chunk, and chunk
+  // rebuilds happen on every road/tunnel/bridge edit (`markInfrastructureDirty`)
+  // during normal play. Fine on Zen (few mountains) but reported as real,
+  // reproducible lag/freezing on the Andes map (mountain-dense by design) --
+  // confirmed independently by a `Page.captureScreenshot` CDP timeout while
+  // playtesting live. This lazily-built index buckets mountain cells by
+  // chunk key ONCE, so `_drawMountains` only ever touches cells that are
+  // actually in the chunk being built. Invalidated in `markAllDirty()` --
+  // every code path that changes mountain data (`rebuildMountain`,
+  // `reconstructTerrainState` on GridManager) already funnels through a
+  // `gridRenderer.markDirty()`/`markAllDirty()` call to force a full
+  // re-render, so hooking the same signal keeps this correct without
+  // GridManager needing to know the renderer caches anything.
+  Map<int, List<GridPosition>>? _mountainCellsByChunk;
+
+  // [PERF] Same family of bug as `_mountainCellsByChunk` above, found while
+  // fixing that one: `gridManager.placedExpressLanes` is a flat, unindexed
+  // `List<List<GridPosition>>` (each a 2-element [start, end] pair) with NO
+  // spatial bucketing. The old `_drawExpressLanesGlobal` looped over EVERY
+  // placed express lane on every single chunk rebuild, unconditionally
+  // building and drawing (real Path construction + 2x drawPath + chevron
+  // sampling + 2 ramp triangles) each lane's full curve into every chunk's
+  // Picture -- `canvas.clipRect()` in `_buildChunkPicture` hid the visual
+  // overdraw, but every chunk fully paid the CPU cost of every lane on the
+  // map, same as the mountain bug: O(total lanes) of wasted work per chunk.
+  //
+  // Unlike a mountain cell (which belongs to exactly one chunk), an express
+  // lane is a long-jump ARC between two, possibly distant, grid positions --
+  // it can visibly pass through a chunk's screen rect without either
+  // endpoint's cell being inside that chunk's [minX,maxX)x[minY,maxY) range.
+  // A naive "only draw a lane in the chunk(s) containing an endpoint" filter
+  // would make the lane vanish in every chunk it merely passes through, a
+  // real visible regression. So this index buckets each lane under EVERY
+  // chunk its actual bounding box overlaps (may be 1, 2, or more chunks per
+  // lane), where the bounding box is computed from the same
+  // arcHeight = length * 0.15 * perpSign curve construction
+  // `_drawExpressLanesForChunk` (and CarComponent._rebuildSmoothPath) use,
+  // not just the straight line between the two endpoints -- see
+  // `_expressLaneBounds()` for the exact box (and why it's provably
+  // conservative: a quadratic bezier always lies within the convex hull of
+  // its three control points, so the box around {start, controlPoint, end}
+  // padded by the stroke half-width can never clip off part of the curve).
+  //
+  // Invalidated in `markAllDirty()`, same as `_mountainCellsByChunk` --
+  // every place `placedExpressLanes` is mutated (`placeExpressLane` via
+  // `onScaleEnd`'s express-lane branch -> `_cleanupInput()`;
+  // `removeInfrastructure`'s express-lane branch via the erase tool's
+  // `eraseCell` -> `_handleBuild` -> always followed, in the same
+  // synchronous `executeUndoableAction` call, by `_applyEraseRefunds()`;
+  // `undo()`; and `loadFromSave`/snapshot-restore, which always run against
+  // a brand-new `GridRenderer` instance per `flow_grid_game.dart`'s
+  // `removeFromParent()` + fresh `GridRenderer(...)` construction on every
+  // resume/new-game) already ends with a no-arg `gridRenderer.markDirty()`
+  // (= `markAllDirty()`) before the next render, in the same call stack as
+  // the mutation itself -- confirmed by reading every call site, not
+  // assumed. So hooking this index to the same signal as the mountain index
+  // is correct, not just "conservative."
+  Map<int, List<List<GridPosition>>>? _expressLaneChunkIndex;
+
   // Task 6: Preallocated Paints (Double-Pass Outline Style)
+  //
+  // [ROAD WIDTH] Widened 2026-09-01 from fill 0.48 / outline 0.60 to fill
+  // 0.64 / outline 0.76 (inlined below on every Paint — there is no shared
+  // named constant, so any future change here must touch all ten fill/
+  // outline strokeWidths), chasing Mini Motorways' measured ~3x
+  // road-to-car width ratio. Full 3x would be cellSize*0.79 (3x the
+  // car's actual painted silhouette, cellSize*0.2634 — see
+  // `_maxSafeLaneOffsetMagnitude` in car_component.dart) but that pushes
+  // the tunnel-portal headwall to ~0.99*cellSize (near-zero clearance to
+  // the tile edge) and measurably deepens the smart-junction ring's
+  // pre-existing bleed into DIAGONAL neighbor tiles (not covered by the
+  // orthogonal-only building clip in `_drawSmartJunctions`). 0.64 is a
+  // deliberately conservative middle ground: still a meaningful jump
+  // (ratio-to-car goes from ~1.82x to ~2.43x, vs. today's 1.82x) while
+  // keeping every derived margin comfortably inside its tile — see the
+  // fix/qa-issues commit message for the full numeric verification.
+  //
+  // Every fill/outline pair below MUST stay in sync (kept as a fixed
+  // +0.12*cellSize outline margin over the fill, matching the original
+  // 0.60/0.48 relationship) — and so must:
+  //   - `_drawSmartJunctions`' outerR/innerR/glowR (ring thickness == this
+  //     outline width, centered on the fixed r=0.75 driving centerline)
+  //   - `_drawTunnelPortal`'s opening width/offset and headwall width
+  //   - `_drawBridgeRails`' rail offset (must sit at the new curb edge)
+  //   - `_drawExpressLanesForChunk`'s laneStroke (kept wider than the road,
+  //     via the shared `_expressLaneStrokeFactor` constant)
+  //   - car_component.dart's `_maxSafeLaneOffsetMagnitude` surfaceHalfWidth
+  //     constants (must equal the new half-widths or the lane-separation
+  //     fix from earlier today silently loses most of its benefit)
   final Paint _roadOutlinePaint = Paint()
     ..color = const Color(0xFF14161B)
-    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..strokeWidth = GameConstants.cellSize * 0.76
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _roadPaint = Paint()
     ..color = GameConstants.roadColor
-    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..strokeWidth = GameConstants.cellSize * 0.64
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _tunnelOutlinePaint = Paint()
     ..color = const Color(0xFF14161B)
-    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..strokeWidth = GameConstants.cellSize * 0.76
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _tunnelPaint = Paint()
     ..color = const Color(0xFF23252A)
-    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..strokeWidth = GameConstants.cellSize * 0.64
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _bridgeOutlinePaint = Paint()
     ..color = const Color(0xFF14161B)
-    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..strokeWidth = GameConstants.cellSize * 0.76
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _bridgePaint = Paint()
     ..color = GameConstants.bridgeColor
-    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..strokeWidth = GameConstants.cellSize * 0.64
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _iceRoadOutlinePaint = Paint()
     ..color = const Color(0xFF14161B)
-    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..strokeWidth = GameConstants.cellSize * 0.76
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _iceRoadPaint = Paint()
     ..color = const Color(0xFFA5DFEE)
-    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..strokeWidth = GameConstants.cellSize * 0.64
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _dirtRoadOutlinePaint = Paint()
     ..color = const Color(0xFF2C2417)
-    ..strokeWidth = GameConstants.cellSize * 0.60
+    ..strokeWidth = GameConstants.cellSize * 0.76
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
 
   final Paint _dirtRoadPaint = Paint()
     ..color = const Color(0xFFC0A477)
-    ..strokeWidth = GameConstants.cellSize * 0.48
+    ..strokeWidth = GameConstants.cellSize * 0.64
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
     ..strokeJoin = StrokeJoin.round;
@@ -99,8 +192,7 @@ class GridRenderer extends PositionComponent
   // Skia — even when cached into a chunk Picture, the rasterizer pays the
   // blur cost the first time the picture is rendered to the screen, and that
   // first paint is enough to ANR/crash on lower-end Android devices.
-  final Paint _mountainBasePaint = Paint()
-    ..color = GameConstants.mountainColor;
+  final Paint _mountainBasePaint = Paint()..color = GameConstants.mountainColor;
 
   final Paint _mountainPeakPaint = Paint()
     ..color = GameConstants.mountainHighlightColor.withValues(alpha: 0.4);
@@ -160,6 +252,18 @@ class GridRenderer extends PositionComponent
   }
 
   void markAllDirty() {
+    // [PERF] Every caller of markAllDirty() is, by definition, saying "the
+    // whole map's rendered state may have changed" -- the only place mountain
+    // data itself can actually change (GridManager.rebuildMountain /
+    // reconstructTerrainState) already goes through this same call, so
+    // invalidating the mountain-chunk index here (rather than needing
+    // GridManager to know about it) keeps it correct for free. It's rebuilt
+    // lazily, once, the next time any chunk with mountains is drawn.
+    _mountainCellsByChunk = null;
+    // Same reasoning for the express-lane chunk index -- see its field
+    // comment for why every `placedExpressLanes` mutation site already
+    // funnels through a no-arg `markDirty()` (= `markAllDirty()`) call.
+    _expressLaneChunkIndex = null;
     for (final chunk in _chunks.values) {
       chunk.dirty = true;
     }
@@ -226,43 +330,56 @@ class GridRenderer extends PositionComponent
   void _drawSpawnAnimations(Canvas canvas) {
     if (_spawnAnimations.isEmpty) return;
     final now = game.elapsedTime;
-    _spawnAnimations.removeWhere((a) => now - a.startTime >= _SpawnAnimation.duration);
+    _spawnAnimations.removeWhere(
+      (a) => now - a.startTime >= _SpawnAnimation.duration,
+    );
     if (_spawnAnimations.isEmpty) return;
 
     for (final anim in _spawnAnimations) {
-      final t = ((now - anim.startTime) / _SpawnAnimation.duration).clamp(0.0, 1.0);
+      final t = ((now - anim.startTime) / _SpawnAnimation.duration).clamp(
+        0.0,
+        1.0,
+      );
       final cx = offsetX + anim.pos.x * cellSize + cellSize / 2;
       final cy = offsetY + anim.pos.y * cellSize + cellSize / 2;
 
-      // 1. Draw a rapid blinking neon central beacon (0xFF00E5FF)
-      final blink = (math.sin(t * 30.0) >= 0.0) ? 1.0 : 0.25;
-      final beaconRadius = cellSize * 0.18;
+      // Simple, calm white blinking dot (Mini-Motorways-style) — replaces the
+      // previous neon-cyan beacon + 3 expanding ripple rings, which read as a
+      // much bigger, busier visual event than a new building warrants.
+      final blink = 0.5 + 0.5 * math.sin(t * 10.0);
+      final fadeOut = 1.0 - t;
       canvas.drawCircle(
         Offset(cx, cy),
-        beaconRadius,
+        cellSize * 0.14,
         Paint()
-          ..color = const Color(0xFF00E5FF).withValues(alpha: 0.85 * blink)
+          ..color = Colors.white.withValues(alpha: blink * fadeOut)
           ..style = PaintingStyle.fill,
       );
+    }
+  }
 
-      // 2. Draw 3 staggered expanding ripple rings
-      for (int i = 0; i < 3; i++) {
-        final delay = i * 0.25;
-        if (t >= delay) {
-          final ringT = ((t - delay) / (1.0 - delay)).clamp(0.0, 1.0);
-          final ease = 1.0 - math.pow(1.0 - ringT, 3).toDouble();
-          final radius = cellSize * (0.2 + ease * 0.9);
-          final alpha = (1.0 - ringT) * 0.8;
-          canvas.drawCircle(
-            Offset(cx, cy),
-            radius,
-            Paint()
-              ..color = const Color(0xFF00E5FF).withValues(alpha: alpha)
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.5 - (i * 0.5),
-          );
-        }
-      }
+  /// The actual visible board background for the current map -- each
+  /// MapType has its own distinct tint (Andes' is a warm dark brown,
+  /// nothing like the others), NOT the generic GameConstants.backgroundColor.
+  /// Extracted so anything else that needs to blend into "empty terrain"
+  /// (e.g. the fog-of-war reveal overlay below) uses the SAME color this
+  /// method actually paints, instead of a hardcoded fallback that visibly
+  /// mismatches on every map except whichever one it happened to be tuned
+  /// against.
+  Color get _mapBackgroundColor {
+    switch (game.selectedMapType) {
+      case MapType.zen:
+        return const Color(0xFF13171F);
+      case MapType.andes:
+        return const Color(0xFF1E1612);
+      case MapType.nile:
+        return const Color(0xFF0F1A1B);
+      case MapType.arctic:
+        return const Color(0xFF12232D);
+      case MapType.savanna:
+        return const Color(0xFF241C13);
+      case MapType.delta:
+        return const Color(0xFF0E221C);
     }
   }
 
@@ -270,27 +387,7 @@ class GridRenderer extends PositionComponent
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
-    Color bg;
-    switch (game.selectedMapType) {
-      case MapType.zen:
-        bg = const Color(0xFF13171F);
-        break;
-      case MapType.andes:
-        bg = const Color(0xFF1E1612);
-        break;
-      case MapType.nile:
-        bg = const Color(0xFF0F1A1B);
-        break;
-      case MapType.arctic:
-        bg = const Color(0xFF12232D);
-        break;
-      case MapType.savanna:
-        bg = const Color(0xFF241C13);
-        break;
-      case MapType.delta:
-        bg = const Color(0xFF0E221C);
-        break;
-    }
+    final bg = _mapBackgroundColor;
 
     final double width = gridManager.cols * cellSize;
     final double height = gridManager.rows * cellSize;
@@ -385,8 +482,16 @@ class GridRenderer extends PositionComponent
       for (int y = 0; y <= gridManager.rows; y++) {
         final cx = offsetX + x * cellSize;
         final cy = offsetY + y * cellSize;
-        canvas.drawLine(Offset(cx - crossArm, cy), Offset(cx + crossArm, cy), crossPaint);
-        canvas.drawLine(Offset(cx, cy - crossArm), Offset(cx, cy + crossArm), crossPaint);
+        canvas.drawLine(
+          Offset(cx - crossArm, cy),
+          Offset(cx + crossArm, cy),
+          crossPaint,
+        );
+        canvas.drawLine(
+          Offset(cx, cy - crossArm),
+          Offset(cx, cy + crossArm),
+          crossPaint,
+        );
       }
     }
 
@@ -396,19 +501,31 @@ class GridRenderer extends PositionComponent
   void _drawChunks(Canvas canvas) {
     // Determine visible area for culling
     final viewport = game.camera.visibleWorldRect;
-    
+
     final chunkPx = GameConstants.cellSize * GameConstants.chunkSize;
-    
-    final minCX = ((viewport.left - offsetX) / chunkPx).floor().clamp(0, (gridManager.cols / GameConstants.chunkSize).floor());
-    final maxCX = ((viewport.right - offsetX) / chunkPx).floor().clamp(0, (gridManager.cols / GameConstants.chunkSize).floor());
-    final minCY = ((viewport.top - offsetY) / chunkPx).floor().clamp(0, (gridManager.rows / GameConstants.chunkSize).floor());
-    final maxCY = ((viewport.bottom - offsetY) / chunkPx).floor().clamp(0, (gridManager.rows / GameConstants.chunkSize).floor());
+
+    final minCX = ((viewport.left - offsetX) / chunkPx).floor().clamp(
+      0,
+      (gridManager.cols / GameConstants.chunkSize).floor(),
+    );
+    final maxCX = ((viewport.right - offsetX) / chunkPx).floor().clamp(
+      0,
+      (gridManager.cols / GameConstants.chunkSize).floor(),
+    );
+    final minCY = ((viewport.top - offsetY) / chunkPx).floor().clamp(
+      0,
+      (gridManager.rows / GameConstants.chunkSize).floor(),
+    );
+    final maxCY = ((viewport.bottom - offsetY) / chunkPx).floor().clamp(
+      0,
+      (gridManager.rows / GameConstants.chunkSize).floor(),
+    );
 
     for (int cx = minCX; cx <= maxCX; cx++) {
       for (int cy = minCY; cy <= maxCY; cy++) {
         final key = cx + cy * 1000;
         final chunk = _chunks.putIfAbsent(key, () => _RenderChunk(cx, cy));
-        
+
         if (chunk.dirty || chunk.picture == null) {
           chunk.picture = _buildChunkPicture(cx, cy);
           chunk.dirty = false;
@@ -421,7 +538,7 @@ class GridRenderer extends PositionComponent
   ui.Picture _buildChunkPicture(int cx, int cy) {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    
+
     final minX = cx * GameConstants.chunkSize;
     final minY = cy * GameConstants.chunkSize;
     final maxX = minX + GameConstants.chunkSize;
@@ -454,7 +571,9 @@ class GridRenderer extends PositionComponent
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
-        if (cell.type != CellType.water && cell.type != CellType.bridge) continue;
+        if (cell.type != CellType.water && cell.type != CellType.bridge) {
+          continue;
+        }
 
         any = true;
         final rect = Rect.fromLTWH(
@@ -486,20 +605,43 @@ class GridRenderer extends PositionComponent
     canvas.drawPath(waterPath, borderPaint);
   }
 
-  // Mountain paths are now built per-chunk so each chunk picture only carries
-  // its own mountains. The old global cache replayed every mountain in the
-  // world into every chunk picture, which choked mobile GPUs on first paint.
+  /// Lazily builds (or reuses) the chunk-bucketed mountain-cell index. See
+  /// the `_mountainCellsByChunk` field comment for why this exists.
+  Map<int, List<GridPosition>> _ensureMountainIndex() {
+    final existing = _mountainCellsByChunk;
+    if (existing != null) return existing;
+
+    final index = <int, List<GridPosition>>{};
+    for (final cluster in gridManager.mountainClusters) {
+      for (final cell in cluster.cells) {
+        final chunkX = cell.x ~/ GameConstants.chunkSize;
+        final chunkY = cell.y ~/ GameConstants.chunkSize;
+        final key = chunkX + chunkY * 1000;
+        (index[key] ??= []).add(cell);
+      }
+    }
+    _mountainCellsByChunk = index;
+    return index;
+  }
+
+  // Mountain paths are built per-chunk so each chunk picture only carries
+  // its own mountains (drawing-side cost). [PERF] Which cells belong to
+  // THIS chunk is now a direct index lookup via `_ensureMountainIndex()`,
+  // not a full scan-and-filter over every mountain cluster in the whole
+  // map on every chunk build -- see that index's field comment for the
+  // Andes-map lag this fixed.
   void _drawMountains(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     final basePath = Path();
     final peaksPath = Path();
     final snowPath = Path();
     bool any = false;
 
-    for (final cluster in gridManager.mountainClusters) {
-      for (final cell in cluster.cells) {
-        if (cell.x < minX || cell.x >= maxX || cell.y < minY || cell.y >= maxY) {
-          continue;
-        }
+    final chunkX = minX ~/ GameConstants.chunkSize;
+    final chunkY = minY ~/ GameConstants.chunkSize;
+    final chunkKey = chunkX + chunkY * 1000;
+    final cellsInChunk = _ensureMountainIndex()[chunkKey];
+    if (cellsInChunk != null) {
+      for (final cell in cellsInChunk) {
         any = true;
         final rect = Rect.fromLTWH(
           offsetX + cell.x * cellSize,
@@ -542,7 +684,47 @@ class GridRenderer extends PositionComponent
     canvas.drawPath(snowPath, Paint()..color = GameConstants.mountainSnowColor);
   }
 
-  void _drawRoadsAndExpressLanes(Canvas canvas, int minX, int minY, int maxX, int maxY) {
+  /// Whether the cell one step past (x, y) in `entryDir` is a road-ish tile
+  /// (plain road, express-lane node, tunnel, bridge, or smart junction) --
+  /// i.e. whether a house/destination's driveway stub actually gets drawn
+  /// on that side. Shared by `_drawRoadsAndExpressLanes` (decides whether to
+  /// paint the stub at all) and `_drawHouse` (decides whether to grow the
+  /// house's own footprint to meet that stub) so the two can never disagree
+  /// about whether a given side is actually connected.
+  bool _hasAdjacentRoad(int x, int y, Direction entryDir) {
+    int adjX = x;
+    int adjY = y;
+    switch (entryDir) {
+      case Direction.north:
+        adjY--;
+        break;
+      case Direction.east:
+        adjX++;
+        break;
+      case Direction.south:
+        adjY++;
+        break;
+      case Direction.west:
+        adjX--;
+        break;
+    }
+
+    if (!gridManager.isValid(adjX, adjY)) return false;
+    final adj = gridManager.grid[adjY][adjX];
+    return adj.isRoad ||
+        adj.isExpressLaneNode ||
+        adj.isTunnel ||
+        adj.isBridge ||
+        adj.isSmartJunction;
+  }
+
+  void _drawRoadsAndExpressLanes(
+    Canvas canvas,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY,
+  ) {
     final roadPath = Path();
     final dirtRoadPath = Path();
     final tunnelPath = Path();
@@ -554,7 +736,13 @@ class GridRenderer extends PositionComponent
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
 
-        if ((!cell.isRoad && !cell.isExpressLaneNode && !cell.isTunnel && !cell.isBridge && !cell.isHouse && !cell.isDestination) || cell.isPendingDeletion) {
+        if ((!cell.isRoad &&
+                !cell.isExpressLaneNode &&
+                !cell.isTunnel &&
+                !cell.isBridge &&
+                !cell.isHouse &&
+                !cell.isDestination) ||
+            cell.isPendingDeletion) {
           continue;
         }
 
@@ -566,27 +754,7 @@ class GridRenderer extends PositionComponent
         if (cell.isHouse || cell.isDestination) {
           final entryDir = cell.entrySide;
           if (entryDir != null) {
-            // Determine adjacent cell coordinates
-            int adjX = x;
-            int adjY = y;
-            if (entryDir == Direction.north) {
-              adjY--;
-            } else if (entryDir == Direction.east) {
-              adjX++;
-            } else if (entryDir == Direction.south) {
-              adjY++;
-            } else if (entryDir == Direction.west) {
-              adjX--;
-            }
-
-            final bool hasAdjacentRoad = gridManager.isValid(adjX, adjY) &&
-                (gridManager.grid[adjY][adjX].isRoad ||
-                 gridManager.grid[adjY][adjX].isExpressLaneNode ||
-                 gridManager.grid[adjY][adjX].isTunnel ||
-                 gridManager.grid[adjY][adjX].isBridge ||
-                 gridManager.grid[adjY][adjX].isSmartJunction);
-
-            if (hasAdjacentRoad) {
+            if (_hasAdjacentRoad(x, y, entryDir)) {
               double sx = midX;
               double sy = midY;
               double ex = midX;
@@ -595,13 +763,17 @@ class GridRenderer extends PositionComponent
               final distToEdge = cellSize / 2;
 
               if (entryDir == Direction.north) {
-                ex = midX; ey = midY - distToEdge;
+                ex = midX;
+                ey = midY - distToEdge;
               } else if (entryDir == Direction.east) {
-                ex = midX + distToEdge; ey = midY;
+                ex = midX + distToEdge;
+                ey = midY;
               } else if (entryDir == Direction.south) {
-                ex = midX; ey = midY + distToEdge;
+                ex = midX;
+                ey = midY + distToEdge;
               } else {
-                ex = midX - distToEdge; ey = midY;
+                ex = midX - distToEdge;
+                ey = midY;
               }
 
               roadPath.moveTo(sx, sy);
@@ -625,7 +797,8 @@ class GridRenderer extends PositionComponent
           targetPath = tunnelPath;
         } else if (cell.isBridge) {
           targetPath = bridgePath;
-        } else if (game.selectedMapType == MapType.savanna && cell.owner == InfrastructureOwner.player) {
+        } else if (game.selectedMapType == MapType.savanna &&
+            cell.owner == InfrastructureOwner.player) {
           targetPath = dirtRoadPath;
         } else {
           targetPath = roadPath;
@@ -680,10 +853,22 @@ class GridRenderer extends PositionComponent
             }
           }
         } else if (connCount > 2) {
-          if (n) { targetPath.moveTo(midX, midY); targetPath.lineTo(midX, cy); }
-          if (e) { targetPath.moveTo(midX, midY); targetPath.lineTo(cx + cellSize, midY); }
-          if (s) { targetPath.moveTo(midX, midY); targetPath.lineTo(midX, cy + cellSize); }
-          if (w) { targetPath.moveTo(midX, midY); targetPath.lineTo(cx, midY); }
+          if (n) {
+            targetPath.moveTo(midX, midY);
+            targetPath.lineTo(midX, cy);
+          }
+          if (e) {
+            targetPath.moveTo(midX, midY);
+            targetPath.lineTo(cx + cellSize, midY);
+          }
+          if (s) {
+            targetPath.moveTo(midX, midY);
+            targetPath.lineTo(midX, cy + cellSize);
+          }
+          if (w) {
+            targetPath.moveTo(midX, midY);
+            targetPath.lineTo(cx, midY);
+          }
         }
       }
     }
@@ -741,39 +926,174 @@ class GridRenderer extends PositionComponent
             Offset(midX + cellSize * 0.05, midY + cellSize * 0.15),
             crackPaint,
           );
-        } else if (game.selectedMapType == MapType.savanna && cell.owner == InfrastructureOwner.player && cell.isRoad) {
+        } else if (game.selectedMapType == MapType.savanna &&
+            cell.owner == InfrastructureOwner.player &&
+            cell.isRoad) {
           final trackPaint = Paint()
             ..color = const Color(0x355C4033)
             ..strokeWidth = 1.0
             ..style = PaintingStyle.stroke;
 
           if (cell.connUp || cell.connDown) {
-            canvas.drawLine(Offset(midX - 3, cy), Offset(midX - 3, cy + cellSize), trackPaint);
-            canvas.drawLine(Offset(midX + 3, cy), Offset(midX + 3, cy + cellSize), trackPaint);
+            canvas.drawLine(
+              Offset(midX - 3, cy),
+              Offset(midX - 3, cy + cellSize),
+              trackPaint,
+            );
+            canvas.drawLine(
+              Offset(midX + 3, cy),
+              Offset(midX + 3, cy + cellSize),
+              trackPaint,
+            );
           }
           if (cell.connLeft || cell.connRight) {
-            canvas.drawLine(Offset(cx, midY - 3), Offset(cx + cellSize, midY - 3), trackPaint);
-            canvas.drawLine(Offset(cx, midY + 3), Offset(cx + cellSize, midY + 3), trackPaint);
+            canvas.drawLine(
+              Offset(cx, midY - 3),
+              Offset(cx + cellSize, midY - 3),
+              trackPaint,
+            );
+            canvas.drawLine(
+              Offset(cx, midY + 3),
+              Offset(cx + cellSize, midY + 3),
+              trackPaint,
+            );
           }
         }
       }
     }
 
-    _drawExpressLanesGlobal(canvas);
+    _drawExpressLanesForChunk(canvas, minX, minY, maxX, maxY);
   }
-  
-  void _drawExpressLanesGlobal(Canvas canvas) {
-    // Wide enough that the car (cellSize * 0.55) actually fits inside the
-    // lane, with a darker outer rim for a "highway shoulders" feel. The arc
-    // direction and height MUST match CarComponent._rebuildSmoothPath's
-    // long-jump arc (perp = right-perp of forward, arcHeight = dist * 0.15)
-    // or the car will visibly drive off the painted lane.
-    // Match the car's visible width (cellSize * 0.55) so the car sits
-    // *inside* the lane stroke rather than overhanging both sides — that
-    // overhang is what made cars look like they were floating in the air
-    // above a too-narrow ribbon. Alpha is high enough that the lane reads
-    // as a solid overlay but the road and grid are still visible through.
-    final laneStroke = cellSize * 0.58;
+
+  // Stroke-width factor shared between the actual draw (`laneStroke` below)
+  // and `_expressLaneBounds()`'s padding, so the two can never drift apart
+  // and silently under-pad the bounding box.
+  static const double _expressLaneStrokeFactor = 0.74;
+
+  /// Lazily builds (or reuses) the chunk-bucketed express-lane index. See
+  /// the `_expressLaneChunkIndex` field comment for why this exists and why
+  /// a lane can (and often does) belong to more than one chunk's bucket.
+  Map<int, List<List<GridPosition>>> _ensureExpressLaneIndex() {
+    final existing = _expressLaneChunkIndex;
+    if (existing != null) return existing;
+
+    final index = <int, List<List<GridPosition>>>{};
+    final chunkPx = GameConstants.chunkSize * cellSize;
+    for (final lane in gridManager.placedExpressLanes) {
+      if (lane.length < 2) continue;
+      final bounds = _expressLaneBounds(lane[0], lane[1]);
+      if (bounds == null) continue;
+
+      final minCX = ((bounds.left - offsetX) / chunkPx).floor();
+      final maxCX = ((bounds.right - offsetX) / chunkPx).floor();
+      final minCY = ((bounds.top - offsetY) / chunkPx).floor();
+      final maxCY = ((bounds.bottom - offsetY) / chunkPx).floor();
+
+      for (int cx = minCX; cx <= maxCX; cx++) {
+        for (int cy = minCY; cy <= maxCY; cy++) {
+          final key = cx + cy * 1000;
+          (index[key] ??= []).add(lane);
+        }
+      }
+    }
+    _expressLaneChunkIndex = index;
+    return index;
+  }
+
+  /// Conservative pixel-space bounding box for one express lane's painted
+  /// curve (arc + stroke + ramp markers), used only to decide which
+  /// chunk(s) the lane must be drawn into -- NOT used for the actual paint
+  /// geometry, which `_drawExpressLanesForChunk` still computes itself from
+  /// `lane[0]`/`lane[1]` so the two can never disagree on the curve shape.
+  ///
+  /// Reproduces the exact same arc construction as `_drawExpressLanesForChunk`
+  /// (and CarComponent._rebuildSmoothPath's long-jump bezier): a quadratic
+  /// bezier from o1 to o2 with control point `cp` offset perpendicular by
+  /// `length * 0.15`. A quadratic bezier is a convex combination of its
+  /// three control points at every t (weights (1-t)^2, 2t(1-t), t^2, which
+  /// are all >= 0 and sum to 1), so the WHOLE curve is guaranteed to lie
+  /// inside the bounding box of {o1, cp, o2} -- no need to solve for the
+  /// curve's exact extrema. That box is then padded by the widest stroke's
+  /// half-width (the outline paint, laneStroke + 3) plus a further
+  /// cellSize*0.3 margin, comfortably covering the round stroke caps and the
+  /// small ramp-marker triangles drawn just past each endpoint (their
+  /// maximum reach beyond the raw curve is cellSize*0.126 sideways / 0.072
+  /// outward -- see `_drawExpressLaneRamp` -- well inside that margin).
+  Rect? _expressLaneBounds(GridPosition p1, GridPosition p2) {
+    final o1 = Offset(
+      offsetX + p1.x * cellSize + cellSize / 2,
+      offsetY + p1.y * cellSize + cellSize / 2,
+    );
+    final o2 = Offset(
+      offsetX + p2.x * cellSize + cellSize / 2,
+      offsetY + p2.y * cellSize + cellSize / 2,
+    );
+
+    final delta = o2 - o1;
+    final length = delta.distance;
+
+    final outlineStroke = cellSize * _expressLaneStrokeFactor + 3;
+    final pad = outlineStroke / 2 + cellSize * 0.3;
+
+    if (length < 1) {
+      // Degenerate (near-zero-length) lane; still needs a real box to be
+      // bucketed correctly instead of silently vanishing.
+      return Rect.fromCircle(center: o1, radius: pad);
+    }
+
+    final dir = Offset(delta.dx / length, delta.dy / length);
+    final perp = Offset(-dir.dy, dir.dx);
+    final perpSign = (perp.dy < 0 || (perp.dy == 0 && perp.dx < 0))
+        ? 1.0
+        : -1.0;
+    final arcHeight = length * 0.15 * perpSign;
+    final mid = Offset((o1.dx + o2.dx) / 2, (o1.dy + o2.dy) / 2);
+    final cp = Offset(mid.dx + perp.dx * arcHeight, mid.dy + perp.dy * arcHeight);
+
+    final minX = math.min(o1.dx, math.min(o2.dx, cp.dx));
+    final maxX = math.max(o1.dx, math.max(o2.dx, cp.dx));
+    final minY = math.min(o1.dy, math.min(o2.dy, cp.dy));
+    final maxY = math.max(o1.dy, math.max(o2.dy, cp.dy));
+
+    return Rect.fromLTRB(minX - pad, minY - pad, maxX + pad, maxY + pad);
+  }
+
+  // Renamed from `_drawExpressLanesGlobal`: that name was accurate when it
+  // looped over the entire map's lanes on every chunk (the bug fixed here).
+  // Now it draws only the lanes relevant to THIS chunk -- looked up via
+  // `_ensureExpressLaneIndex()`, which buckets each lane's conservative
+  // pixel-space bounding box (see `_expressLaneBounds()`) under every chunk
+  // it overlaps, so a lane that passes through a chunk without either
+  // endpoint landing inside it still gets drawn (and correctly clipped) in
+  // that middle chunk's Picture -- see the fix/qa-issues commit message for
+  // the worked (0,0)->(1,0)->(2,0) example this was checked against.
+  void _drawExpressLanesForChunk(
+    Canvas canvas,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY,
+  ) {
+    final chunkX = minX ~/ GameConstants.chunkSize;
+    final chunkY = minY ~/ GameConstants.chunkSize;
+    final chunkKey = chunkX + chunkY * 1000;
+    final lanes = _ensureExpressLaneIndex()[chunkKey];
+    if (lanes == null || lanes.isEmpty) return;
+
+    // Wide enough that the car actually fits inside the lane, with a darker
+    // outer rim for a "highway shoulders" feel. The arc direction and height
+    // MUST match CarComponent._rebuildSmoothPath's long-jump arc (perp =
+    // right-perp of forward, arcHeight = dist * 0.15) or the car will
+    // visibly drive off the painted lane.
+    //
+    // [ROAD WIDTH 2026-09-01] Kept at the road fill width + 0.10*cellSize —
+    // the same margin the original 0.58 had over the old 0.48 road fill —
+    // so the express-lane ribbon stays visibly WIDER than the plain road it
+    // connects to at each end, matching how it read before the widening.
+    // Left independent of the car's own painted width (still comfortably
+    // covers it either way; see _maxSafeLaneOffsetMagnitude in
+    // car_component.dart for that real number, cellSize*0.2634).
+    final laneStroke = cellSize * _expressLaneStrokeFactor;
     final lanePaint = Paint()
       ..color = GameConstants.expressLaneColor.withValues(alpha: 0.7)
       ..style = PaintingStyle.stroke
@@ -800,7 +1120,7 @@ class GridRenderer extends PositionComponent
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
 
-    for (final lane in gridManager.placedExpressLanes) {
+    for (final lane in lanes) {
       if (lane.length < 2) continue;
       final p1 = lane[0];
       final p2 = lane[1];
@@ -865,8 +1185,13 @@ class GridRenderer extends PositionComponent
     }
   }
 
-  void _drawExpressLaneRamp(Canvas canvas, Offset center, Offset forward,
-      Paint fill, Paint outline) {
+  void _drawExpressLaneRamp(
+    Canvas canvas,
+    Offset center,
+    Offset forward,
+    Paint fill,
+    Paint outline,
+  ) {
     final perp = Offset(-forward.dy, forward.dx);
     final r = cellSize * 0.18;
     final tip = center + forward * r;
@@ -881,13 +1206,36 @@ class GridRenderer extends PositionComponent
     canvas.drawPath(path, outline);
   }
 
-  void _drawSmartJunctions(Canvas canvas, int minX, int minY, int maxX, int maxY) {
-    // Larger hub design — outerR/innerR are sized so the asphalt ring centerline
-    // sits at 0.85×cellSize, matching the driving radius in _rebuildSmoothPath.
-    // The ring extends into adjacent cells, covering road stubs cleanly.
-    final outerR = cellSize * 1.05;   // asphalt outer edge
-    final innerR = cellSize * 0.45;   // center island boundary
-    final glowR  = cellSize * 1.10;   // barely-visible ambient glow ring
+  // Orthogonal neighbor offsets shared by the building-adjacency clip below.
+  static const _kOrthogonalOffsets = [
+    [0, -1],
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+  ];
+
+  void _drawSmartJunctions(
+    Canvas canvas,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY,
+  ) {
+    // Larger hub design — outerR/innerR are centered on the FIXED r=0.75
+    // driving centerline that car_component.dart's _rebuildSmoothPath
+    // actually uses (multiple hard-coded cellSize*0.75 references there —
+    // that radius is a pathing/timing constant and is NOT changed by the
+    // 2026-09-01 road-width widening). Only the ring's radial THICKNESS
+    // (outerR - innerR) moves, and it is kept equal to the road outline
+    // width (0.76, was 0.60) so the ring reads as exactly as thick as the
+    // visible road (fill + dark border) feeding into it — same relationship
+    // the original 1.05/0.45 numbers had (0.60 ring thickness == the old
+    // 0.60 outline width). The ring extends into adjacent cells, covering
+    // road stubs cleanly.
+    const ringHalfThickness = 0.38; // (0.76 outline width) / 2
+    final outerR = cellSize * (0.75 + ringHalfThickness); // 1.13: asphalt outer edge
+    final innerR = cellSize * (0.75 - ringHalfThickness); // 0.37: center island boundary
+    final glowR = cellSize * 1.18; // barely-visible ambient glow ring (outerR + 0.05, same margin as before)
 
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
@@ -898,6 +1246,46 @@ class GridRenderer extends PositionComponent
         final cx = offsetX + x * cellSize + cellSize / 2;
         final cy = offsetY + y * cellSize + cellSize / 2;
         final center = Offset(cx, cy);
+
+        // The bleed above (up to glowR ≈ 1.10×cellSize from center) reaches
+        // well past this tile into each orthogonal neighbor — intentional,
+        // so the asphalt merges cleanly with connecting road stubs instead of
+        // leaving a seam. But when a neighbor is a house/destination rather
+        // than a road, that same bleed would paint into the building's own
+        // tile. Clip those specific neighbor tiles out of the bleed so the
+        // asphalt stops cleanly at the shared tile edge — the same kind of
+        // hard, tile-aligned boundary already used elsewhere in this renderer
+        // (chunk clip rects, destination lot growth) — while every other
+        // direction keeps the full, intentional bleed.
+        List<Rect>? buildingNeighborRects;
+        for (final off in _kOrthogonalOffsets) {
+          final nx = x + off[0];
+          final ny = y + off[1];
+          if (!gridManager.isValid(nx, ny)) continue;
+          final neighbor = gridManager.grid[ny][nx];
+          if (neighbor.isHouse || neighbor.isDestination) {
+            (buildingNeighborRects ??= []).add(
+              Rect.fromLTWH(
+                offsetX + nx * cellSize,
+                offsetY + ny * cellSize,
+                cellSize,
+                cellSize,
+              ),
+            );
+          }
+        }
+
+        final needsClip = buildingNeighborRects != null;
+        if (needsClip) {
+          canvas.save();
+          final clipPath = Path()
+            ..addRect(Rect.fromCircle(center: center, radius: glowR + 1))
+            ..fillType = PathFillType.evenOdd;
+          for (final rect in buildingNeighborRects) {
+            clipPath.addRect(rect);
+          }
+          canvas.clipPath(clipPath);
+        }
 
         // Layer 1 — soft glow bloom (drawn first, underneath everything)
         canvas.drawCircle(center, glowR, _smartJunctionGlowPaint);
@@ -913,11 +1301,13 @@ class GridRenderer extends PositionComponent
 
         // Layer 5 — inner edge soft outline (island border)
         canvas.drawCircle(center, innerR, _smartJunctionInnerOutlinePaint);
+
+        if (needsClip) {
+          canvas.restore();
+        }
       }
     }
   }
-
-
 
   void _drawBuildings(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     for (int x = minX; x < maxX; x++) {
@@ -930,12 +1320,37 @@ class GridRenderer extends PositionComponent
         final cy = offsetY + y * cellSize + cellSize / 2;
 
         final color = GameConstants.getBuildingColor(cell.colorIndex ?? 0);
-        final districtType = game.districtPlanner.getDistrictType(cell.colorIndex ?? 0);
+        final districtType = game.districtPlanner.getDistrictType(
+          cell.colorIndex ?? 0,
+        );
 
         if (cell.isHouse) {
-          _drawHouse(canvas, cx, cy, color, BuildingProfile.residential.renderScale, districtType);
+          final entrySide = cell.entrySide;
+          final connectedEntrySide =
+              (entrySide != null && _hasAdjacentRoad(x, y, entrySide))
+              ? entrySide
+              : null;
+          _drawHouse(
+            canvas,
+            cx,
+            cy,
+            color,
+            BuildingProfile.residential.renderScale,
+            districtType,
+            connectedEntrySide,
+          );
         } else {
-          _drawDestination(canvas, cx, cy, color, cell.entrySide!, BuildingProfile.commercial.renderScale, districtType, x, y);
+          _drawDestination(
+            canvas,
+            cx,
+            cy,
+            color,
+            cell.entrySide!,
+            BuildingProfile.commercial.renderScale,
+            districtType,
+            x,
+            y,
+          );
         }
       }
     }
@@ -948,7 +1363,12 @@ class GridRenderer extends PositionComponent
         final snowCapPaint = Paint()..color = const Color(0xFFF0F8FF);
         canvas.drawRRect(
           RRect.fromRectAndRadius(
-            Rect.fromLTWH(bRect.left + 1, bRect.top + 1, bRect.width - 2, bRect.height * 0.4),
+            Rect.fromLTWH(
+              bRect.left + 1,
+              bRect.top + 1,
+              bRect.width - 2,
+              bRect.height * 0.4,
+            ),
             Radius.circular(size * 0.08),
           ),
           snowCapPaint,
@@ -960,23 +1380,50 @@ class GridRenderer extends PositionComponent
           ..color = const Color(0xFFC0A477).withValues(alpha: 0.85)
           ..strokeWidth = 1.0
           ..style = PaintingStyle.stroke;
-        canvas.drawLine(Offset(bRect.left + 3, bRect.top + 2), Offset(bRect.left + 6, bRect.top + 6), thatchPaint);
-        canvas.drawLine(Offset(bRect.left + bRect.width / 2, bRect.top + 2), Offset(bRect.left + bRect.width / 2 + 3, bRect.top + 6), thatchPaint);
-        canvas.drawLine(Offset(bRect.right - 6, bRect.top + 2), Offset(bRect.right - 3, bRect.top + 6), thatchPaint);
+        canvas.drawLine(
+          Offset(bRect.left + 3, bRect.top + 2),
+          Offset(bRect.left + 6, bRect.top + 6),
+          thatchPaint,
+        );
+        canvas.drawLine(
+          Offset(bRect.left + bRect.width / 2, bRect.top + 2),
+          Offset(bRect.left + bRect.width / 2 + 3, bRect.top + 6),
+          thatchPaint,
+        );
+        canvas.drawLine(
+          Offset(bRect.right - 6, bRect.top + 2),
+          Offset(bRect.right - 3, bRect.top + 6),
+          thatchPaint,
+        );
         break;
       case MapType.delta:
         // Ivy/mossy details on corners
         final mossPaint = Paint()..color = const Color(0xAA4CAF50);
-        canvas.drawCircle(Offset(bRect.left + 2, bRect.bottom - 2), 2.0, mossPaint);
-        canvas.drawCircle(Offset(bRect.right - 2, bRect.bottom - 2), 1.5, mossPaint);
-        canvas.drawCircle(Offset(bRect.left + 2, bRect.top + 2), 1.0, mossPaint);
+        canvas.drawCircle(
+          Offset(bRect.left + 2, bRect.bottom - 2),
+          2.0,
+          mossPaint,
+        );
+        canvas.drawCircle(
+          Offset(bRect.right - 2, bRect.bottom - 2),
+          1.5,
+          mossPaint,
+        );
+        canvas.drawCircle(
+          Offset(bRect.left + 2, bRect.top + 2),
+          1.0,
+          mossPaint,
+        );
         break;
       case MapType.andes:
         // Stone details/slate texture
         final stonePaint = Paint()
           ..color = const Color(0xFF8D6E63).withValues(alpha: 0.5)
           ..strokeWidth = 1.0;
-        canvas.drawRect(Rect.fromLTWH(bRect.right - 3, bRect.top - 2, 2, 4), stonePaint);
+        canvas.drawRect(
+          Rect.fromLTWH(bRect.right - 3, bRect.top - 2, 2, 4),
+          stonePaint,
+        );
         break;
       case MapType.nile:
         // Clay dome roof accent
@@ -1001,6 +1448,16 @@ class GridRenderer extends PositionComponent
     Color color,
     double scale,
     DistrictType districtType,
+    // Null unless this house's `entrySide` ALSO has an actually-built road
+    // (or tunnel/bridge/junction) sitting next to it right now -- see
+    // `_hasAdjacentRoad`, called by `_drawBuildings` before passing this in.
+    // A house's `entrySide` on the GridCell just records which side it is
+    // ALLOWED to connect from; it is set at spawn time, before any road has
+    // necessarily been built there. Growing the lobe below off the raw
+    // (maybe-unconnected) entrySide would draw a permanent appendage on
+    // every not-yet-connected house, for a stub that was never drawn in the
+    // first place -- so this must be the pre-gated value, not `cell.entrySide`.
+    Direction? entrySide,
   ) {
     final size = cellSize * scale;
     final rect = Rect.fromCenter(
@@ -1009,22 +1466,123 @@ class GridRenderer extends PositionComponent
       height: size,
     );
 
-    // Shadow — flat offset RRect (no blur) for cheap mobile rasterization.
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        rect.shift(const Offset(0, 2)),
-        Radius.circular(size * 0.2),
-      ),
-      Paint()..color = Colors.black26,
-    );
+    // [FIX 2026-09-01, take 2] "Road on house is weird, sides not trimmed":
+    // the driveway road stub is drawn (in _drawRoadsAndExpressLanes, earlier
+    // in the same chunk picture) as a BUTT-capped stroke from this tile's
+    // center out to the tile edge, at the road's full painted width
+    // (cellSize*0.64 fill / 0.76 outline). A house's own body
+    // (BuildingProfile.residential.renderScale, 0.52*cellSize -- shrunk
+    // deliberately so destinations read as clearly bigger) is narrower than
+    // that (half-width 0.26 vs the outline's half-width 0.38), so the
+    // driveway visibly pokes "ears" out past the house's own edges on the
+    // two sides PERPENDICULAR to the driveway -- but only within the half
+    // of the house nearest the entry edge (the far half of the tile, away
+    // from the stub, never overlaps the stub's rectangle at all, so it never
+    // bled and never needed fixing).
+    //
+    // Take 1 (reverted) papered over this with a flat background-colored
+    // square patch sized to cover the worst-case bleed on EVERY side
+    // uniformly. That made things worse: the patch was big enough to paint
+    // over the decorative background grid-dot texture visible on empty
+    // terrain, on all 4 sides, regardless of which side (if any) actually
+    // had a stub -- reading as a uniform "thick outline" around every house.
+    //
+    // This take fixes the actual asymmetry instead of hiding it behind a
+    // same-size-everywhere mask: the house's own footprint is extended with
+    // an additional lobe -- as wide as the road's outline (so it can never
+    // be out-bled) -- flush against the tile edge on ONLY the side the
+    // driveway actually approaches from. The other three sides keep the
+    // original, smaller square with its full margin (and the background
+    // dots) untouched. This also happens to be exactly the "space on the
+    // sides that aren't the stub, tight/flush where the stub is" look
+    // requested for buildings generally -- the same principle already
+    // covered for _drawSmartJunctions' bleed into building tiles (see that
+    // method's per-neighbor evenOdd clip) is applied here from the opposite
+    // side: instead of clipping the road out of the building's tile, the
+    // building is grown to meet the road exactly where it actually arrives.
+    if (entrySide != null) {
+      // Half-width of the road's dark outline stroke (cellSize * 0.76 / 2),
+      // plus a small safety margin, so the lobe is guaranteed wider than
+      // anything the road can paint -- see the outline strokeWidth comment
+      // above _roadOutlinePaint for why 0.76 is the number to beat.
+      final lobeHalfWidth = cellSize * 0.40;
+      // How close the lobe comes to the tile edge -- deliberately short of
+      // the true edge (cellSize * 0.5) by the same small margin every other
+      // near-edge surface in this renderer leaves (see the destination
+      // lot's lotMaxScale comment), so adjacent tiles never visually touch.
+      final lobeReach = cellSize * 0.42;
 
-    // Body
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, Radius.circular(size * 0.2)),
-      Paint()..color = color,
-    );
+      final Rect lobeRect;
+      switch (entrySide) {
+        case Direction.north:
+          lobeRect = Rect.fromLTRB(
+            cx - lobeHalfWidth,
+            cy - lobeReach,
+            cx + lobeHalfWidth,
+            cy,
+          );
+          break;
+        case Direction.south:
+          lobeRect = Rect.fromLTRB(
+            cx - lobeHalfWidth,
+            cy,
+            cx + lobeHalfWidth,
+            cy + lobeReach,
+          );
+          break;
+        case Direction.east:
+          lobeRect = Rect.fromLTRB(
+            cx,
+            cy - lobeHalfWidth,
+            cx + lobeReach,
+            cy + lobeHalfWidth,
+          );
+          break;
+        case Direction.west:
+          lobeRect = Rect.fromLTRB(
+            cx - lobeReach,
+            cy - lobeHalfWidth,
+            cx,
+            cy + lobeHalfWidth,
+          );
+          break;
+      }
 
-    // Roof highlight
+      // Union of the house square and the lobe, as a single Path, so the
+      // shadow/fill below reads as one shape (no seam / no double-shadow at
+      // the join).
+      final housePath = Path()
+        ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(size * 0.2)));
+      final lobePath = Path()
+        ..addRRect(RRect.fromRectAndRadius(lobeRect, Radius.circular(size * 0.15)));
+      final bodyPath = Path.combine(PathOperation.union, housePath, lobePath);
+
+      // Shadow — flat offset (no blur) for cheap mobile rasterization.
+      canvas.drawPath(
+        bodyPath.shift(const Offset(0, 2)),
+        Paint()..color = Colors.black26,
+      );
+      // Body
+      canvas.drawPath(bodyPath, Paint()..color = color);
+    } else {
+      // No known entry side (shouldn't normally happen for a placed house,
+      // but the grid model allows entrySide to be null) -- fall back to the
+      // plain square with no lobe and no patch. Matches pre-lobe behavior.
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          rect.shift(const Offset(0, 2)),
+          Radius.circular(size * 0.2),
+        ),
+        Paint()..color = Colors.black26,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, Radius.circular(size * 0.2)),
+        Paint()..color = color,
+      );
+    }
+
+    // Roof highlight — stays on the original square only (not the lobe), so
+    // it keeps reading as the roof of the main house body.
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(rect.left + 2, rect.top + 2, size - 4, size * 0.3),
@@ -1052,43 +1610,128 @@ class GridRenderer extends PositionComponent
     int gridY,
   ) {
     final size = cellSize * scale;
-    final rect = Rect.fromCenter(
+
+    // [CHECKED 2026-09-01] Does the destination's lot need the same
+    // "generous margin except tight/flush at the stub" treatment just given
+    // to `_drawHouse`? No -- verified, not just assumed: `lotRect` below is
+    // a uniform square around the building regardless of `entry`, but even
+    // at the SMALLEST it ever gets (freshly placed, `lotMinScale` = 0.95, so
+    // half-width = 0.95 * 0.90 * cellSize / 2 = 0.4275 * cellSize) it is
+    // already wider than the road outline's own half-width (0.76 * cellSize
+    // / 2 = 0.38 * cellSize) that can bleed into this tile -- a 0.0475 *
+    // cellSize margin to spare at every maturity stage, not just once fully
+    // grown. And unlike the house's small square body, the lot is already
+    // the same road-surface color/style as the driveway itself, so even
+    // that margin bleeding onto the lot would blend in, not stand out. So
+    // there's no bleed bug here to fix. A direction-aware (asymmetric)
+    // lot shape purely for the "tight at the stub, open elsewhere" AESTHETIC
+    // the house now has would be a bigger, purely cosmetic redesign of a
+    // shape that's tuned by several prior commits (parking-lot growth
+    // animation, stall-tick layout, outline treatment) -- left as-is rather
+    // than risked without visual verification; a good candidate for a
+    // follow-up if the house's new asymmetric look is confirmed and the
+    // team wants the two building types to match stylistically.
+    //
+    // Maturity progress (0.0 freshly placed -> 1.0 fully mature), driven by
+    // the exact same age/maturityThresholdWeeks signal that also unlocks
+    // matureMaxDemand and the penthouse below — no separate timer.
+    final age = game.gridManager?.destinationAges["$gridX,$gridY"] ?? 0;
+    final maturityProgress = (age / GameConstants.maturityThresholdWeeks)
+        .clamp(0.0, 1.0);
+    final isMature = maturityProgress >= 1.0;
+
+    // Foundation/Parking lot — grows with maturityProgress, like a parking
+    // lot expanding around a mall as it gets busier. Bounded by lotMaxScale
+    // (relative to `size`, itself 0.85 * cellSize) so it always stays inside
+    // this tile and never bleeds onto neighboring roads/buildings.
+    final lotScale =
+        GameConstants.lotMinScale +
+        (GameConstants.lotMaxScale - GameConstants.lotMinScale) *
+            maturityProgress;
+    final lotSize = size * lotScale;
+    final lotRect = Rect.fromCenter(
       center: Offset(cx, cy),
-      width: size,
-      height: size,
+      width: lotSize,
+      height: lotSize,
     );
-
-    // Foundation/Parking
+    // [FIX] Two prior rounds only enlarged lotMinScale/lotMaxScale, on the
+    // (correct but incomplete) theory that the lot was too small. It never
+    // was: at cellSize=40 the freshly-placed margin (lotMinScale 0.95) is
+    // already ~1.4px/side in world units, and every OTHER paved surface on
+    // this map (roads, the smart-junction ring, bridges) reads as clearly
+    // visible not because of size but because they're all drawn with the
+    // same double-pass technique — a dark 0xFF14161B outline under/around
+    // the colored fill (see _roadOutlinePaint/_roadPaint above, and the
+    // building body's own stroke a few lines below in this method). This
+    // lot rect was the one paved surface drawn as a bare flat fill with no
+    // border at all, so on warm dark palettes where roadColor (a cool
+    // blue-gray, 0xFF5F6572) sits closer in luminance to the map's own
+    // _mapBackgroundColor (e.g. Andes' warm 0xFF1E1612) than on other maps,
+    // and once the thin margin gets anti-aliased at typical camera zoom,
+    // the fill-only contrast wasn't enough for the lot to read as a
+    // distinct surface — it just looked like more empty ground around the
+    // (still clearly bordered) building. Adding the same dark-outline
+    // treatment here — not another size bump — gives the lot a crisp,
+    // zoom-independent edge so it reads as a parking apron regardless of
+    // how close roadColor happens to sit to any given map's background.
+    final lotRRect = RRect.fromRectAndRadius(
+      lotRect,
+      Radius.circular(size * 0.12),
+    );
+    canvas.drawRRect(lotRRect, Paint()..color = GameConstants.roadColor);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, Radius.circular(size * 0.12)),
-      Paint()..color = GameConstants.roadColor,
+      lotRRect,
+      Paint()
+        ..color = const Color(0xFF14161B)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
     );
 
-    // Faint parking stall indicators (very simple, just 3 lines at the top)
+    // Faint parking stall indicators — a couple more appear as the lot grows
+    // (2 lines when young, up to 4 once mature), still just simple ticks.
     final parkingPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.10)
       ..strokeWidth = 1.0;
-    final stallLength = size * 0.12;
-    for (int i = 0; i < 3; i++) {
-      final xOffset = rect.left + size * 0.25 + i * (size * 0.25);
+    final stallLength = lotSize * 0.12;
+    final stallCount = 2 + (maturityProgress * 2).round();
+    final stallSpacing = lotSize / (stallCount + 1);
+    for (int i = 0; i < stallCount; i++) {
+      final xOffset = lotRect.left + stallSpacing * (i + 1);
       canvas.drawLine(
-        Offset(xOffset, rect.top + size * 0.08),
-        Offset(xOffset, rect.top + size * 0.08 + stallLength),
+        Offset(xOffset, lotRect.top + lotSize * 0.08),
+        Offset(xOffset, lotRect.top + lotSize * 0.08 + stallLength),
         parkingPaint,
       );
     }
 
-    // Main building body (occupies the center-bottom portion of the lot)
-    final bSize = size * 0.72;
+    // Main building body (occupies the center-bottom portion of the lot).
+    // [FIX] History: was 0.72 x 0.65, which (combined with houses drawing
+    // at their full `size` with no further shrink) made destinations
+    // render SMALLER than houses despite a bigger renderScale -- raised to
+    // 0.98 x 0.92 to fix that, but that overshot: with `size` = cellSize *
+    // commercial.renderScale (now 0.90, was 0.85) and the OLD lotMinScale
+    // (0.78), a 0.98 building was actually wider than its own freshly-
+    // placed lot -- the building visibly overflowed its parking lot at
+    // low maturity. Settled on 0.78 x 0.85 together with the raised
+    // lotMinScale/lotMaxScale (see GameConstants) so the building is
+    // still clearly bigger than a house (renderScale 0.52) at every
+    // maturity stage, while staying comfortably smaller than its own lot
+    // (visible parking-lot margin all around it, growing over time) and
+    // the lot itself stays safely inside the tile (maxes out at
+    // ~0.97*cellSize).
+    final bSize = size * 0.78;
     final bRect = Rect.fromCenter(
       center: Offset(cx, cy + size * 0.06),
       width: bSize,
-      height: bSize * 0.65,
+      height: bSize * 0.85,
     );
 
     // Drop shadow
     canvas.drawRRect(
-      RRect.fromRectAndRadius(bRect.shift(const Offset(0, 2)), Radius.circular(size * 0.08)),
+      RRect.fromRectAndRadius(
+        bRect.shift(const Offset(0, 2)),
+        Radius.circular(size * 0.08),
+      ),
       Paint()..color = Colors.black26,
     );
 
@@ -1107,10 +1750,7 @@ class GridRenderer extends PositionComponent
         ..strokeWidth = 1.5,
     );
 
-    // Check if destination is mature (age >= threshold)
-    final age = game.gridManager?.destinationAges["$gridX,$gridY"] ?? 0;
-    final isMature = age >= GameConstants.maturityThresholdWeeks;
-
+    // (age/isMature/maturityProgress already computed above for the lot)
     if (isMature) {
       final pWidth = bRect.width * 0.75;
       final pHeight = bRect.height * 0.75;
@@ -1123,7 +1763,10 @@ class GridRenderer extends PositionComponent
 
       // Drop shadow for penthouse
       canvas.drawRRect(
-        RRect.fromRectAndRadius(pRect.shift(const Offset(0, 1)), Radius.circular(size * 0.06)),
+        RRect.fromRectAndRadius(
+          pRect.shift(const Offset(0, 1)),
+          Radius.circular(size * 0.06),
+        ),
         Paint()..color = Colors.black12,
       );
 
@@ -1148,7 +1791,10 @@ class GridRenderer extends PositionComponent
         width: pWidth * 0.4,
         height: pHeight * 0.4,
       );
-      canvas.drawRect(pWindow, Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.6));
+      canvas.drawRect(
+        pWindow,
+        Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.6),
+      );
       canvas.drawRect(
         pWindow,
         Paint()
@@ -1169,7 +1815,8 @@ class GridRenderer extends PositionComponent
       );
 
       // Blinking warning beacon light
-      final pulse = (math.sin(DateTime.now().millisecondsSinceEpoch / 150) + 1.0) / 2.0;
+      final pulse =
+          (math.sin(DateTime.now().millisecondsSinceEpoch / 150) + 1.0) / 2.0;
       final signalColor = Color.lerp(Colors.redAccent, Colors.red, pulse)!;
       final signalPaint = Paint()
         ..color = signalColor
@@ -1198,7 +1845,10 @@ class GridRenderer extends PositionComponent
       width: bSize * 0.24,
       height: bRect.height * 0.32,
     );
-    canvas.drawRect(doorRect, Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.5));
+    canvas.drawRect(
+      doorRect,
+      Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.5),
+    );
     canvas.drawRect(
       doorRect,
       Paint()
@@ -1210,7 +1860,13 @@ class GridRenderer extends PositionComponent
     _drawBuildingMarkers(canvas, cx, cy, size, districtType);
   }
 
-  void _drawBuildingMarkers(Canvas canvas, double cx, double cy, double size, DistrictType type) {
+  void _drawBuildingMarkers(
+    Canvas canvas,
+    double cx,
+    double cy,
+    double size,
+    DistrictType type,
+  ) {
     final paint = Paint()
       ..color = Colors.white.withValues(alpha: 0.5)
       ..style = PaintingStyle.fill;
@@ -1223,12 +1879,30 @@ class GridRenderer extends PositionComponent
         // Simple Truck shape (Rectangle + small wheels)
         final tw = size * 0.45;
         final th = size * 0.25;
-        canvas.drawRect(Rect.fromCenter(center: Offset(cx, cy + size * 0.1), width: tw, height: th), paint);
+        canvas.drawRect(
+          Rect.fromCenter(
+            center: Offset(cx, cy + size * 0.1),
+            width: tw,
+            height: th,
+          ),
+          paint,
+        );
         // Cabin
-        canvas.drawRect(Rect.fromLTWH(cx + tw * 0.2, cy + size * 0.05, tw * 0.25, th * 0.6), paint);
+        canvas.drawRect(
+          Rect.fromLTWH(cx + tw * 0.2, cy + size * 0.05, tw * 0.25, th * 0.6),
+          paint,
+        );
         // Small Wheels
-        canvas.drawCircle(Offset(cx - tw * 0.3, cy + size * 0.25), size * 0.06, paint);
-        canvas.drawCircle(Offset(cx + tw * 0.3, cy + size * 0.25), size * 0.06, paint);
+        canvas.drawCircle(
+          Offset(cx - tw * 0.3, cy + size * 0.25),
+          size * 0.06,
+          paint,
+        );
+        canvas.drawCircle(
+          Offset(cx + tw * 0.3, cy + size * 0.25),
+          size * 0.06,
+          paint,
+        );
         break;
       case DistrictType.commercial:
         // Shop-style dots or cross - REMOVED for clean aesthetics
@@ -1239,9 +1913,20 @@ class GridRenderer extends PositionComponent
     }
   }
 
+  // [ROAD WIDTH 2026-09-01] The opening (dark hole) width/offset below track
+  // the road fill width exactly (0.64, was 0.48; offset is always half of
+  // that) so the portal's dark hole continues to exactly match the width of
+  // the tunnel road painted through it. The headwall (concrete surround)
+  // keeps the same +0.20*cellSize margin over the opening it had before
+  // (0.68 = 0.48+0.20, now 0.84 = 0.64+0.20) — margin to the tile edge
+  // shrinks from 16% to 8% of cellSize per side as a result (still positive,
+  // but this is the tightest-margin change in the whole widening; flagged
+  // as a residual visual-check item since a tunnel portal can be immediately
+  // adjacent to other infrastructure and this was not checked in a browser).
   void _drawTunnelPortal(Canvas canvas, double cx, double cy, Direction dir) {
     final headwallPaint = Paint()
-      ..color = const Color(0xFF5F6572) // concrete grey
+      ..color =
+          const Color(0xFF5F6572) // concrete grey
       ..style = PaintingStyle.fill;
     final headwallOutlinePaint = Paint()
       ..color = const Color(0xFF14161B)
@@ -1255,23 +1940,29 @@ class GridRenderer extends PositionComponent
       case Direction.north:
         final hwRect = Rect.fromCenter(
           center: Offset(cx, cy - cellSize / 2 + 3),
-          width: cellSize * 0.68,
+          width: cellSize * 0.84,
           height: 6,
         );
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallPaint);
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallOutlinePaint);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallPaint,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallOutlinePaint,
+        );
 
         final opRect = Rect.fromLTWH(
-          cx - cellSize * 0.24,
+          cx - cellSize * 0.32,
           cy - cellSize / 2 + 4,
-          cellSize * 0.48,
+          cellSize * 0.64,
           cellSize * 0.22,
         );
         canvas.drawRRect(
           RRect.fromRectAndCorners(
             opRect,
-            topLeft: Radius.circular(cellSize * 0.2),
-            topRight: Radius.circular(cellSize * 0.2),
+            topLeft: Radius.circular(cellSize * 0.2667),
+            topRight: Radius.circular(cellSize * 0.2667),
           ),
           openingPaint,
         );
@@ -1280,23 +1971,29 @@ class GridRenderer extends PositionComponent
       case Direction.south:
         final hwRect = Rect.fromCenter(
           center: Offset(cx, cy + cellSize / 2 - 3),
-          width: cellSize * 0.68,
+          width: cellSize * 0.84,
           height: 6,
         );
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallPaint);
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallOutlinePaint);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallPaint,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallOutlinePaint,
+        );
 
         final opRect = Rect.fromLTWH(
-          cx - cellSize * 0.24,
+          cx - cellSize * 0.32,
           cy + cellSize / 2 - 4 - cellSize * 0.22,
-          cellSize * 0.48,
+          cellSize * 0.64,
           cellSize * 0.22,
         );
         canvas.drawRRect(
           RRect.fromRectAndCorners(
             opRect,
-            bottomLeft: Radius.circular(cellSize * 0.2),
-            bottomRight: Radius.circular(cellSize * 0.2),
+            bottomLeft: Radius.circular(cellSize * 0.2667),
+            bottomRight: Radius.circular(cellSize * 0.2667),
           ),
           openingPaint,
         );
@@ -1306,22 +2003,28 @@ class GridRenderer extends PositionComponent
         final hwRect = Rect.fromCenter(
           center: Offset(cx + cellSize / 2 - 3, cy),
           width: 6,
-          height: cellSize * 0.68,
+          height: cellSize * 0.84,
         );
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallPaint);
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallOutlinePaint);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallPaint,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallOutlinePaint,
+        );
 
         final opRect = Rect.fromLTWH(
           cx + cellSize / 2 - 4 - cellSize * 0.22,
-          cy - cellSize * 0.24,
+          cy - cellSize * 0.32,
           cellSize * 0.22,
-          cellSize * 0.48,
+          cellSize * 0.64,
         );
         canvas.drawRRect(
           RRect.fromRectAndCorners(
             opRect,
-            topRight: Radius.circular(cellSize * 0.2),
-            bottomRight: Radius.circular(cellSize * 0.2),
+            topRight: Radius.circular(cellSize * 0.2667),
+            bottomRight: Radius.circular(cellSize * 0.2667),
           ),
           openingPaint,
         );
@@ -1331,22 +2034,28 @@ class GridRenderer extends PositionComponent
         final hwRect = Rect.fromCenter(
           center: Offset(cx - cellSize / 2 + 3, cy),
           width: 6,
-          height: cellSize * 0.68,
+          height: cellSize * 0.84,
         );
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallPaint);
-        canvas.drawRRect(RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)), headwallOutlinePaint);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallPaint,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(hwRect, const Radius.circular(1.5)),
+          headwallOutlinePaint,
+        );
 
         final opRect = Rect.fromLTWH(
           cx - cellSize / 2 + 4,
-          cy - cellSize * 0.24,
+          cy - cellSize * 0.32,
           cellSize * 0.22,
-          cellSize * 0.48,
+          cellSize * 0.64,
         );
         canvas.drawRRect(
           RRect.fromRectAndCorners(
             opRect,
-            topLeft: Radius.circular(cellSize * 0.2),
-            bottomLeft: Radius.circular(cellSize * 0.2),
+            topLeft: Radius.circular(cellSize * 0.2667),
+            bottomLeft: Radius.circular(cellSize * 0.2667),
           ),
           openingPaint,
         );
@@ -1369,44 +2078,118 @@ class GridRenderer extends PositionComponent
     final e = cell.connRight;
     final w = cell.connLeft;
 
-    final offset = cellSize * 0.24;
+    // [ROAD WIDTH 2026-09-01] Rails sit at the curb edge, i.e. the road's
+    // own half-width (0.32, was 0.24) — must track _bridgePaint's stroke
+    // width or the rails end up floating in the middle of the (now wider)
+    // road surface instead of tracing its edge.
+    final offset = cellSize * 0.32;
 
     if (n && s && !e && !w) {
-      canvas.drawLine(Offset(cx - offset, cy - cellSize / 2), Offset(cx - offset, cy + cellSize / 2), railPaint);
-      canvas.drawLine(Offset(cx + offset, cy - cellSize / 2), Offset(cx + offset, cy + cellSize / 2), railPaint);
+      canvas.drawLine(
+        Offset(cx - offset, cy - cellSize / 2),
+        Offset(cx - offset, cy + cellSize / 2),
+        railPaint,
+      );
+      canvas.drawLine(
+        Offset(cx + offset, cy - cellSize / 2),
+        Offset(cx + offset, cy + cellSize / 2),
+        railPaint,
+      );
       canvas.drawCircle(Offset(cx - offset, cy), 1.0, postPaint);
       canvas.drawCircle(Offset(cx + offset, cy), 1.0, postPaint);
     } else if (e && w && !n && !s) {
-      canvas.drawLine(Offset(cx - cellSize / 2, cy - offset), Offset(cx + cellSize / 2, cy - offset), railPaint);
-      canvas.drawLine(Offset(cx - cellSize / 2, cy + offset), Offset(cx + cellSize / 2, cy + offset), railPaint);
+      canvas.drawLine(
+        Offset(cx - cellSize / 2, cy - offset),
+        Offset(cx + cellSize / 2, cy - offset),
+        railPaint,
+      );
+      canvas.drawLine(
+        Offset(cx - cellSize / 2, cy + offset),
+        Offset(cx + cellSize / 2, cy + offset),
+        railPaint,
+      );
       canvas.drawCircle(Offset(cx, cy - offset), 1.0, postPaint);
       canvas.drawCircle(Offset(cx, cy + offset), 1.0, postPaint);
     } else {
       if (n) {
-        if (!w) canvas.drawLine(Offset(cx - offset, cy - cellSize / 2), Offset(cx - offset, cy), railPaint);
-        if (!e) canvas.drawLine(Offset(cx + offset, cy - cellSize / 2), Offset(cx + offset, cy), railPaint);
+        if (!w) {
+          canvas.drawLine(
+            Offset(cx - offset, cy - cellSize / 2),
+            Offset(cx - offset, cy),
+            railPaint,
+          );
+        }
+        if (!e) {
+          canvas.drawLine(
+            Offset(cx + offset, cy - cellSize / 2),
+            Offset(cx + offset, cy),
+            railPaint,
+          );
+        }
       }
       if (s) {
-        if (!w) canvas.drawLine(Offset(cx - offset, cy), Offset(cx - offset, cy + cellSize / 2), railPaint);
-        if (!e) canvas.drawLine(Offset(cx + offset, cy), Offset(cx + offset, cy + cellSize / 2), railPaint);
+        if (!w) {
+          canvas.drawLine(
+            Offset(cx - offset, cy),
+            Offset(cx - offset, cy + cellSize / 2),
+            railPaint,
+          );
+        }
+        if (!e) {
+          canvas.drawLine(
+            Offset(cx + offset, cy),
+            Offset(cx + offset, cy + cellSize / 2),
+            railPaint,
+          );
+        }
       }
       if (e) {
-        if (!n) canvas.drawLine(Offset(cx, cy - offset), Offset(cx + cellSize / 2, cy - offset), railPaint);
-        if (!s) canvas.drawLine(Offset(cx, cy + offset), Offset(cx + cellSize / 2, cy + offset), railPaint);
+        if (!n) {
+          canvas.drawLine(
+            Offset(cx, cy - offset),
+            Offset(cx + cellSize / 2, cy - offset),
+            railPaint,
+          );
+        }
+        if (!s) {
+          canvas.drawLine(
+            Offset(cx, cy + offset),
+            Offset(cx + cellSize / 2, cy + offset),
+            railPaint,
+          );
+        }
       }
       if (w) {
-        if (!n) canvas.drawLine(Offset(cx - cellSize / 2, cy - offset), Offset(cx, cy - offset), railPaint);
-        if (!s) canvas.drawLine(Offset(cx - cellSize / 2, cy + offset), Offset(cx, cy + offset), railPaint);
+        if (!n) {
+          canvas.drawLine(
+            Offset(cx - cellSize / 2, cy - offset),
+            Offset(cx, cy - offset),
+            railPaint,
+          );
+        }
+        if (!s) {
+          canvas.drawLine(
+            Offset(cx - cellSize / 2, cy + offset),
+            Offset(cx, cy + offset),
+            railPaint,
+          );
+        }
       }
     }
   }
 
-  void _drawInfrastructure(Canvas canvas, int minX, int minY, int maxX, int maxY) {
+  void _drawInfrastructure(
+    Canvas canvas,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY,
+  ) {
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
-        
+
         if (cell.hasTrafficLight) {
           _drawTrafficLight(canvas, x, y, cell);
         }
@@ -1415,16 +2198,24 @@ class GridRenderer extends PositionComponent
         final cy = offsetY + y * cellSize + cellSize / 2;
 
         if (cell.isTunnel) {
-          if (cell.connUp && gridManager.isValid(x, y - 1) && !gridManager.grid[y - 1][x].isTunnel) {
+          if (cell.connUp &&
+              gridManager.isValid(x, y - 1) &&
+              !gridManager.grid[y - 1][x].isTunnel) {
             _drawTunnelPortal(canvas, cx, cy, Direction.north);
           }
-          if (cell.connRight && gridManager.isValid(x + 1, y) && !gridManager.grid[y][x + 1].isTunnel) {
+          if (cell.connRight &&
+              gridManager.isValid(x + 1, y) &&
+              !gridManager.grid[y][x + 1].isTunnel) {
             _drawTunnelPortal(canvas, cx, cy, Direction.east);
           }
-          if (cell.connDown && gridManager.isValid(x, y + 1) && !gridManager.grid[y + 1][x].isTunnel) {
+          if (cell.connDown &&
+              gridManager.isValid(x, y + 1) &&
+              !gridManager.grid[y + 1][x].isTunnel) {
             _drawTunnelPortal(canvas, cx, cy, Direction.south);
           }
-          if (cell.connLeft && gridManager.isValid(x - 1, y) && !gridManager.grid[y][x - 1].isTunnel) {
+          if (cell.connLeft &&
+              gridManager.isValid(x - 1, y) &&
+              !gridManager.grid[y][x - 1].isTunnel) {
             _drawTunnelPortal(canvas, cx, cy, Direction.west);
           }
         } else if (cell.isBridge) {
@@ -1434,33 +2225,94 @@ class GridRenderer extends PositionComponent
     }
   }
 
+  // [ROAD WIDTH] Redesigned 2026-09-01 alongside the road-width widening
+  // above. OLD DESIGN (see git history for the exact code): a free-standing
+  // black "traffic light box" — an opaque rounded pill plus a short dark
+  // pole stub beneath it — planted off-center in the tile at a fixed
+  // cellSize*0.7 offset, lit by two saturated bulb dots (Colors.redAccent /
+  // Colors.greenAccent, dimmed to Colors.red/green at 0.2 alpha when off).
+  // Two problems: (1) it was a literal miniature real-world traffic-signal
+  // icon — thick black outline, saturated red/green bulbs — while every
+  // other piece of infrastructure here is flat/near-flat with soft
+  // alpha-layered glows and deliberately desaturated colors (see the
+  // congestionLowColor/HighColor comment below, which explicitly rejects
+  // "flat-UI traffic-light yellow/red", and the smart-junction ring's
+  // glow, which is built from flat alpha circles, never MaskFilter.blur —
+  // see `_mountainBasePaint`'s comment above for why blur is avoided here).
+  // (2) its size and cellSize*0.7 offset were never tied to the actual road
+  // paint width, so widening the road (fill 0.48->0.64, outline 0.60->0.76)
+  // left the box sitting on top of the now-wider paved lane instead of
+  // clear of it — a dark pole appearing to stand in traffic.
+  //
+  // NEW DESIGN: a flat "+" pair of short lane-aligned bars painted directly
+  // on the road surface at the intersection center — the same idiom the
+  // (currently disabled) `_drawCongestion` road-tint overlay uses below:
+  // signal state is shown by marking the road itself, not by standing an
+  // object on it. Bar length/thickness are fractions of cellSize, so they
+  // track the live road width automatically. The NS bar and EW bar glow in
+  // the same soft, desaturated green already used for "traffic may flow
+  // here" (GameConstants.expressLaneColor) when that axis has the
+  // right-of-way, and sit as a barely-visible neutral tick (roadColor at
+  // low alpha) when it doesn't — no red, keeping the same restraint the
+  // congestion colors already apply. Direction stays unambiguous: a lit
+  // vertical bar means N/S traffic is moving, a lit horizontal bar means
+  // E/W traffic is moving, and — unlike the old design, which only ever
+  // read Direction.north and inferred the rest — both bars can light up
+  // together for the low-traffic "everyone gets a green" case that
+  // `isGreenForDirection` already returns (nsCount + ewCount <= 1).
   void _drawTrafficLight(Canvas canvas, int x, int y, GridCell cell) {
     final opacity = cell.isPendingDeletion ? 0.3 : 1.0;
-    final cx = offsetX + x * cellSize + cellSize * 0.7;
-    final cy = offsetY + y * cellSize + cellSize * 0.5;
+    final cx = offsetX + x * cellSize + cellSize / 2;
+    final cy = offsetY + y * cellSize + cellSize / 2;
 
-    final pillW = cellSize * 0.16;
-    final pillH = cellSize * 0.38;
+    final nsGreen = gridManager.isGreenForDirection(x, y, Direction.north);
+    final ewGreen = gridManager.isGreenForDirection(x, y, Direction.east);
 
-    canvas.drawRect(
-      Rect.fromLTWH(cx - 1, cy + pillH * 0.2, 2, cellSize * 0.3),
-      Paint()..color = Colors.black45.withValues(alpha: opacity),
-    );
+    // Sized off cellSize, not the road paint constants directly, but kept
+    // well inside the fill half-width (cellSize*0.32) so the marking reads
+    // as sitting on the lane rather than bleeding onto the curb/outline.
+    final barThickness = cellSize * 0.09;
+    final barLength = cellSize * 0.30;
+    final glowMargin = cellSize * 0.08;
 
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(cx, cy), width: pillW, height: pillH),
-        Radius.circular(pillW / 2),
-      ),
-      Paint()..color = Colors.black87.withValues(alpha: opacity),
-    );
+    void drawBar(bool active, bool vertical) {
+      final w = vertical ? barThickness : barLength;
+      final h = vertical ? barLength : barThickness;
+      final rect = Rect.fromCenter(center: Offset(cx, cy), width: w, height: h);
+      final rrect = RRect.fromRectAndRadius(rect, Radius.circular(barThickness / 2));
 
-    final redActive = !gridManager.isGreenForDirection(x, y, Direction.north);
-    final redColor = redActive ? Colors.redAccent : Colors.red.withValues(alpha: 0.2);
-    canvas.drawCircle(Offset(cx, cy - pillH * 0.22), pillW * 0.35, Paint()..color = redColor.withValues(alpha: opacity));
+      if (active) {
+        // Soft glow halo (flat low-alpha layer, no blur) behind the bright core.
+        final glowRect = Rect.fromCenter(
+          center: Offset(cx, cy),
+          width: w + glowMargin,
+          height: h + glowMargin,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            glowRect,
+            Radius.circular((barThickness + glowMargin) / 2),
+          ),
+          Paint()
+            ..color = GameConstants.expressLaneColor.withValues(
+              alpha: 0.22 * opacity,
+            ),
+        );
+        canvas.drawRRect(
+          rrect,
+          Paint()
+            ..color = GameConstants.expressLaneColor.withValues(alpha: opacity),
+        );
+      } else {
+        canvas.drawRRect(
+          rrect,
+          Paint()..color = GameConstants.roadColor.withValues(alpha: 0.35 * opacity),
+        );
+      }
+    }
 
-    final greenColor = !redActive ? Colors.greenAccent : Colors.green.withValues(alpha: 0.2);
-    canvas.drawCircle(Offset(cx, cy + pillH * 0.22), pillW * 0.35, Paint()..color = greenColor.withValues(alpha: opacity));
+    drawBar(nsGreen, true);
+    drawBar(ewGreen, false);
   }
 
   void _drawParkingHighlights(Canvas canvas) {
@@ -1483,11 +2335,27 @@ class GridRenderer extends PositionComponent
   }
 
   void _drawDemandIndicators(Canvas canvas) {
+    // [PERF] Unlike the building bodies drawn into _buildChunkPicture (cached
+    // per-chunk and only rebuilt when dirty), this loop runs unconditionally
+    // every single frame with no caching. Left unculled, its cost scales with
+    // the TOTAL number of destinations on the map -- not with what's actually
+    // on screen or with active car count -- and each destination can cost
+    // several drawCircle/drawArc/drawPath calls (more when mature or in
+    // overflow). That's invisible on a small early map but grows steadily
+    // through week 2-3+ as more destinations are placed (e.g. Andes), which
+    // matches reported lag that static review of per-car/per-frame code
+    // alone didn't explain. Cull to the visible viewport, same approach
+    // _drawChunks already uses for the cached chunk pictures.
+    final viewport = game.camera.visibleWorldRect.inflate(cellSize);
     for (final pos in gridManager.destinations) {
       final cell = gridManager.grid[pos.y][pos.x];
       // [CRITICAL] Prevent Role Contamination (Issue 3)
       // Only draw demand if the cell at this position is still actually a destination
       if (!cell.isDestination) continue;
+
+      final cx = offsetX + pos.x * cellSize + cellSize / 2;
+      final cy = offsetY + pos.y * cellSize + cellSize / 2;
+      if (!viewport.contains(Offset(cx, cy))) continue;
 
       final demand = gridManager.getDemand(pos);
       if (demand <= 0) continue;
@@ -1495,23 +2363,25 @@ class GridRenderer extends PositionComponent
       final key = '${pos.x},${pos.y}';
       final overflowLevel = gridManager.overflowLevels[key] ?? 0.0;
 
-      final cx = offsetX + pos.x * cellSize + cellSize / 2;
-      final cy = offsetY + pos.y * cellSize + cellSize / 2;
-
       final age = gridManager.destinationAges[key] ?? 0;
-      final isMature = age >= GameConstants.maturityThresholdWeeks;
+      final maturityProgress = (age / GameConstants.maturityThresholdWeeks)
+          .clamp(0.0, 1.0);
+      final isMature = maturityProgress >= 1.0;
 
-      // Draw Maturity Aura — flat alpha pulse (no blur) for mobile.
-      if (isMature) {
+      // Draw Maturity Aura — flat alpha pulse (no blur) for mobile. Fades in
+      // smoothly with maturityProgress instead of popping on at the mature
+      // threshold.
+      if (maturityProgress > 0) {
         final t = game.elapsedTime * 2.0;
         final pulse = (0.5 + 0.5 * math.sin(t)).clamp(0.0, 1.0);
-        final auraRadius = cellSize * (0.5 + pulse * 0.1);
+        final auraRadius = cellSize * (0.5 + pulse * 0.1 * maturityProgress);
 
         canvas.drawCircle(
           Offset(cx, cy),
           auraRadius,
-          Paint()
-            ..color = Colors.white.withValues(alpha: 0.05 + pulse * 0.05),
+          Paint()..color = Colors.white.withValues(
+            alpha: (0.05 + pulse * 0.05) * maturityProgress,
+          ),
         );
       }
 
@@ -1592,11 +2462,18 @@ class GridRenderer extends PositionComponent
         // Normal pip drawing (shifted above building)
         double indicatorY = offsetY + pos.y * cellSize - cellSize * 0.2;
         if (isMature) {
-          // If mature, shift higher to avoid overlapping with penthouse structure & blinking beacon
+          // If mature, shift higher to avoid overlapping with penthouse structure & blinking beacon.
+          // [FIX] bSize/bRectHeight factors must match _drawDestination's own
+          // building-body math exactly (0.78 / 0.85, updated alongside the
+          // destination-size fix) -- this duplicate calculation existed only
+          // to derive the building's on-screen top edge for indicator
+          // placement, and had silently drifted out of sync when those
+          // factors changed, which would have positioned the indicator too
+          // low (overlapping the now-taller building).
           final destScale = BuildingProfile.commercial.renderScale;
           final size = cellSize * destScale;
-          final bSize = size * 0.72;
-          final bRectHeight = bSize * 0.65;
+          final bSize = size * 0.78;
+          final bRectHeight = bSize * 0.85;
           final cyLocal = offsetY + pos.y * cellSize + cellSize / 2;
           final bRectTop = cyLocal + size * 0.06 - bRectHeight / 2;
           final pHeight = bRectHeight * 0.75;
@@ -1626,11 +2503,9 @@ class GridRenderer extends PositionComponent
     }
   }
 
-
-
   void _drawAmbientTimeOfDay(Canvas canvas) {
     final weekProgress = game.weekProgress.clamp(0.0, 1.0);
-    
+
     // Derive warm/cool tint from progress
     // Morning (0.0-0.15): warm orange sunrise
     // Midday (0.15-0.45): clear/neutral
@@ -1652,12 +2527,18 @@ class GridRenderer extends PositionComponent
     } else if (weekProgress < 0.65) {
       // Evening → warm amber/red sunset
       final t = (weekProgress - 0.45) / 0.20;
-      tintColor = Color.lerp(const Color(0xFFE26D5C), const Color(0xFF1A1040), t)!;
+      tintColor = Color.lerp(
+        const Color(0xFFE26D5C),
+        const Color(0xFF1A1040),
+        t,
+      )!;
       tintStrength = t * 0.15;
     } else {
       // Night → deep indigo, peaks at 0.85, then fades back to dawn
       final nightProgress = (weekProgress - 0.65) / 0.35;
-      final nightIntensity = math.sin(nightProgress * math.pi); // peaks at center of night
+      final nightIntensity = math.sin(
+        nightProgress * math.pi,
+      ); // peaks at center of night
       tintColor = const Color(0xFF0A0E1A);
       tintStrength = nightIntensity * 0.25;
     }
@@ -1738,13 +2619,29 @@ class GridRenderer extends PositionComponent
       if (isErase) {
         // Draw diagonal X for erase preview
         final crossSize = cellSize * 0.15;
-        canvas.drawLine(Offset(cx - crossSize, cy - crossSize), Offset(cx + crossSize, cy + crossSize), borderPaint);
-        canvas.drawLine(Offset(cx - crossSize, cy + crossSize), Offset(cx + crossSize, cy - crossSize), borderPaint);
+        canvas.drawLine(
+          Offset(cx - crossSize, cy - crossSize),
+          Offset(cx + crossSize, cy + crossSize),
+          borderPaint,
+        );
+        canvas.drawLine(
+          Offset(cx - crossSize, cy + crossSize),
+          Offset(cx + crossSize, cy - crossSize),
+          borderPaint,
+        );
       } else {
         // Draw subtle drafting grid marking (crosshair) in the center of blueprint tile
         final crossSize = cellSize * 0.15;
-        canvas.drawLine(Offset(cx - crossSize, cy), Offset(cx + crossSize, cy), borderPaint);
-        canvas.drawLine(Offset(cx, cy - crossSize), Offset(cx, cy + crossSize), borderPaint);
+        canvas.drawLine(
+          Offset(cx - crossSize, cy),
+          Offset(cx + crossSize, cy),
+          borderPaint,
+        );
+        canvas.drawLine(
+          Offset(cx, cy - crossSize),
+          Offset(cx, cy + crossSize),
+          borderPaint,
+        );
       }
     }
   }
@@ -1795,20 +2692,20 @@ class GridRenderer extends PositionComponent
   //   for (final pos in gridManager.infrastructure) {
   //     final cell = gridManager.getCell(pos.x, pos.y);
   //     if (!cell.isRoad && !cell.isExpressLaneNode) continue;
-  // 
+  //
   //     final load = gridManager.getRoadLoad(pos.x, pos.y);
   //     if (load <= 0) continue;
-  // 
+  //
   //     final ratio = (load / cell.capacity).clamp(0.0, 1.0);
   //     if (ratio < 0.4) continue;
-  // 
+  //
   //     final rect = Rect.fromLTWH(
   //       offsetX + pos.x * cellSize,
   //       offsetY + pos.y * cellSize,
   //       cellSize,
   //       cellSize,
   //     );
-  // 
+  //
   //     Color color;
   //     if (ratio >= 0.8) {
   //       color = GameConstants.congestionHighColor.withValues(alpha: 0.3);
@@ -1828,7 +2725,7 @@ class GridRenderer extends PositionComponent
 
     final cx = game.gridCols / 2.0;
     final cy = game.gridRows / 2.0;
-    
+
     final dims = game.getSmoothActiveHalfDimensions();
     final hw = dims.x;
     final hh = dims.y;
@@ -1846,9 +2743,13 @@ class GridRenderer extends PositionComponent
       offsetY + maxY * cellSize,
     );
 
-    // Draw fully opaque solid overlay outside the active rectangle
+    // Draw fully opaque solid overlay outside the active rectangle. [FIX]
+    // Was GameConstants.backgroundColor (a generic dark navy) instead of
+    // this map's actual terrain background (_mapBackgroundColor) -- visibly
+    // mismatched on every map whose tint differs from that generic navy
+    // (Andes, Savanna, etc.), showing as an obvious seam at the reveal edge.
     final paint = Paint()
-      ..color = GameConstants.backgroundColor
+      ..color = _mapBackgroundColor
       ..style = PaintingStyle.fill;
 
     // Use clipPath/evenOdd path to draw solid color everywhere in the camera viewport EXCEPT the rect
@@ -1863,12 +2764,12 @@ class GridRenderer extends PositionComponent
 
   void _drawFloatingMessages(Canvas canvas) {
     if (_floatingMessages.isEmpty) return;
-    
+
     // Use a shared TextPainter to avoid allocations (Task 6)
     // ... logic remains same but we reuse painter ...
     // (I will update this specifically in a later step to be clean)
     // For now, let's just finish the class.
-    
+
     final List<_FloatingMessage> toRemove = [];
     for (final msg in _floatingMessages) {
       msg.life -= 0.016; // Approx 60fps
@@ -1914,14 +2815,14 @@ class GridRenderer extends PositionComponent
     final textPainter = TextPainter(
       text: TextSpan(
         text: '⚠️',
-        style: GoogleFonts.outfit(
-          color: Colors.amber,
-          fontSize: size,
-        ),
+        style: GoogleFonts.outfit(color: Colors.amber, fontSize: size),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    textPainter.paint(canvas, Offset(cx - textPainter.width / 2, cy - textPainter.height / 2));
+    textPainter.paint(
+      canvas,
+      Offset(cx - textPainter.width / 2, cy - textPainter.height / 2),
+    );
   }
 
   void _drawMapSpecificEventVisuals(Canvas canvas) {
@@ -1945,7 +2846,11 @@ class GridRenderer extends PositionComponent
       for (int i = 0; i < 30; i++) {
         final rx = (r.nextDouble() * width + time * 40.0) % width;
         final ry = (r.nextDouble() * height + time * 50.0) % height;
-        canvas.drawCircle(Offset(offsetX + rx, offsetY + ry), 1.0 + r.nextDouble() * 1.5, snowPaint);
+        canvas.drawCircle(
+          Offset(offsetX + rx, offsetY + ry),
+          1.0 + r.nextDouble() * 1.5,
+          snowPaint,
+        );
       }
     } else if (game.activeEvent == 'dustStorm') {
       // Map-wide orange-brown sandstorm tint
@@ -1955,7 +2860,8 @@ class GridRenderer extends PositionComponent
       );
 
       // Draw drifting dust particles (halved)
-      final dustPaint = Paint()..color = const Color(0xFFC69C6D).withValues(alpha: 0.4);
+      final dustPaint = Paint()
+        ..color = const Color(0xFFC69C6D).withValues(alpha: 0.4);
       final r = math.Random(1337);
       for (int i = 0; i < 20; i++) {
         final rx = (r.nextDouble() * width + time * 80.0) % width;
@@ -1983,9 +2889,17 @@ class GridRenderer extends PositionComponent
         final offsetPhase = (time * 0.4 + i * 0.3) % 1.0;
         final ax = cx - cellSize * 0.4 + offsetPhase * cellSize * 0.8;
         final ay = cy + math.sin(offsetPhase * math.pi * 4.0) * 1.5;
-        
-        canvas.drawCircle(Offset(ax, ay), 2.0, Paint()..color = const Color(0xFF8B5A2B));
-        canvas.drawCircle(Offset(ax + 2.0, ay - 1.2), 1.2, Paint()..color = const Color(0xFF8B5A2B));
+
+        canvas.drawCircle(
+          Offset(ax, ay),
+          2.0,
+          Paint()..color = const Color(0xFF8B5A2B),
+        );
+        canvas.drawCircle(
+          Offset(ax + 2.0, ay - 1.2),
+          1.2,
+          Paint()..color = const Color(0xFF8B5A2B),
+        );
       }
     }
 
@@ -2002,31 +2916,54 @@ class GridRenderer extends PositionComponent
         Offset(cx, cy),
         cellSize * 0.45,
         Paint()
-          ..color = (flash ? Colors.redAccent : Colors.transparent).withValues(alpha: 0.25)
+          ..color = (flash ? Colors.redAccent : Colors.transparent).withValues(
+            alpha: 0.25,
+          )
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.2,
       );
 
       // Draw bridge flaps open (two dark rects separated in the center)
-      final bool isVertical = cell.infrastructureAxis == InfrastructureAxis.vertical;
+      final bool isVertical =
+          cell.infrastructureAxis == InfrastructureAxis.vertical;
       final bridgePaint = Paint()..color = const Color(0xFF424953);
 
       if (isVertical) {
         canvas.drawRect(
-          Rect.fromLTWH(cx - cellSize * 0.15, cy - cellSize * 0.4, cellSize * 0.3, cellSize * 0.2),
+          Rect.fromLTWH(
+            cx - cellSize * 0.15,
+            cy - cellSize * 0.4,
+            cellSize * 0.3,
+            cellSize * 0.2,
+          ),
           bridgePaint,
         );
         canvas.drawRect(
-          Rect.fromLTWH(cx - cellSize * 0.15, cy + cellSize * 0.2, cellSize * 0.3, cellSize * 0.2),
+          Rect.fromLTWH(
+            cx - cellSize * 0.15,
+            cy + cellSize * 0.2,
+            cellSize * 0.3,
+            cellSize * 0.2,
+          ),
           bridgePaint,
         );
       } else {
         canvas.drawRect(
-          Rect.fromLTWH(cx - cellSize * 0.4, cy - cellSize * 0.15, cellSize * 0.2, cellSize * 0.3),
+          Rect.fromLTWH(
+            cx - cellSize * 0.4,
+            cy - cellSize * 0.15,
+            cellSize * 0.2,
+            cellSize * 0.3,
+          ),
           bridgePaint,
         );
         canvas.drawRect(
-          Rect.fromLTWH(cx + cellSize * 0.2, cy - cellSize * 0.15, cellSize * 0.2, cellSize * 0.3),
+          Rect.fromLTWH(
+            cx + cellSize * 0.2,
+            cy - cellSize * 0.15,
+            cellSize * 0.2,
+            cellSize * 0.3,
+          ),
           bridgePaint,
         );
       }
@@ -2038,11 +2975,27 @@ class GridRenderer extends PositionComponent
         ..strokeCap = StrokeCap.round;
 
       if (isVertical) {
-        canvas.drawLine(Offset(cx - cellSize * 0.25, cy - cellSize * 0.3), Offset(cx + cellSize * 0.25, cy - cellSize * 0.3), barrierPaint);
-        canvas.drawLine(Offset(cx - cellSize * 0.25, cy + cellSize * 0.3), Offset(cx + cellSize * 0.25, cy + cellSize * 0.3), barrierPaint);
+        canvas.drawLine(
+          Offset(cx - cellSize * 0.25, cy - cellSize * 0.3),
+          Offset(cx + cellSize * 0.25, cy - cellSize * 0.3),
+          barrierPaint,
+        );
+        canvas.drawLine(
+          Offset(cx - cellSize * 0.25, cy + cellSize * 0.3),
+          Offset(cx + cellSize * 0.25, cy + cellSize * 0.3),
+          barrierPaint,
+        );
       } else {
-        canvas.drawLine(Offset(cx - cellSize * 0.3, cy - cellSize * 0.25), Offset(cx - cellSize * 0.3, cy + cellSize * 0.25), barrierPaint);
-        canvas.drawLine(Offset(cx + cellSize * 0.3, cy - cellSize * 0.25), Offset(cx + cellSize * 0.3, cy + cellSize * 0.25), barrierPaint);
+        canvas.drawLine(
+          Offset(cx - cellSize * 0.3, cy - cellSize * 0.25),
+          Offset(cx - cellSize * 0.3, cy + cellSize * 0.25),
+          barrierPaint,
+        );
+        canvas.drawLine(
+          Offset(cx + cellSize * 0.3, cy - cellSize * 0.25),
+          Offset(cx + cellSize * 0.3, cy + cellSize * 0.25),
+          barrierPaint,
+        );
       }
     }
 
@@ -2056,23 +3009,27 @@ class GridRenderer extends PositionComponent
         final cx = offsetX + pos.x * cellSize + cellSize / 2;
         final cy = offsetY + pos.y * cellSize + cellSize / 2;
 
-        canvas.drawCircle(
-          Offset(cx, cy),
-          cellSize * 0.4,
-          floodPaint,
-        );
+        canvas.drawCircle(Offset(cx, cy), cellSize * 0.4, floodPaint);
 
         final wavePaint = Paint()
           ..color = const Color(0xB02196F3)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5
           ..strokeCap = StrokeCap.round;
-        
+
         canvas.drawLine(Offset(cx - 5, cy - 2), Offset(cx - 1, cy), wavePaint);
         canvas.drawLine(Offset(cx - 1, cy), Offset(cx + 3, cy - 2), wavePaint);
-        
-        canvas.drawLine(Offset(cx - 3, cy + 2), Offset(cx + 1, cy + 4), wavePaint);
-        canvas.drawLine(Offset(cx + 1, cy + 4), Offset(cx + 5, cy + 2), wavePaint);
+
+        canvas.drawLine(
+          Offset(cx - 3, cy + 2),
+          Offset(cx + 1, cy + 4),
+          wavePaint,
+        );
+        canvas.drawLine(
+          Offset(cx + 1, cy + 4),
+          Offset(cx + 5, cy + 2),
+          wavePaint,
+        );
       }
     }
   }
@@ -2088,26 +3045,44 @@ class GridRenderer extends PositionComponent
         // Vector orange roadblock barricade
         final barrierW = cellSize * 0.5;
         final barrierH = cellSize * 0.22;
-        final bRect = Rect.fromCenter(center: Offset(cx, cy), width: barrierW, height: barrierH);
-        
+        final bRect = Rect.fromCenter(
+          center: Offset(cx, cy),
+          width: barrierW,
+          height: barrierH,
+        );
+
         // Base feet
-        final footPaint = Paint()..color = Colors.grey..style = PaintingStyle.fill;
-        canvas.drawRect(Rect.fromLTWH(cx - barrierW * 0.4, cy + barrierH * 0.3, 2, 4), footPaint);
-        canvas.drawRect(Rect.fromLTWH(cx + barrierW * 0.4 - 2, cy + barrierH * 0.3, 2, 4), footPaint);
+        final footPaint = Paint()
+          ..color = Colors.grey
+          ..style = PaintingStyle.fill;
+        canvas.drawRect(
+          Rect.fromLTWH(cx - barrierW * 0.4, cy + barrierH * 0.3, 2, 4),
+          footPaint,
+        );
+        canvas.drawRect(
+          Rect.fromLTWH(cx + barrierW * 0.4 - 2, cy + barrierH * 0.3, 2, 4),
+          footPaint,
+        );
 
         // Barricade board
-        final boardPaint = Paint()..color = Colors.deepOrange..style = PaintingStyle.fill;
+        final boardPaint = Paint()
+          ..color = Colors.deepOrange
+          ..style = PaintingStyle.fill;
         canvas.drawRect(bRect, boardPaint);
-        
+
         // White stripes
-        final stripePaint = Paint()..color = Colors.white..style = PaintingStyle.fill;
+        final stripePaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
         for (int i = 0; i < 3; i++) {
           final sx = bRect.left + (i * 2 + 1) * (barrierW / 6.0);
-          canvas.drawRect(Rect.fromLTWH(sx - 1.5, bRect.top, 3.0, barrierH), stripePaint);
+          canvas.drawRect(
+            Rect.fromLTWH(sx - 1.5, bRect.top, 3.0, barrierH),
+            stripePaint,
+          );
         }
-      }
-
-      else if (event.type == CityEventType.bridgeMaintenance && event.affectedTile != null) {
+      } else if (event.type == CityEventType.bridgeMaintenance &&
+          event.affectedTile != null) {
         final pos = event.affectedTile!;
         final cx = offsetX + pos.x * cellSize + cellSize / 2;
         final cy = offsetY + pos.y * cellSize + cellSize / 2;
@@ -2116,23 +3091,39 @@ class GridRenderer extends PositionComponent
         final wrenchPaint = Paint()
           ..color = Colors.blueGrey
           ..style = PaintingStyle.fill;
-        
+
         // Wrench handle
         canvas.drawRect(
-          Rect.fromCenter(center: Offset(cx, cy), width: 3, height: cellSize * 0.4),
+          Rect.fromCenter(
+            center: Offset(cx, cy),
+            width: 3,
+            height: cellSize * 0.4,
+          ),
           wrenchPaint,
         );
         // Wrench jaw (head)
         canvas.drawCircle(Offset(cx, cy - cellSize * 0.15), 4.5, wrenchPaint);
-        canvas.drawCircle(Offset(cx, cy - cellSize * 0.15), 1.8, Paint()..color = GameConstants.backgroundColor..style = PaintingStyle.fill);
+        canvas.drawCircle(
+          Offset(cx, cy - cellSize * 0.15),
+          1.8,
+          Paint()
+            ..color = GameConstants.backgroundColor
+            ..style = PaintingStyle.fill,
+        );
         // Clip notch
-        canvas.drawRect(Rect.fromLTWH(cx - 1, cy - cellSize * 0.15 - 5, 2, 4), Paint()..color = GameConstants.backgroundColor);
-      }
-
-      else if (event.type == CityEventType.festival && event.affectedColor != null) {
+        canvas.drawRect(
+          Rect.fromLTWH(cx - 1, cy - cellSize * 0.15 - 5, 2, 4),
+          Paint()..color = GameConstants.backgroundColor,
+        );
+      } else if (event.type == CityEventType.festival &&
+          event.affectedColor != null) {
         final colorIndex = event.affectedColor!;
-        final destinations = gridManager.destinations.where((d) => gridManager.grid[d.y][d.x].colorIndex == colorIndex);
-        final houses = gridManager.houses.where((h) => gridManager.grid[h.y][h.x].colorIndex == colorIndex);
+        final destinations = gridManager.destinations.where(
+          (d) => gridManager.grid[d.y][d.x].colorIndex == colorIndex,
+        );
+        final houses = gridManager.houses.where(
+          (h) => gridManager.grid[h.y][h.x].colorIndex == colorIndex,
+        );
         final allPositions = [...destinations, ...houses];
 
         for (final pos in allPositions) {
@@ -2150,16 +3141,29 @@ class GridRenderer extends PositionComponent
           final dot1 = Offset(cx, cy - cellSize * 0.65);
           final dot2 = Offset(cx - 3.5, cy - cellSize * 0.55);
           final dot3 = Offset(cx + 3.5, cy - cellSize * 0.55);
-          
-          canvas.drawCircle(dot1, 2.0, Paint()..color = const Color(0xFFF48FB1)); // pink
-          canvas.drawCircle(dot2, 1.8, Paint()..color = const Color(0xFFCE93D8)); // purple
-          canvas.drawCircle(dot3, 2.0, Paint()..color = const Color(0xFFFFE082)); // gold
-        }
-      }
 
-      else if (event.type == CityEventType.trafficSurge && event.affectedColor != null) {
+          canvas.drawCircle(
+            dot1,
+            2.0,
+            Paint()..color = const Color(0xFFF48FB1),
+          ); // pink
+          canvas.drawCircle(
+            dot2,
+            1.8,
+            Paint()..color = const Color(0xFFCE93D8),
+          ); // purple
+          canvas.drawCircle(
+            dot3,
+            2.0,
+            Paint()..color = const Color(0xFFFFE082),
+          ); // gold
+        }
+      } else if (event.type == CityEventType.trafficSurge &&
+          event.affectedColor != null) {
         final colorIndex = event.affectedColor!;
-        final destinations = gridManager.destinations.where((d) => gridManager.grid[d.y][d.x].colorIndex == colorIndex);
+        final destinations = gridManager.destinations.where(
+          (d) => gridManager.grid[d.y][d.x].colorIndex == colorIndex,
+        );
 
         for (final dest in destinations) {
           final cx = offsetX + dest.x * cellSize + cellSize / 2;
@@ -2181,7 +3185,12 @@ class GridRenderer extends PositionComponent
             ..lineTo(cx + 2, cy - cellSize * 0.63)
             ..lineTo(cx, cy - cellSize * 0.63)
             ..close();
-          canvas.drawPath(path, Paint()..color = Colors.amber..style = PaintingStyle.fill);
+          canvas.drawPath(
+            path,
+            Paint()
+              ..color = Colors.amber
+              ..style = PaintingStyle.fill,
+          );
         }
       }
     }
@@ -2215,15 +3224,23 @@ class GridRenderer extends PositionComponent
         ..style = PaintingStyle.fill;
       final crossW = cellSize * 0.3;
       final crossThick = cellSize * 0.08;
-      
+
       // Horizontal bar
       canvas.drawRect(
-        Rect.fromCenter(center: Offset(cx, iconY), width: crossW, height: crossThick),
+        Rect.fromCenter(
+          center: Offset(cx, iconY),
+          width: crossW,
+          height: crossThick,
+        ),
         crossPaint,
       );
       // Vertical bar
       canvas.drawRect(
-        Rect.fromCenter(center: Offset(cx, iconY), width: crossThick, height: crossW),
+        Rect.fromCenter(
+          center: Offset(cx, iconY),
+          width: crossThick,
+          height: crossW,
+        ),
         crossPaint,
       );
 

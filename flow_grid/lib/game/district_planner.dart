@@ -110,9 +110,10 @@ class DistrictPlanner {
     }
 
     // [CRITICAL] Spacing Separation (Issue 3)
-    // Only expand to commercial-scale radius if we are actually placing a destination.
+    // Ensure commercial territories are at least commercial-scale, without
+    // ever shrinking growth already accumulated via expandTerritory().
     if (isCommercial) {
-      territory.radius = 15.0;
+      territory.radius = max(territory.radius, 15.0);
     }
 
     // Drift the center towards the new building

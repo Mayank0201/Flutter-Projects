@@ -40,7 +40,23 @@ class Pathfinder {
 
       if (current.pos.side == null) {
         // Normal Road/Building Node
-        final neighbors = grid.getNeighbors(current.pos.x, current.pos.y, target: end);
+        // [FIX] GridManager.getNeighbors() also injects each express lane's
+        // far endpoint as a plain "neighbor", which gets costed below like
+        // an adjacent tile (~0.25-1.0). The dedicated EXPRESS LANE SHORTCUTS
+        // block further down already costs these edges properly based on
+        // real distance (dist / GameConstants.expressLaneSpeed), and A*
+        // always keeps the cheaper of the two — so the near-free cost here
+        // was always winning for lanes longer than ~1 tile, making them act
+        // like near-free teleports. Filter out any neighbor more than one
+        // tile away (Chebyshev distance) so only orthogonal connectivity is
+        // handled here; long-distance express edges are left entirely to
+        // the distance-based cost block.
+        final neighbors = grid
+            .getNeighbors(current.pos.x, current.pos.y, target: end)
+            .where((n) =>
+                (n.x - current.pos.x).abs() <= 1 &&
+                (n.y - current.pos.y).abs() <= 1)
+            .toList();
         for (final nPos in neighbors) {
           final nCell = grid.grid[nPos.y][nPos.x];
           if (nCell.type == CellType.smartJunction) {
@@ -186,8 +202,15 @@ class Pathfinder {
           stepCost *= roadWeight * congestionWeight;
           
           // Intersection penalty
+          // [FIX] Same Chebyshev-distance filter as above: exclude far
+          // express-lane endpoints so a lane endpoint isn't miscounted as an
+          // extra intersection branch.
           final connectionCount = grid.getNeighbors(neighbor.x, neighbor.y, target: end)
-              .where((n) => grid.grid[n.y][n.x].isPassable).length;
+              .where((n) =>
+                  (n.x - neighbor.x).abs() <= 1 &&
+                  (n.y - neighbor.y).abs() <= 1 &&
+                  grid.grid[n.y][n.x].isPassable)
+              .length;
           if (connectionCount > 2) stepCost += 0.3;
         }
 

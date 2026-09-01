@@ -50,19 +50,34 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
       timeout: 60.0,
     );
 
+    // Only start the emergency (and its timeout penalty clock) once we've confirmed
+    // a responder vehicle can actually be dispatched. Previously the event was added
+    // unconditionally, but the vehicle's spawn point was hardcoded to (0,0), which is
+    // almost never a real road tile — so the vehicle silently failed to spawn and the
+    // event always timed out for a guaranteed -500 penalty with no way to prevent it.
+    final spawned = _spawnEmergencyVehicle(event);
+    if (!spawned) {
+      if (GameConstants.debugInfrastructure) {
+        debugPrint('[BREADCRUMB] Emergency event skipped (no reachable responder route) at: (${target.x}, ${target.y}).');
+      }
+      return;
+    }
+
     activeEvents.add(event);
-    _spawnEmergencyVehicle(event);
-    
+
     if (GameConstants.debugInfrastructure) {
       debugPrint('[BREADCRUMB] Emergency event triggered at: (${target.x}, ${target.y}). Timeout: 60s.');
     }
     game.onStateChanged?.call();
   }
 
-  void _spawnEmergencyVehicle(EmergencyEvent event) {
-    // Find a "Service Depot" or just a random edge of the map for now
-    final start = const GridPosition(0, 0); // Placeholder
-    
+  /// Returns true if a responder vehicle was actually spawned and dispatched.
+  bool _spawnEmergencyVehicle(EmergencyEvent event) {
+    // Dispatch from the nearest existing road tile to the incident, rather than a
+    // hardcoded grid corner that is almost never part of the player's road network.
+    final start = _findNearestRoadPosition(event.location);
+    if (start == null) return false;
+
     final path = Pathfinder.findPath(
       game.gridManager!,
       start,
@@ -70,21 +85,48 @@ class EmergencyManager extends Component with HasGameReference<FlowGridGame> {
       isEmergency: true,
     );
 
-    if (path != null) {
-      final ev = game.carPool.getCar(
-        path: path,
-        colorIndex: 0,
-        spawnHousePos: start,
-        targetDest: event.location,
-        vehicleType: VehicleType.emergency,
-        cellSize: game.cellSize,
-        offsetX: game.boardOffsetX,
-        offsetY: game.boardOffsetY,
-        routeId: event.id,
-      );
-      game.cars.add(ev);
-      game.world.add(ev);
+    if (path == null) return false;
+
+    final ev = game.carPool.getCar(
+      path: path,
+      colorIndex: 0,
+      spawnHousePos: start,
+      targetDest: event.location,
+      vehicleType: VehicleType.emergency,
+      cellSize: game.cellSize,
+      offsetX: game.boardOffsetX,
+      offsetY: game.boardOffsetY,
+      routeId: event.id,
+    );
+    game.cars.add(ev);
+    game.world.add(ev);
+    return true;
+  }
+
+  /// Scans the grid for the closest road-type tile to [target], excluding the
+  /// target tile itself, to use as an emergency-vehicle dispatch point.
+  GridPosition? _findNearestRoadPosition(GridPosition target) {
+    final gridManager = game.gridManager!;
+    GridPosition? best;
+    int bestDistSq = 1 << 30;
+
+    for (int y = 0; y < gridManager.rows; y++) {
+      for (int x = 0; x < gridManager.cols; x++) {
+        if (x == target.x && y == target.y) continue;
+        final cell = gridManager.grid[y][x];
+        if (!cell.isRoad) continue;
+
+        final dx = x - target.x;
+        final dy = y - target.y;
+        final distSq = dx * dx + dy * dy;
+        if (distSq < bestDistSq) {
+          bestDistSq = distSq;
+          best = GridPosition(x, y);
+        }
+      }
     }
+
+    return best;
   }
 
   void _checkTimeouts(double dt) {

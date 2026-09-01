@@ -65,7 +65,6 @@ class SaveManager {
     required double cameraPosY,
     required double userZoomMultiplier,
     int slotIndex = 0,
-    Map<String, dynamic> districtTypes = const {},
   }) async {
     final prefs = await SharedPreferences.getInstance();
     
@@ -165,7 +164,6 @@ class SaveManager {
       'mapType': gridManager.selectedMapType.index,
       'saveTime': now,
       'activeEdges': gridManager.activeEdges.toList(),
-      'districtTypes': districtTypes,
     };
 
     await prefs.setString('$_savePrefix$slotIndex', jsonEncode(data));
@@ -178,16 +176,61 @@ class SaveManager {
 
     try {
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-      
+
       // Basic schema validation
       if (data['grid'] == null || data['gridCols'] == null || data['gridRows'] == null) {
         return null;
       }
-      
+
       return data;
     } catch (e) {
       return null;
     }
+  }
+
+  /// [FIX] Restores the in-flight vehicles that [saveGame] serializes via
+  /// `CarComponent.toJson()`. Previously there was no read-back for the
+  /// `cars` entry at all (no `fromJson` even existed), so every car/bus/
+  /// emergency vehicle on the road vanished the moment a save was reloaded.
+  /// [cellSize]/[offsetX]/[offsetY] must be the same board-projection
+  /// values the game is currently using, since they aren't part of the
+  /// serialized car data.
+  static List<CarComponent> loadCars(
+    Map<String, dynamic> data, {
+    required double cellSize,
+    required double offsetX,
+    required double offsetY,
+  }) {
+    final cars = <CarComponent>[];
+    final carsData = data['cars'] as List<dynamic>?;
+    if (carsData == null) return cars;
+
+    for (final entry in carsData) {
+      try {
+        cars.add(CarComponent.fromJson(
+          entry as Map<String, dynamic>,
+          cellSize: cellSize,
+          offsetX: offsetX,
+          offsetY: offsetY,
+        ));
+      } catch (_) {
+        // Skip any malformed/legacy car entry rather than aborting the load.
+      }
+    }
+    return cars;
+  }
+
+  /// [FIX] `houseCarCounts` was written into every save but never read back,
+  /// silently discarding that state on load. Mirrors the write side in
+  /// [saveGame] so callers can repopulate their house-car-count map.
+  static Map<String, int> loadHouseCarCounts(Map<String, dynamic> data) {
+    final raw = data['houseCarCounts'] as Map<String, dynamic>?;
+    if (raw == null) return {};
+    final result = <String, int>{};
+    raw.forEach((k, v) {
+      if (v is int) result[k] = v;
+    });
+    return result;
   }
 
   static Future<bool> hasSaveGame({int slotIndex = 0}) async {

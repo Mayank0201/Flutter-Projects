@@ -207,24 +207,35 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                           // Page Indicators
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(_steps.length, (index) {
-                                final isActive = index == _currentStep;
-                                return GestureDetector(
-                                  onTap: () => _pageController.animateToPage(index, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 300),
-                                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                                    width: isActive ? 24 : 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: isActive ? Colors.blueAccent : Colors.white24,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                  ),
+                            child: AnimatedBuilder(
+                              animation: _pageController,
+                              builder: (context, _) {
+                                final double livePage =
+                                    _pageController.hasClients && _pageController.page != null
+                                        ? _pageController.page!
+                                        : _currentStep.toDouble();
+                                final int activeIndex =
+                                    livePage.round().clamp(0, _steps.length - 1);
+                                return Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: List.generate(_steps.length, (index) {
+                                    final isActive = index == activeIndex;
+                                    return GestureDetector(
+                                      onTap: () => _pageController.animateToPage(index, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 300),
+                                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                                        width: isActive ? 24 : 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: isActive ? Colors.blueAccent : Colors.white24,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                    );
+                                  }),
                                 );
-                              }),
+                              },
                             ),
                           ),
                           const SizedBox(height: 24),

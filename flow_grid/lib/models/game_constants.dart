@@ -19,6 +19,30 @@ class GameConstants {
   static const double matureRequestSpeedMultiplier = 1.15;
   static const double matureOverflowBuildupMultiplier = 1.10;
 
+  // Maturity — parking lot growth (visual only, driven by the same
+  // age/maturityThresholdWeeks signal as matureMaxDemand above; see
+  // GridRenderer._drawDestination). Scales are relative to the destination's
+  // rendered building "size" (cellSize * BuildingProfile.commercial.renderScale
+  // == 0.90 * cellSize, see below), not the raw cellSize, so the lot always
+  // stays safely inside its own tile even at lotMaxScale.
+  //
+  // [FIX] Was 0.78 / 1.15. When the destination-vs-house size fix enlarged
+  // the building body factor (_drawDestination's bSize, now 0.78 of `size`
+  // -- see that method), the OLD lotMinScale (0.78) put the freshly-placed
+  // lot at almost exactly the building's own width, and briefly (before
+  // that follow-up fix) even smaller than it -- the building visibly
+  // overflowed its own parking lot. Raised to 0.85/1.08 so the lot was
+  // always at least somewhat bigger than the building, but live feedback
+  // ("right and left and top of destination houses [need to be] bigger...
+  // house takes all the area, I want it to have like a parking lot") found
+  // that margin still read as too thin to register as a visible lot.
+  // Raised further -- margin per side goes from ~8%/12% of cellSize
+  // (min/max maturity) to ~15%/20%, a clearly visible parking apron on
+  // every side, while lotMaxScale*renderScale (1.05*0.90=0.945*cellSize)
+  // stays safely under 1.0*cellSize.
+  static const double lotMinScale = 0.95; // freshly placed: clearly visible parking apron around the building
+  static const double lotMaxScale = 1.05; // fully mature: 0.945*cellSize, safely inside the tile
+
   // Endless Scaling (Part 1 & 3)
   static const double highDemandHouseTriggerDuration = 22.0;
   static const double demandAgeScalingRate = 0.08;
@@ -48,18 +72,18 @@ class GameConstants {
   static const int highwayCapacity = 45;
   static const int metroCapacity = 120;
   static const int elevatedRailCapacity = 180;
-  
+
   static const double metroSpeedMultiplier = 2.2;
   static const double elevatedRailSpeedMultiplier = 2.8;
   static const double highwaySpeedMultiplier = 1.8;
-  
+
   static const double roadCapacityCongestedThreshold = 0.8;
-  
+
   // Satisfaction System (Part 4)
   static const double satisfactionDecayRate = 0.005; // per car delivery delay
   static const double satisfactionRecoveryRate = 0.02; // per on-time delivery
   static const double criticalSatisfactionThreshold = 0.35;
-  
+
   // Regional Expansion (Part 3)
   static const int sectorUnlockBaseCost = 1500;
   static const int sectorUnlockScoreThreshold = 500;
@@ -95,9 +119,10 @@ class GameConstants {
   static const Color expressLaneColor = Color(0xFF9FE0B4); // Light Green
   static const Color expressLaneBorderColor = Color(0xFF6FB088);
 
-  // Congestion
-  static const Color congestionLowColor = Color(0xFFE6B800); // Yellow
-  static const Color congestionHighColor = Color(0xFFE74C3C); // Red
+  // Congestion — muted ochre/terracotta instead of flat-UI traffic-light
+  // yellow/red, so it reads as calm information rather than an alarm.
+  static const Color congestionLowColor = Color(0xFFC9A24B);
+  static const Color congestionHighColor = Color(0xFFC17A5E);
 
   static const Color hudBackground = Color(0xFF22262E);
   static const Color hudText = Color(0xFFD8DCE2);
@@ -106,21 +131,23 @@ class GameConstants {
 
   // Muted, desaturated building colors
   static const List<Color> buildingColors = [
-    Color(0xFFE05A5A), // 0: Muted Red
+    Color(0xFFC97575), // 0: Muted Red (further desaturated from a vivid coral)
     Color(0xFF5AC0D0), // 1: Muted Cyan (was Blue)
     Color(0xFF5AC47A), // 2: Muted Green
     Color(0xFFD98A4A), // 3: Muted Orange (was Yellow)
     Color(0xFF9B7DBF), // 4: Muted Purple
-    Color(0xFFE6C15A), // 5: Muted Yellow (was Orange)
+    Color(
+      0xFFD9BE6E,
+    ), // 5: Muted Yellow (further desaturated from a vivid gold)
   ];
 
   static const List<Color> buildingDarkColors = [
-    Color(0xFFB84848), // 0: Dark Red
+    Color(0xFFA15E5E), // 0: Dark Red
     Color(0xFF388EA0), // 1: Dark Cyan (was Blue)
     Color(0xFF489E60), // 2: Dark Green
     Color(0xFFB06E38), // 3: Dark Orange (was Yellow)
     Color(0xFF7E5FA0), // 4: Dark Purple
-    Color(0xFFC0A048), // 5: Dark Yellow (was Orange)
+    Color(0xFFAE9858), // 5: Dark Yellow (was Orange)
   ];
 
   static Color getBuildingColor(int index) =>
@@ -132,13 +159,13 @@ class GameConstants {
   // --- Performance & Stabilization (Task 7 & 13) ---
   static const bool debugInfrastructure = false;
   static const bool showPerformanceOverlay = true;
-  
+
   // Tick Rates (Hz) - Task 5
-  static const double logicTickRate = 15.0;     // Traffic, logic updates
+  static const double logicTickRate = 15.0; // Traffic, logic updates
   static const double congestionTickRate = 5.0; // Congestion analytics
   static const double satisfactionTickRate = 2.0; // Global metrics
-  static const double spawnCheckTickRate = 1.0;   // District expansion
-  
+  static const double spawnCheckTickRate = 1.0; // District expansion
+
   // Render Chunks - Task 1
   static const int chunkSize = 16; // tiles per chunk
 }

@@ -31,7 +31,12 @@ class BuildingProfile {
 
   static const residential = BuildingProfile(
     influenceRadius: 6.0,
-    renderScale: 0.60,
+    // [FIX] Was 0.60. Nudged down alongside the destination-size fix so
+    // houses read as clearly the smaller building type -- renderScale is
+    // visual-only (verified: not used by spacing/collision/placement
+    // logic, only by GridRenderer's draw calls), so this has no gameplay
+    // effect.
+    renderScale: 0.52,
     sameColorSpacing: 4,
     interColorSpacing: 2,
     corridorLength: 2,
@@ -41,7 +46,12 @@ class BuildingProfile {
 
   static const commercial = BuildingProfile(
     influenceRadius: 10.0, // Reduced from 15.0 for better early-game fit
-    renderScale: 0.85,
+    // [FIX] Was 0.85. Raised alongside GameConstants.lotMinScale/lotMaxScale
+    // and _drawDestination's building-body factors so the destination's
+    // overall footprint (lot + building) reads as clearly bigger than a
+    // house's, while the building itself stays comfortably smaller than
+    // its own lot at every maturity stage (see those call sites).
+    renderScale: 0.90,
     sameColorSpacing: 6,  // Reduced from 10
     interColorSpacing: 8, // Reduced from 14 (critical for 16-wide map)
     corridorLength: 2,    // Reduced from 3
@@ -88,6 +98,27 @@ class SpawnConfig {
   static const int destinationToHouseMinDistance = 5;
   static const int destinationToDestinationMinDistance = 7;
   static const int sameColorHouseClusterRadius = 4;
+
+  // ============================================================
+  // [NEW] Shared-Hub Bias For Brand-New Districts
+  // ============================================================
+  // A brand-new color's initial house cluster (see
+  // SpawnController._findInitialHouseCenter) used to scan the ENTIRE active
+  // grid with only a soft scoring bias toward the map center — a bias that
+  // was easily overpowered by the "avoid existing buildings" penalty in
+  // SpawnScoringService.scoreInitialHouseCenter, which pushes candidates
+  // away from every existing building within 10 tiles. Once the active grid
+  // has grown from adaptive expansion, that combination let new colors land
+  // anywhere far outside the existing network, with zero connective tissue
+  // to the rest of the city. These radii bound the *candidate search
+  // region* itself (Manhattan half-width from the shared hub — see
+  // SpawnController._preferredHubCenter) so new districts are found near
+  // the existing network first, and only fall back to the unrestricted
+  // full-grid search in the later, more-relaxed planning stages (same
+  // stage1→stage5 relaxation pattern used everywhere else in this file).
+  static const int initialHubSearchRadiusStage1 = 16;
+  static const int initialHubSearchRadiusStage2 = 26;
+  static const int initialHubSearchRadiusStage3 = 36;
 }
 
 enum SpawnNodeType { house, destination }
@@ -938,12 +969,14 @@ class SpawnController {
   }
 
   /// Request a spawn through the queue (the ONLY way gameplay code should spawn)
-  void requestSpawn(int colorIndex, SpawnNodeType nodeType, String reason) {
+  /// [priority]: 10 = Unlock, 5 = House (completing an incomplete cluster), 1 = generic demand.
+  void requestSpawn(int colorIndex, SpawnNodeType nodeType, String reason, {int priority = 1}) {
     final req = SpawnRequest(
       colorIndex: colorIndex,
       nodeType: nodeType,
       requestTime: _elapsedTime,
       reason: reason,
+      priority: priority,
     );
     _queue.add(req);
     _log('QUEUED: $req');
@@ -971,10 +1004,21 @@ class SpawnController {
 
   /// Minimum age (in weekly transitions) a color's oldest destination must
   /// have before demand pressure can push the house count past
-  /// [SpawnConfig.earlyHouseCap]. Two means the destination has survived two
-  /// weekly transitions — i.e. it is "more than 1 week old" — matching the
-  /// player-facing rule that 1-week-old destinations stay capped at 2 houses.
-  static const int _minDestAgeForExtraHouse = 3;
+  /// [SpawnConfig.earlyHouseCap]. Dynamic: 2 transitions required early game,
+  /// 1 in the late game (once any destination in the game has reached age 4).
+  /// [FIX] Shared by BOTH the enqueue-time check (_maybeEnqueueDemandDrivenHouse)
+  /// and the processing-time check (_processHouseSpawn) so they always agree —
+  /// previously the enqueue side used this dynamic threshold while processing
+  /// used a fixed value of 3, so requests enqueued with destAge 1 or 2 (once
+  /// dynamically allowed) were always rejected during processing and silently
+  /// discarded after 5 retries.
+  int _requiredDestAgeForExtraHouse() {
+    int gameMaxAge = 0;
+    for (final age in gridManager.destinationAges.values) {
+      if (age > gameMaxAge) gameMaxAge = age;
+    }
+    return (gameMaxAge >= 4) ? 1 : 2;
+  }
 
   /// Get current queue depth (for debugging)
   int get queueDepth => _queue.length;
@@ -1041,9 +1085,10 @@ class SpawnController {
       // queue still gets refused if the color's oldest destination hasn't
       // aged past the threshold.
       final destAge = _maxDestinationAgeForColor(colorIndex);
-      if (destAge < _minDestAgeForExtraHouse) {
+      final requiredDestAge = _requiredDestAgeForExtraHouse();
+      if (destAge < requiredDestAge) {
         _log('HOUSE REJECTED: Color $colorIndex has $houseCount houses; '
-            'oldest destination age=$destAge < $_minDestAgeForExtraHouse, '
+            'oldest destination age=$destAge < $requiredDestAge, '
             'cap holds at ${SpawnConfig.earlyHouseCap}.');
         lastFailure = SpawnFailure.demand;
         return false;
@@ -1282,28 +1327,78 @@ class SpawnController {
 
   // _scorePlacement moved to SpawnScoringService
 
+  /// [NEW] The shared "downtown" anchor that new districts should radiate
+  /// outward from. Before any buildings exist (color 0's very first
+  /// district) this is simply the active map's center. Once buildings
+  /// exist, it's the centroid of every placed building across all colors —
+  /// i.e. wherever the network has actually organically formed — so later
+  /// colors keep gravitating toward the established city rather than an
+  /// arbitrary fixed point.
+  GridPosition _preferredHubCenter() {
+    if (gridManager.buildings.isEmpty) {
+      final centerX = ((minSpawnX + maxSpawnX) / 2).round();
+      final centerY = ((minSpawnY + maxSpawnY) / 2).round();
+      return GridPosition(centerX, centerY);
+    }
+
+    double sumX = 0;
+    double sumY = 0;
+    for (final b in gridManager.buildings) {
+      sumX += b.x;
+      sumY += b.y;
+    }
+    final n = gridManager.buildings.length;
+    return GridPosition((sumX / n).round(), (sumY / n).round());
+  }
+
   /// [NEW] Find the best spot for an initial house cluster, favoring central gaps.
   GridPosition? _findInitialHouseCenter(int colorIndex, {required PlanningStage stage}) {
     final candidates = <GridPosition>[];
-    
-    // Search the whole map within spawn bounds
-    for (int y = minSpawnY; y <= maxSpawnY; y++) {
-      for (int x = minSpawnX; x <= maxSpawnX; x++) {
+
+    // [NEW] Hub-biased search region — see SpawnConfig's "Shared-Hub Bias"
+    // section for why this exists. Stages 1-3 restrict the candidate scan
+    // to a bounded box around the shared hub, widening each stage; stage 4
+    // and 5 drop the bound entirely and fall back to the previous
+    // whole-active-grid search so a genuinely full map never blocks a
+    // color from spawning at all.
+    final bool boundedSearch = stage.index < PlanningStage.stage4StrongRelax.index;
+    int scanMinX = minSpawnX, scanMaxX = maxSpawnX;
+    int scanMinY = minSpawnY, scanMaxY = maxSpawnY;
+    if (boundedSearch) {
+      final hub = _preferredHubCenter();
+      int hubRadius = SpawnConfig.initialHubSearchRadiusStage1;
+      if (stage.index >= PlanningStage.stage2Relaxed.index) hubRadius = SpawnConfig.initialHubSearchRadiusStage2;
+      if (stage.index >= PlanningStage.stage3MoreRelaxed.index) hubRadius = SpawnConfig.initialHubSearchRadiusStage3;
+      scanMinX = max(minSpawnX, hub.x - hubRadius);
+      scanMaxX = min(maxSpawnX, hub.x + hubRadius);
+      scanMinY = max(minSpawnY, hub.y - hubRadius);
+      scanMaxY = min(maxSpawnY, hub.y + hubRadius);
+    }
+
+    for (int y = scanMinY; y <= scanMaxY; y++) {
+      for (int x = scanMinX; x <= scanMaxX; x++) {
         final pos = GridPosition(x, y);
-        
+
         // 1. Must be empty
         if (!gridManager.grid[y][x].isEmpty) continue;
-        
+
         // 2. Must not be reserved (unless in emergency)
         if (gridManager.grid[y][x].isReserved && stage.index < PlanningStage.stage4StrongRelax.index) continue;
-        
+
         // 3. Must have enough breathing room for a cluster
-        if (gridManager.countNearbyBuildings(x, y, 3) > 0) continue;
+        // [FIX] Relax progressively by stage, same as the isReserved check
+        // above — previously this never relaxed, so it kept producing
+        // identical "no space" failures even at stage5ExtremeRelax.
+        if (gridManager.countNearbyBuildings(x, y, 3) > 0 && stage.index < PlanningStage.stage4StrongRelax.index) continue;
 
         candidates.add(pos);
       }
     }
 
+    // If the bounded hub search came up empty, DON'T fall through to
+    // Emergency-only relaxation here — let the normal stage loop in
+    // spawnInitialPair/spawnExtraHouse advance to the next (wider) stage,
+    // exactly like every other search in this file.
     if (candidates.isEmpty) return null;
 
     // Use Scoring Service to pick the best "central/organic" spot
@@ -1365,7 +1460,9 @@ class SpawnController {
         // Rule: Separation from residential center
         double minDist = SpawnConfig.destinationToHouseMinDistance.toDouble();
         if (stage.index >= PlanningStage.stage4StrongRelax.index) minDist *= 0.5;
-        if (stage.index >= PlanningStage.stage5ExtremeRelax.index) minDist = 4.0;
+        // [FIX] stage5 is the most permissive last-resort stage, so its
+        // minDist must be looser than stage4's (2.5), not stricter (was 4.0).
+        if (stage.index >= PlanningStage.stage5ExtremeRelax.index) minDist = 1.0;
 
         if (center != null && pos.manhattanDistance(center) < minDist) continue;
 
@@ -1553,21 +1650,32 @@ class SpawnController {
          // Destinations must stay away from ANY other destination
          if (dist < SpawnConfig.destinationToDestinationMinDistance) {
            if (stage.index < PlanningStage.stage4StrongRelax.index) return false;
-           if (dist < 7) return false; // Hard minimum (Mini Motorways spread)
+           // [FIX] This must be a genuinely lower threshold than the outer
+           // trigger (destinationToDestinationMinDistance = 7) or stage4/5
+           // relaxation above can never actually take effect.
+           if (dist < 4) return false; // Hard minimum (Mini Motorways spread)
          }
        }
     }
 
-    // [NEW] Destination Accessibility (Hard Requirement)
-    if (nodeType == SpawnNodeType.destination) {
-      if (!_isDestinationAccessible(pos, entrySide, stage: stage)) {
-        _log('REJECTED: Destination inaccessible at $pos');
+    // [NEW] Building Accessibility (Hard Requirement)
+    // Previously this hard connectivity guarantee (driveway + approach tiles
+    // must be valid/empty/unobstructed, with enough surrounding openness to
+    // actually route a road) only applied to destinations — houses had no
+    // equivalent check at all, so a house could spawn with its only
+    // connection point off the valid grid or blocked, permanently
+    // unconnectable ("house is cut off, can't connect a road to it").
+    if (nodeType == SpawnNodeType.destination || nodeType == SpawnNodeType.house) {
+      if (!_isDestinationAccessible(pos, entrySide, stage: stage, nodeType: nodeType)) {
+        _log('REJECTED: Building inaccessible at $pos');
         return false;
       }
-      
-      // Strict Border Padding for Destinations (Rule 3)
-      // Even in Emergency, destinations shouldn't be pinned against the map edge
-      int minPadding = 2; 
+
+      // Strict Border Padding (Rule 3)
+      // Even in Emergency, buildings shouldn't be pinned against the map edge
+      // — the same edge-pinning failure mode applies to houses as much as
+      // destinations, so this is no longer destination-only.
+      int minPadding = 2;
       if (stage == PlanningStage.stage5ExtremeRelax) minPadding = 1;
 
       if (pos.x < minSpawnX + minPadding || pos.x > maxSpawnX - minPadding ||
@@ -1627,19 +1735,25 @@ class SpawnController {
 
     // 7. Inter-Color Spacing (Strict: Buildings must never touch)
     int interSpacing = 2; // Always at least 2
-    
-    // Check against all existing buildings
-    for (int y = 0; y < gridManager.rows; y++) {
-      for (int x = 0; x < gridManager.cols; x++) {
-        final otherCell = gridManager.grid[y][x];
-        if (!otherCell.isHouse && !otherCell.isDestination) continue;
-        
-        final otherPos = GridPosition(x, y);
-        final dist = pos.manhattanDistance(otherPos);
-        
-        // [STRICT] Buildings must never touch (dist=1 is forbidden)
-        if (dist < interSpacing) return false;
-      }
+
+    // [PERF] Check against all existing buildings. This is called once per
+    // candidate tile scanned by _findSpotInZones (which itself iterates
+    // every tile in the spawn area), so a full gridManager.rows x
+    // gridManager.cols scan here made this O(candidates x total map cells)
+    // per spawn attempt -- cost scaled with total map size, not with the
+    // (much smaller) number of buildings actually placed. gridManager.houses
+    // / gridManager.destinations are already the authoritative, kept-in-sync
+    // building position lists (see e.g. _preferredHubCenter above), so
+    // iterate those directly instead of the whole grid.
+    for (final otherPos in gridManager.houses) {
+      final dist = pos.manhattanDistance(otherPos);
+      // [STRICT] Buildings must never touch (dist=1 is forbidden)
+      if (dist < interSpacing) return false;
+    }
+    for (final otherPos in gridManager.destinations) {
+      final dist = pos.manhattanDistance(otherPos);
+      // [STRICT] Buildings must never touch (dist=1 is forbidden)
+      if (dist < interSpacing) return false;
     }
 
     // 9. Driveway Spacing (Relaxed in Stage 2+)
@@ -1840,7 +1954,7 @@ class SpawnController {
   }
 
   /// [NEW] Hard accessibility check for destinations (Rule 1 & 4)
-  bool _isDestinationAccessible(GridPosition pos, Direction entrySide, {required PlanningStage stage}) {
+  bool _isDestinationAccessible(GridPosition pos, Direction entrySide, {required PlanningStage stage, SpawnNodeType nodeType = SpawnNodeType.destination}) {
     final driveway = pos.getNeighbor(entrySide);
     
     // In extreme emergency, just ensure we have ONE tile out
@@ -1882,8 +1996,10 @@ class SpawnController {
       }
     }
     
-    // 3. Openness Check (Hard floor for destinations, relaxed in Stage 3+)
-    int floor = BuildingProfile.commercial.minOpenness;
+    // 3. Openness Check (Hard floor for the building type, relaxed in Stage 3+)
+    int floor = (nodeType == SpawnNodeType.house)
+        ? BuildingProfile.residential.minOpenness
+        : BuildingProfile.commercial.minOpenness;
     if (stage.index >= PlanningStage.stage3MoreRelaxed.index) floor = 2;
     
     int openness = calculateOpennessScore(pos, entrySide);
@@ -1970,14 +2086,15 @@ class SpawnController {
     int bestColor = -1;
     int bestPressure = 0;
     SpawnNodeType nodeToSpawn = SpawnNodeType.house;
+    // [FIX] Track whether bestColor was chosen via the "incomplete cluster"
+    // branch so it can be enqueued at the documented higher priority (5)
+    // instead of always defaulting to the generic demand priority (1).
+    bool isIncompleteClusterCompletion = false;
 
-    // Calculate maximum age of any destination to determine game progression
-    int gameMaxAge = 0;
-    for (final age in gridManager.destinationAges.values) {
-      if (age > gameMaxAge) gameMaxAge = age;
-    }
-    // Dynamic age gate: 2 transitions required early game, 1 in the late game (max age >= 4)
-    final requiredAge = (gameMaxAge >= 4) ? 1 : 2;
+    // Dynamic age gate: 2 transitions required early game, 1 in the late game
+    // (max age >= 4). [FIX] Shared with _processHouseSpawn so a request that
+    // clears this gate at enqueue time also clears it during processing.
+    final requiredAge = _requiredDestAgeForExtraHouse();
 
     for (int c = 0; c < activeColorCount; c++) {
       final pressure = _demandPressure[c] ?? 0;
@@ -1996,6 +2113,7 @@ class SpawnController {
         bestColor = c;
         bestPressure = pressure;
         nodeToSpawn = SpawnNodeType.house;
+        isIncompleteClusterCompletion = true;
         break; // Highest priority — do this immediately
       }
 
@@ -2040,7 +2158,8 @@ class SpawnController {
 
     if (bestColor >= 0) {
       requestSpawn(bestColor, nodeToSpawn,
-          'demand-driven (pressure=$bestPressure, houses=${getHouseCount(bestColor)})');
+          'demand-driven (pressure=$bestPressure, houses=${getHouseCount(bestColor)})',
+          priority: isIncompleteClusterCompletion ? 5 : 1);
       return;
     }
   }

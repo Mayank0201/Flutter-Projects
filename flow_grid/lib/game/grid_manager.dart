@@ -35,6 +35,16 @@ class GridManager {
   /// Callback when roads/tunnels/bridges are placed or removed, triggering path cache invalidation.
   VoidCallback? onTopologyChanged;
 
+  /// [FIX] Traffic-light phases flip every few seconds in updateTrafficSignals
+  /// below, but that only ever mutated `grid[y][x]`'s state -- nothing told
+  /// the renderer a redraw was needed. _drawTrafficLight is baked into the
+  /// per-chunk cached Picture (see GridRenderer), so without this the drawn
+  /// light was only ever as fresh as the last unrelated reason that chunk
+  /// happened to get marked dirty (e.g. a nearby build action) -- it could
+  /// visually sit on one phase indefinitely otherwise. Wired in
+  /// FlowGridGame to call gridRenderer.markInfrastructureDirty(x, y).
+  void Function(int x, int y)? onSignalPhaseChanged;
+
   /// Optional guard set by SpawnController — returns true if the tile at (x,y)
   /// is reserved for a staged building that has not yet committed.  When set,
   /// player road-building on these tiles is silently blocked.
@@ -84,6 +94,19 @@ class GridManager {
   final Map<String, double> signalTimers = {};
   final Map<String, int> signalNsCounts = {};
   final Map<String, int> signalEwCounts = {};
+
+  /// [FIX] Same bug class as onSignalPhaseChanged above, for a second way
+  /// the drawn traffic-light bars can go stale. isGreenForDirection doesn't
+  /// only depend on signalPhases -- when nsCount+ewCount <= 1 it overrides
+  /// the phase entirely and reports both directions green (the "everyone
+  /// gets a green, traffic is too light to bother" case). That low-traffic
+  /// override can flip on/off purely from nsCount/ewCount drifting across
+  /// the <=1 boundary as cars enter/leave the intersection's vicinity --
+  /// with no accompanying signalPhases change and therefore no call to
+  /// onSignalPhaseChanged. Track the override's last-drawn state per
+  /// intersection so we can detect *that* transition too and invalidate the
+  /// chunk then, instead of only on an actual phase flip.
+  final Map<String, bool> signalLowTrafficOverride = {};
 
   final List<MountainCluster> mountainClusters = [];
   
@@ -538,11 +561,24 @@ class GridManager {
       signalNsCounts[key] = nsCount;
       signalEwCounts[key] = ewCount;
 
+      // [FIX] See signalLowTrafficOverride's doc comment -- detect the
+      // override itself flipping, independent of currentPhase, since that
+      // alone changes what isGreenForDirection reports and therefore what
+      // _drawTrafficLight bakes into the cached chunk picture.
+      final bool lowTrafficOverride = (nsCount + ewCount) <= 1;
+      final bool wasLowTrafficOverride =
+          signalLowTrafficOverride[key] ?? true; // matches the pre-data default
+      if (lowTrafficOverride != wasLowTrafficOverride) {
+        signalLowTrafficOverride[key] = lowTrafficOverride;
+        onSignalPhaseChanged?.call(pos.x, pos.y);
+      }
+
       if (timer >= dynamicInterval) {
         timer = 0;
         currentPhase = currentPhase == 0 ? 1 : 0;
         signalPhases[key] = currentPhase;
         grid[pos.y][pos.x] = cell.copyWith(signalPhase: currentPhase);
+        onSignalPhaseChanged?.call(pos.x, pos.y);
       }
       
       signalTimers[key] = timer;
@@ -714,7 +750,15 @@ class GridManager {
     signalTimers.clear();
     signalNsCounts.clear();
     signalEwCounts.clear();
-    
+    signalLowTrafficOverride.clear();
+    // [FIX] Clear stale state so a flood/event blockage, district naming,
+    // manual road upgrades, or sector satisfaction data from a previous
+    // session/game cannot leak into a new game or loaded save.
+    blockedTiles.clear();
+    districtNames.clear();
+    upgradedRoads.clear();
+    sectorSatisfaction.clear();
+
     // Reset inventory based on starting constants
     roads = GameConstants.startingRoadBudget;
     tunnels = GameConstants.startingTunnels;
@@ -807,10 +851,31 @@ class GridManager {
         try {
           final pair = mw as List<dynamic>;
           if (pair.length < 2) continue;
-          placedExpressLanes.add([
-            GridPosition(pair[0]['x'] as int, pair[0]['y'] as int),
-            GridPosition(pair[1]['x'] as int, pair[1]['y'] as int),
-          ]);
+          final start = GridPosition(pair[0]['x'] as int, pair[0]['y'] as int);
+          final end = GridPosition(pair[1]['x'] as int, pair[1]['y'] as int);
+          placedExpressLanes.add([start, end]);
+
+          // [FIX] Restore the express-lane speed/flag state on each endpoint
+          // cell, mirroring what placeExpressLane() sets when the lane is
+          // first placed. Without this, express lanes revert to plain-road
+          // speed after every save/load even though the lane pair itself
+          // (and its rendering) is restored above.
+          if (isValid(start.x, start.y)) {
+            final startCell = grid[start.y][start.x];
+            grid[start.y][start.x] = startCell.copyWith(
+              overpass: OverpassType.start,
+              speedMultiplier: GameConstants.expressLaneSpeed,
+              isExpressLane: true,
+            );
+          }
+          if (isValid(end.x, end.y)) {
+            final endCell = grid[end.y][end.x];
+            grid[end.y][end.x] = endCell.copyWith(
+              overpass: OverpassType.end,
+              speedMultiplier: GameConstants.expressLaneSpeed,
+              isExpressLane: true,
+            );
+          }
         } catch (_) {}
       }
     }
@@ -899,6 +964,9 @@ class GridManager {
       'smartJunctions': smartJunctions,
       'expressLanes': expressLanes,
       'activeEdges': Set<String>.from(activeEdges),
+      // [FIX] Capture infrastructure positions (traffic lights, smart junctions, etc.)
+      // so signals/pending-deletion cleanup keep tracking a cell after undo.
+      'infrastructure': Set<GridPosition>.from(infrastructure),
     };
   }
 
@@ -962,6 +1030,12 @@ class GridManager {
     activeEdges.addAll(snapshot['activeEdges'] as Set<String>);
     // Merge back system/building edges
     activeEdges.addAll(systemEdges);
+
+    // [FIX] Restore infrastructure tracking set so traffic signal updates and
+    // pending-deletion cleanup keep operating on undone cells (e.g. a
+    // traffic light that was erased and then restored via undo).
+    infrastructure.clear();
+    infrastructure.addAll(snapshot['infrastructure'] as Set<GridPosition>);
 
     // Reconstruct road graph and terrain state
     rebuildRoadGraph();
@@ -1259,24 +1333,22 @@ class GridManager {
     }
     
     // Inventory Transaction
-    int roadDeducted = 0;
-    if (owner == InfrastructureOwner.player) {
-      if (!isExtension) {
-        if (type == CellType.tunnel) {
-          spendTunnel(1);
-        } else {
-          spendBridge(1);
-        }
-      } else if (consumeRoad) {
-        // [FIX] Tunnel Extension Costing (Bug 2)
-        if (roads <= 0) return false;
-        roadDeducted = 1;
-        spendRoads(1);
+    // Only the FIRST tile of a tunnel/bridge spends a tunnel/bridge ticket.
+    // Extending it further across more matching terrain in the same drag is
+    // intentionally free — the tutorial says so explicitly ("Extensions in a
+    // single drag are free!") and the length cap enforced above (max 4 tiles)
+    // already bounds how much free corridor a single ticket can buy. This used
+    // to charge 1 road tile per extension tile instead, which (a) contradicted
+    // the tutorial and (b) could strand players mid-mountain: once `roads`
+    // hit 0 the extension call below returned false and the drag loop stopped,
+    // leaving a tunnel stub that never reached the far side — permanently
+    // unwalkable since nothing could path through the gap.
+    if (owner == InfrastructureOwner.player && !isExtension) {
+      if (type == CellType.tunnel) {
+        spendTunnel(1);
+      } else {
+        spendBridge(1);
       }
-    }
-
-    if (roadDeducted > 0 && GameConstants.debugInfrastructure) {
-      debugPrint('[ROAD_COST] pos=($x,$y) prev=${type.name} new=${type.name} owner=${owner.name} state=${interactionState.name} deducted=$roadDeducted');
     }
 
     // [STRICT] Ownership Rule: Tunnels/Bridges are infrastructure (system-owned by default).
@@ -1587,21 +1659,20 @@ class GridManager {
     final cell = grid[y][x];
     if (cell.isEmpty || cell.isPendingDeletion) return '';
 
-    // [FIX] Road Deletion near Houses
-    // We no longer protect "driveway" tiles. Players can delete any road segment.
-    // However, we still log it for debugging.
-    final pos = GridPosition(x, y);
-    if (isLockedEntrance(pos)) {
-    }
-
     if (cell.hasTrafficLight) {
-      grid[y][x] = GridCell(
-        type: cell.type,
-        hasTrafficLight: true,
-        isPendingDeletion: true,
-      );
+      grid[y][x] = cell.copyWith(isPendingDeletion: true);
       return 'trafficLight';
     }
+
+    // A building's dedicated driveway tile (its one fixed, always-present
+    // link to the road network) must never be erasable: new roads can only
+    // ever be dragged starting FROM an existing road/driveway tile, so
+    // deleting this one would permanently strand the building with no way
+    // to reconnect it. (A traffic light sitting on the tile, handled above,
+    // is still removable -- only the underlying road/tunnel/bridge/smart-
+    // junction cell itself is protected.)
+    final pos = GridPosition(x, y);
+    if (isLockedEntrance(pos)) return '';
 
     if (cell.type == CellType.road) {
       grid[y][x] = cell.copyWith(isPendingDeletion: true);
@@ -1611,11 +1682,12 @@ class GridManager {
       grid[y][x] = cell.copyWith(isPendingDeletion: true);
       rebuildRoadGraph();
       return 'tunnel';
+    } else if (cell.type == CellType.bridge) {
+      grid[y][x] = cell.copyWith(isPendingDeletion: true);
+      rebuildRoadGraph();
+      return 'bridge';
     } else if (cell.type == CellType.smartJunction) {
-      grid[y][x] = GridCell(
-        type: CellType.smartJunction,
-        isPendingDeletion: true,
-      );
+      grid[y][x] = cell.copyWith(isPendingDeletion: true);
       rebuildRoadGraph();
       return 'smartJunction';
     } else if (cell.isExpressLaneNode) {

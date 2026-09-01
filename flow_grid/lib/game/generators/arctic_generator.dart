@@ -77,9 +77,10 @@ class ArcticMapGenerator extends MapGenerator {
 
     int cx = sx;
     int cy = sy;
+    final leadingSpan = (thickness - 1) ~/ 2;
     for (int step = 0; step < length; step++) {
-      for (int t = -thickness ~/ 2; t <= thickness ~/ 2; t++) {
-        final tx = cx + t;
+      for (int t = 0; t < thickness; t++) {
+        final tx = cx + t - leadingSpan;
         final ty = cy;
         if (grid.isValid(tx, ty) && grid.grid[ty][tx].isEmpty) {
           grid.grid[ty][tx] = GridCell(type: CellType.mountain);
