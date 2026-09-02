@@ -970,7 +970,7 @@ class CarComponent extends PositionComponent
   // fits) to whatever margin is actually available at the car's current
   // location for its actual rendered width.
   double _safeLaneOffset() {
-    final raw = cellSize * 0.22 * _currentLaneSign;
+    final raw = cellSize * 0.15 * _currentLaneSign;
     final maxMagnitude = _maxSafeLaneOffsetMagnitude();
     if (raw.abs() <= maxMagnitude) return raw;
     return maxMagnitude * raw.sign;
@@ -1017,7 +1017,9 @@ class CarComponent extends PositionComponent
     // stay equal to or the clamp below will use a stale margin and this
     // widening's extra room silently goes unused (or, if this ever drifted
     // wider than the real paint, cars would ride past the painted edge).
-    final surfaceHalfWidth = onJunctionRing ? cellSize * 0.38 : cellSize * 0.32;
+    final surfaceHalfWidth = onJunctionRing
+        ? cellSize * 0.38
+        : cellSize * GameConstants.roadWidth / 2;
 
     // Leave a small buffer so the car doesn't visually ride the curb/outline
     // stroke drawn just outside the painted fill. Was 0.85, sized against

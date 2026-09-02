@@ -87,6 +87,15 @@ Two things about it are easy to miss:
   and the weekly reward popup commits any in-progress drag before pausing.
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
   `GameConstants` presentation flags and are off for the Mini Motorways calm look.
+- **Visual language is a Mini Motorways dark-mode copy**: slate ground with soft hill
+  blobs and tree clusters (trees only on empty cells, painted in the chunk layer), roads
+  darker than the ground with a thin light edge (`roadColor` / `roadEdgeColor` /
+  `roadWidth` / `roadEdge` in `GameConstants`), buildings as flat blocks with a darker
+  side band and one long shadow (`GridRenderer._drawBlock` / `_drawLongShadow`), shop
+  lots styled as pavement with hatch marks and a white pin, demand shown as pins and
+  overflow as a thin ring. New buildings fade in over their footprint. Keep the road
+  width and the car lane offset in step (`CarComponent._maxSafeLaneOffsetMagnitude`
+  reads `GameConstants.roadWidth`).
 
 ## Open work
 

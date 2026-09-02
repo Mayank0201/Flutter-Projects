@@ -76,7 +76,7 @@ class GameConstants {
   static const double buildingBevelMix = 0.30;
   // Destination lot card: a shade lighter than the road so the shop reads as
   // its own paved island, not more road.
-  static const Color lotColor = Color(0xFF6B7180);
+  static const Color lotColor = roadColor; // lot cards are pavement
 
   // Destinations occupy a 2x2 footprint: the anchor cell (the one that owns
   // demand/age/driveway state) plus three `partOf` cells. See
@@ -124,10 +124,18 @@ class GameConstants {
   static const double serviceVanSpeedMultiplier = 1.3;
 
   // Colors - Soft Dark Mode
-  static const Color backgroundColor = Color(0xFF161A22);
+  static const Color backgroundColor = Color(0xFF2B303B);
   static const Color gridLineColor = Color(0xFF232830);
-  static const Color roadColor = Color(0xFF5F6572);
-  static const Color roadFillColor = Color(0xFF6C7280);
+  // Mini Motorways dark mode: roads are a shade DARKER than the ground and
+  // carry a thin light edge line; that edge is what makes them read.
+  static const Color roadColor = Color(0xFF2C313B);
+  static const Color roadFillColor = Color(0xFF2C313B);
+  static const Color roadEdgeColor = Color(0xFF8C95A8);
+  static const double roadWidth = 0.50; // fill, fraction of a tile
+  static const double roadEdge = 0.045; // edge line, fraction of a tile
+  // Long, soft, single-light-source shadow every building casts.
+  static const Color buildingShadowColor = Color(0x38000000);
+  static const double buildingShadowLength = 0.9; // in building sizes
 
   // Mountain colors (replaces water)
   static const Color mountainColor = Color(0xFF3A3D45); // Dark rocky gray
@@ -153,24 +161,24 @@ class GameConstants {
   static const Color carWindowColor = Color(0x80FFFFFF);
 
   // Muted, desaturated building colors
+  // Mini Motorways identity set: clean, fairly saturated, one per district.
   static const List<Color> buildingColors = [
-    Color(0xFFC97575), // 0: Muted Red (further desaturated from a vivid coral)
-    Color(0xFF5AC0D0), // 1: Muted Cyan (was Blue)
-    Color(0xFF5AC47A), // 2: Muted Green
-    Color(0xFFD98A4A), // 3: Muted Orange (was Yellow)
-    Color(0xFF9B7DBF), // 4: Muted Purple
-    Color(
-      0xFFD9BE6E,
-    ), // 5: Muted Yellow (further desaturated from a vivid gold)
+    Color(0xFFF04A5E), // 0: Red
+    Color(0xFF3E86C6), // 1: Blue
+    Color(0xFF5AC878), // 2: Green
+    Color(0xFFF5A742), // 3: Orange
+    Color(0xFFA65BA0), // 4: Purple
+    Color(0xFFF2CF55), // 5: Yellow
   ];
 
+  // Side/bevel shade of each colour (the "thickness" under the top face).
   static const List<Color> buildingDarkColors = [
-    Color(0xFFA15E5E), // 0: Dark Red
-    Color(0xFF388EA0), // 1: Dark Cyan (was Blue)
-    Color(0xFF489E60), // 2: Dark Green
-    Color(0xFFB06E38), // 3: Dark Orange (was Yellow)
-    Color(0xFF7E5FA0), // 4: Dark Purple
-    Color(0xFFAE9858), // 5: Dark Yellow (was Orange)
+    Color(0xFFB43847), // 0: Red
+    Color(0xFF2E6494), // 1: Blue
+    Color(0xFF43965A), // 2: Green
+    Color(0xFFB87D31), // 3: Orange
+    Color(0xFF7C4478), // 4: Purple
+    Color(0xFFB59B40), // 5: Yellow
   ];
 
   static Color getBuildingColor(int index) =>
