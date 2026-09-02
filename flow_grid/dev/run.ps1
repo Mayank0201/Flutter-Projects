@@ -5,7 +5,9 @@
 #   .\dev\run.ps1 windows              -> desktop run (no --web-port)
 #   .\dev\run.ps1 chrome --release     -> trailing args are forwarded to flutter
 
+[CmdletBinding(PositionalBinding = $false)]
 param(
+    [Parameter(Position = 0)]
     [string]$Device = "chrome",
     [int]$Port = 9494,
     [Parameter(ValueFromRemainingArguments = $true)]

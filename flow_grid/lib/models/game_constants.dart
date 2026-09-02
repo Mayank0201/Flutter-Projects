@@ -133,6 +133,10 @@ class GameConstants {
   static const Color roadEdgeColor = Color(0xFF8C95A8);
   static const double roadWidth = 0.50; // fill, fraction of a tile
   static const double roadEdge = 0.045; // edge line, fraction of a tile
+  // Smart-junction ring centreline radius, fraction of a tile. Cars drive
+  // this circle and the renderer paints one road-width around it, so 0.5
+  // keeps the roundabout inside its own tile like Mini Motorways'.
+  static const double junctionRingRadius = 0.5;
   // Long, soft, single-light-source shadow every building casts.
   static const Color buildingShadowColor = Color(0x38000000);
   static const double buildingShadowLength = 0.9; // in building sizes
@@ -140,15 +144,16 @@ class GameConstants {
   // Mountain colors (replaces water)
   static const Color mountainColor = Color(0xFF3A3D45); // Dark rocky gray
   static const Color mountainHighlightColor = Color(0xFF4A4E58); // Lighter peak
-  static const Color mountainSnowColor = Color(0xFFD0D3DA); // Snow cap
+  static const Color mountainSnowColor = Color(0xFFD0D3DA); // (unused now)
   static const Color mountainEdgeColor = Color(0xFF2E3138); // Cliff edge
 
   // Tunnel & Express Lane
   static const Color tunnelColor = Color(0xFF8A7D6B);
-  static const Color waterColor = Color(0xFF2C5E8A); // Deep River Blue
-  static const Color bridgeColor = Color(0xFF7A8A99); // Slate Steel
-  static const Color expressLaneColor = Color(0xFF9FE0B4); // Light Green
-  static const Color expressLaneBorderColor = Color(0xFF6FB088);
+  static const Color waterColor = Color(0xFF34485F); // MM dark-mode river
+  static const Color waterEdgeColor = Color(0xFF8FA6C2);
+  static const Color bridgeColor = roadColor; // MM: the road just continues over water
+  static const Color expressLaneColor = Color(0xFFF2B65A); // MM motorway gold
+  static const Color expressLaneBorderColor = Color(0xFFB8843A);
 
   // Congestion — muted ochre/terracotta instead of flat-UI traffic-light
   // yellow/red, so it reads as calm information rather than an alarm.

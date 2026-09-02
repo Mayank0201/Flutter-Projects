@@ -8,6 +8,7 @@ import '../../models/grid_cell.dart';
 import '../../models/road_occupancy.dart';
 import '../../game/flow_grid_game.dart';
 import '../pathfinder.dart';
+import '../grid_manager.dart';
 import '../map_generator.dart';
 
 class CarComponent extends PositionComponent
@@ -44,7 +45,8 @@ class CarComponent extends PositionComponent
   bool onExpressLane = false;
   double travelTime = 0.0;
   bool _waitingAtSignal = false;
-  static const double maxWaitTime = 1.5;
+  // Dwell time parked in the shop's lot before heading home.
+  static const double maxWaitTime = 2.6;
   String? routeId;
   final List<Vector2> _trailPositions = [];
   static const int _maxTrailPoints = 2;
@@ -104,8 +106,9 @@ class CarComponent extends PositionComponent
   bool get isRoundaboutInner => _roundaboutInnerLane ?? (hashCode % 2 == 0);
 
   // Acceleration
-  static const double accelerationRate = 1.5;
-  static const double decelerationRate = 2.8;
+  // Gentle Mini Motorways easing: ~1 s to full speed, soft stops.
+  static const double accelerationRate = 1.1;
+  static const double decelerationRate = 2.2;
   static const double startupAccelerationBonus = 1.3;
 
   CarComponent({
@@ -499,6 +502,92 @@ class CarComponent extends PositionComponent
     }
   }
 
+  /// Mini Motorways cars don't vanish at the door: at a shop they pull into
+  /// a stall on the lot's open tarmac (next to the hatch marks), at home
+  /// they sit on the driveway. Sets position/angle for the whole dwell.
+  void _parkAtCurrentEnd() {
+    final gm = game.gridManager;
+    if (gm == null) return;
+    if (isReturning) {
+      final spot = CarComponent.homeParkingSpot(gm, spawnHousePos, cellSize, offsetX, offsetY);
+      if (spot != null) {
+        position = spot.$1;
+        angle = spot.$2;
+      }
+      return;
+    }
+    if (!gm.isValid(targetDest.x, targetDest.y)) return;
+    final entry = gm.getCell(targetDest.x, targetDest.y).entrySide;
+    if (entry == null) return;
+    int slot = 0;
+    for (final other in game.cars) {
+      if (identical(other, this) || other.arrived) continue;
+      if (other.isWaiting && !other.isReturning &&
+          other.targetDest.x == targetDest.x &&
+          other.targetDest.y == targetDest.y) {
+        slot++;
+      }
+    }
+    final ext = GridManager.destinationExtent(entry);
+    final n = GameConstants.destinationFootprintSize;
+    final bx = offsetX + targetDest.x * cellSize + cellSize / 2 + ext.x * cellSize * (n - 1) / 2;
+    final by = offsetY + targetDest.y * cellSize + cellSize / 2 + ext.y * cellSize * (n - 1) / 2;
+    final lot = cellSize * n * 0.90;
+    final stall = CarComponent.stallCenter(bx, by, lot, entry, ext, slot % 2);
+    position = Vector2(stall.dx, stall.dy);
+    final vertical = entry == Direction.north || entry == Direction.south;
+    angle = vertical ? -pi / 2 : 0;
+  }
+
+  /// Centre of parking stall [index] (0 or 1) on a shop's lot. The open
+  /// strip runs along the face the driveway meets; the tongue takes the
+  /// anchor end of that strip, the two stalls sit further along it. Shared
+  /// with GridRenderer so the painted stall lines match where cars park.
+  static Offset stallCenter(
+    double bx,
+    double by,
+    double lot,
+    Direction entry,
+    GridPosition ext,
+    int index,
+  ) {
+    final along = 0.02 + index * 0.27; // fraction of lot from block centre
+    final vertical = entry == Direction.north || entry == Direction.south;
+    if (vertical) {
+      return Offset(bx + ext.x * lot * along, by - ext.y * lot * 0.33);
+    }
+    return Offset(bx - ext.x * lot * 0.33, by + ext.y * lot * along);
+  }
+
+  /// Where a house's car sits when it is home: on the driveway tile, tucked
+  /// toward the house. Shared with GridRenderer so the parked glyph it draws
+  /// for idle houses lands on exactly the same spot.
+  static (Vector2, double)? homeParkingSpot(
+    GridManager gm,
+    GridPosition house,
+    double cellSize,
+    double offsetX,
+    double offsetY,
+  ) {
+    if (!gm.isValid(house.x, house.y)) return null;
+    final entry = gm.getCell(house.x, house.y).entrySide;
+    if (entry == null) return null;
+    final stub = house.getNeighbor(entry);
+    final sx = offsetX + stub.x * cellSize + cellSize / 2;
+    final sy = offsetY + stub.y * cellSize + cellSize / 2;
+    final back = cellSize * 0.12;
+    switch (entry) {
+      case Direction.north:
+        return (Vector2(sx, sy + back), -pi / 2);
+      case Direction.south:
+        return (Vector2(sx, sy - back), pi / 2);
+      case Direction.east:
+        return (Vector2(sx - back, sy), 0);
+      case Direction.west:
+        return (Vector2(sx + back, sy), pi);
+    }
+  }
+
   double get _vehicleSpeedMultiplier {
     switch (vehicleType) {
       case VehicleType.car:
@@ -576,7 +665,9 @@ class CarComponent extends PositionComponent
       // Junction sub-nodes sit on the enlarged hub ring so the smooth-path
       // bezier matches the wider visible donut; building entries keep the
       // tighter 0.4 offset so the parking position lands at the door.
-      final r = isJunctionNodeAt(i) ? cellSize * 0.75 : cellSize * 0.4;
+      final r = isJunctionNodeAt(i)
+          ? cellSize * GameConstants.junctionRingRadius
+          : cellSize * 0.4;
       switch (p.side!) {
         case Direction.north:
           return Offset(midX, midY - r);
@@ -683,7 +774,7 @@ class CarComponent extends PositionComponent
       else if (isJunctionTransitionAt(i)) {
         final cx = offsetX + p1.x * cellSize + cellSize / 2;
         final cy = offsetY + p1.y * cellSize + cellSize / 2;
-        final ringR = cellSize * 0.75;
+        final ringR = cellSize * GameConstants.junctionRingRadius;
         final rect = Rect.fromCircle(center: Offset(cx, cy), radius: ringR);
 
         final bool prevIsEntry =
@@ -724,7 +815,7 @@ class CarComponent extends PositionComponent
           isJunctionNodeAt(i + 1)) {
         final cx = offsetX + p2.x * cellSize + cellSize / 2;
         final cy = offsetY + p2.y * cellSize + cellSize / 2;
-        final r = cellSize * 0.75;
+        final r = cellSize * GameConstants.junctionRingRadius;
         const alpha = pi / 6;
 
         final startPoint = c2 + (c1 - c2) * 0.5;
@@ -755,7 +846,7 @@ class CarComponent extends PositionComponent
       else if (p1.side != null && p2.side == null && isJunctionNodeAt(i)) {
         final cx = offsetX + p1.x * cellSize + cellSize / 2;
         final cy = offsetY + p1.y * cellSize + cellSize / 2;
-        final r = cellSize * 0.75;
+        final r = cellSize * GameConstants.junctionRingRadius;
         const alpha = pi / 6;
 
         final endPoint = c1 + (c2 - c1) * 0.5;
@@ -876,7 +967,7 @@ class CarComponent extends PositionComponent
     if (tangent != null) {
       final nextOffset = min(
         _totalLength,
-        _distanceTraveled + cellSize * 0.75,
+        _distanceTraveled + cellSize * 0.9,
       );
       final nextTangent = _metric!.getTangentForOffset(nextOffset);
       if (nextTangent != null) {
@@ -885,11 +976,11 @@ class CarComponent extends PositionComponent
           turnAngleDiff = 2 * pi - turnAngleDiff;
         }
         targetCurveSpeedMultiplier =
-            1.0 - (turnAngleDiff / (pi / 2) * 0.35).clamp(0.0, 0.35);
+            1.0 - (turnAngleDiff / (pi / 2) * 0.45).clamp(0.0, 0.45);
       }
     }
     if (dt > 0) {
-      const curveSpeedEaseRate = 3.0; // convergence rate, per second
+      const curveSpeedEaseRate = 4.0; // convergence rate, per second
       final diff = targetCurveSpeedMultiplier - _currentCurveSpeedMultiplier;
       final maxStep = curveSpeedEaseRate * dt;
       _currentCurveSpeedMultiplier = diff.abs() <= maxStep
@@ -1007,8 +1098,6 @@ class CarComponent extends PositionComponent
     const paintedVehicleAspect = 1.86;
     final vehicleHalfWidth = (size.x / paintedVehicleAspect) / 2;
 
-    final onJunctionRing =
-        _currentPathIndex < path.length && _isJunctionNode(_currentPathIndex);
     // [ROAD WIDTH 2026-09-01] Must equal half the actual painted width in
     // grid_renderer.dart: plain road fill is cellSize*0.64 (_roadPaint et
     // al.) => half-width 0.32 (was 0.24 when fill was 0.48). The junction
@@ -1017,9 +1106,9 @@ class CarComponent extends PositionComponent
     // stay equal to or the clamp below will use a stale margin and this
     // widening's extra room silently goes unused (or, if this ever drifted
     // wider than the real paint, cars would ride past the painted edge).
-    final surfaceHalfWidth = onJunctionRing
-        ? cellSize * 0.38
-        : cellSize * GameConstants.roadWidth / 2;
+    // The ring is painted exactly one road-width wide, so the same clamp
+    // applies on it as on a plain road.
+    final surfaceHalfWidth = cellSize * GameConstants.roadWidth / 2;
 
     // Leave a small buffer so the car doesn't visually ride the curb/outline
     // stroke drawn just outside the painted fill. Was 0.85, sized against
@@ -1065,7 +1154,10 @@ class CarComponent extends PositionComponent
       // Rule 8: Dual-lane illusion — each car is dynamically or deterministically assigned to the
       // inner or outer orbital lane. On a clockwise circle the right-perpendicular points inward,
       // so +0.85 → inner lane, −0.85 → outer.
-      _targetLaneSign = isRoundaboutInner ? 0.85 : -0.85;
+      // [FIX] Was +0.85 / -0.85: every car swung across to the far side of
+      // the road on approach, which read as a swerve into the roundabout.
+      // Both ring lanes now stay on the driving side of the centreline.
+      _targetLaneSign = isRoundaboutInner ? 0.55 : 1.0;
       return;
     }
 
@@ -1518,6 +1610,7 @@ class CarComponent extends PositionComponent
       if (!isWaiting) {
         isWaiting = true;
         _waitTimer = 0;
+        _parkAtCurrentEnd();
         return;
       }
       arrived = true;
@@ -2527,7 +2620,7 @@ class CarComponent extends PositionComponent
     // A visible parking-stall offset was tried for destinations but reverted
     // per user request; keep both cases simple and consistent.
     if (arrived) return;
-    if (isWaiting) return;
+    // Waiting cars stay visible: they are parked (see _parkAtCurrentEnd).
 
     final sprites = game.vehicleSprites;
     if (sprites.isEmpty) return;

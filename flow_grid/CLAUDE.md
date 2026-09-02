@@ -93,9 +93,18 @@ Two things about it are easy to miss:
   `roadWidth` / `roadEdge` in `GameConstants`), buildings as flat blocks with a darker
   side band and one long shadow (`GridRenderer._drawBlock` / `_drawLongShadow`), shop
   lots styled as pavement with hatch marks and a white pin, demand shown as pins and
-  overflow as a thin ring. New buildings fade in over their footprint. Keep the road
-  width and the car lane offset in step (`CarComponent._maxSafeLaneOffsetMagnitude`
-  reads `GameConstants.roadWidth`).
+  overflow as a thin ring. New buildings pop in with an ease-out-back scale under a
+  ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane
+  offset in step (`CarComponent._maxSafeLaneOffsetMagnitude` reads
+  `GameConstants.roadWidth`).
+- **Cars park instead of vanishing.** At a shop a waiting car sits in one of two
+  painted stalls (`CarComponent.stallCenter`, shared by the renderer's stall lines);
+  at home it sits on the driveway (`CarComponent.homeParkingSpot`), and
+  `GridRenderer._drawParkedCars` draws the same spot for any house with no car out.
+- Utilities follow the Mini Motorways glyphs: roundabout = one-road-width ring on the
+  r = 0.75 pathing circle with a ground-colour island, signals = red/green lamps per
+  approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
+  portal, express lanes = gold band with pale dashes and round white ramp badges.
 
 ## Open work
 
