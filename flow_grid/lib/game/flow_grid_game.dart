@@ -1292,13 +1292,16 @@ class FlowGridGame extends FlameGame
 
   void _triggerWeeklyUpgrade() {
     if (gridManager == null) return;
+    _commitPendingDrag();
 
     week++;
     for (final dest in gridManager!.destinations) {
       final key = "${dest.x},${dest.y}";
       gridManager!.destinationAges[key] =
           (gridManager!.destinationAges[key] ?? 0) + 1;
-      gridRenderer?.markDirty(dest.x, dest.y);
+      for (final fp in gridManager!.footprintOf(dest)) {
+        gridRenderer?.markDirty(fp.x, fp.y);
+      }
     }
     _syncSpawnBounds();
     MapGeneratorFactory.getGenerator(
@@ -1521,6 +1524,7 @@ class FlowGridGame extends FlameGame
         if (_panStartPixel!.distanceTo(currentPos) < dragThreshold) return;
         _isDragging = true;
         gridManager!.interactionState = InteractionState.preview;
+        _seedDragPathFromPressStart();
       }
 
       final worldPos = camera.viewfinder.globalToLocal(currentPos);
@@ -1662,6 +1666,52 @@ class FlowGridGame extends FlameGame
     _updateInventoryNotifiers();
     gridRenderer?.markDirty();
     onStateChanged?.call();
+  }
+
+  /// The drag threshold means the first onScaleUpdate that actually starts a
+  /// drag is already ~24 screen px from where the finger went down. At mobile
+  /// zoom that is usually the NEXT tile, so the tile the player pressed on
+  /// never made it into the path: roads started one tile late and never
+  /// touched the driveway they were dragged from. Seed the path with the
+  /// press tile; the normal adjacency interpolation then fills in from there.
+  void _seedDragPathFromPressStart() {
+    if (_panStartPixel == null || gridManager == null) return;
+    if (_dragPath.isNotEmpty || activeTool == BuildTool.expressLane) return;
+    final worldPos = camera.viewfinder.globalToLocal(_panStartPixel!);
+    final x = ((worldPos.x - boardOffsetX) / cellSize).floor();
+    final y = ((worldPos.y - boardOffsetY) / cellSize).floor();
+    if (!gridManager!.isValid(x, y)) return;
+    final pos = GridPosition(x, y);
+    final cell = gridManager!.getCell(x, y);
+    final isTerrainOrCorridor =
+        cell.type == CellType.mountain ||
+        cell.type == CellType.water ||
+        cell.isTunnel ||
+        cell.isBridge;
+    if (activeTool != BuildTool.erase &&
+        !isTerrainOrCorridor &&
+        !_isInActiveArea(pos)) {
+      return;
+    }
+    _dragPath.add(pos);
+    previewPath = List.from(_dragPath);
+    gridRenderer?.markDirty(x, y);
+  }
+
+  /// The weekly reward popup used to land mid-gesture and silently throw the
+  /// half-drawn road away (then re-zoom the camera under the finger). Commit
+  /// whatever has been drawn so far instead, then reset input state.
+  void _commitPendingDrag() {
+    if (!_isDragging || gridManager == null) return;
+    if (_isDeferredTool &&
+        activeTool != BuildTool.expressLane &&
+        _dragPath.length > 1) {
+      executeUndoableAction(() {
+        gridManager!.commitPlacement(() => _commitDragBuild());
+        if (activeTool == BuildTool.erase) _applyEraseRefunds();
+      });
+    }
+    _cleanupInput();
   }
 
   void _cleanupInput() {
@@ -1912,6 +1962,18 @@ class FlowGridGame extends FlameGame
         break;
     }
     gridRenderer?.markDirty(pos.x, pos.y);
+    // Adjacent roads auto-join the new tile (GridManager.placeRoad), which
+    // changes THEIR connection flags too — and they may sit in another chunk.
+    for (final d in const [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      final nx = pos.x + d[0];
+      final ny = pos.y + d[1];
+      if (gridManager!.isValid(nx, ny)) gridRenderer?.markDirty(nx, ny);
+    }
   }
 
   void _handleSingleClick(GridPosition pos) {

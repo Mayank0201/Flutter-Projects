@@ -72,9 +72,27 @@ Two things about it are easy to miss:
   where noisy by `GameConstants.debugInfrastructure`.
 - Anything touching the road topology should invalidate the path cache via
   `GridManager.onTopologyChanged`.
+- **Adjacent road tiles always join** (`GridManager._autoConnectNeighbours`, called
+  from `placeRoad`). Edges are no longer limited to cells drawn in the same drag, so a
+  road dragged up to a driveway stub connects. Tunnels, bridges, smart junctions,
+  express lanes and one-way roads keep their own rules and are skipped.
+- **Destinations are 2x2.** Only the anchor cell (the one the driveway touches) is in
+  `GridManager.destinations` and owns demand/age/name/driveway state, keyed by its
+  `"x,y"`. The other three cells are `GridCell.partOf` cells that just block the tile.
+  The block hangs off the entry side (`GridManager.destinationExtent`); use
+  `destinationFootprint` / `footprintOf` / `isDestinationFootprintFree` rather than
+  hand-rolling offsets, and skip `isDestinationPart` cells when iterating buildings.
+- **Drag input** seeds the path with the tile under the initial press
+  (`_seedDragPathFromPressStart`), because the 24 px drag threshold otherwise skips it,
+  and the weekly reward popup commits any in-progress drag before pausing.
+- Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
+  `GameConstants` presentation flags and are off for the Mini Motorways calm look.
 
 ## Open work
 
 `notes.txt` is the running backlog. Current items: Andes spawns one oversized mountain
 instead of a range; car speed while waiting; traffic lights aren't meaningfully useful;
-car jitter; collision/overlap checks; game over should destroy the save (permadeath).
+collision/overlap checks; game over should destroy the save (permadeath). Car jitter
+was traced to the door node's non-null `side` triggering the smart-junction exit
+bezier on the first path segment (`CarComponent._rebuildSmoothPath`), plus
+nearest-neighbour sprite sampling; both are fixed.

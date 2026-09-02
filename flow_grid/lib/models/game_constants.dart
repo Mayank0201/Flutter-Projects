@@ -40,8 +40,10 @@ class GameConstants {
   // (min/max maturity) to ~15%/20%, a clearly visible parking apron on
   // every side, while lotMaxScale*renderScale (1.05*0.90=0.945*cellSize)
   // stays safely under 1.0*cellSize.
-  static const double lotMinScale = 0.95; // freshly placed: clearly visible parking apron around the building
-  static const double lotMaxScale = 1.05; // fully mature: 0.945*cellSize, safely inside the tile
+  static const double lotMinScale =
+      0.95; // freshly placed: clearly visible parking apron around the building
+  static const double lotMaxScale =
+      1.05; // fully mature: 0.945*cellSize, safely inside the tile
 
   // Endless Scaling (Part 1 & 3)
   static const double highDemandHouseTriggerDuration = 22.0;
@@ -60,6 +62,27 @@ class GameConstants {
 
   // Car
   static const double carSpeed = 130.0;
+
+  // Presentation — Mini Motorways "calm" pass. Each of these switched a
+  // decorative layer off; kept as flags so they can be brought back cheaply.
+  static const bool ambientTimeOfDayTint = false; // warm/indigo week tint
+  static const bool carTrails = false; // motion streak behind each car
+  static const bool parkingHighlights = false; // yellow pulse under parked cars
+  static const bool maturityAura = false; // white halo around mature shops
+
+  // Building look (Mini Motorways): a shape is its flat colour plus the same
+  // hue pushed ~30% toward the outline colour, offset downward, for a soft
+  // "thickness" — no black drop shadows, no outlines on buildings.
+  static const double buildingBevelMix = 0.30;
+  // Destination lot card: a shade lighter than the road so the shop reads as
+  // its own paved island, not more road.
+  static const Color lotColor = Color(0xFF6B7180);
+
+  // Destinations occupy a 2x2 footprint: the anchor cell (the one that owns
+  // demand/age/driveway state) plus three `partOf` cells. See
+  // GridManager.destinationFootprint for how the footprint hangs off the
+  // entry side.
+  static const int destinationFootprintSize = 2;
 
   // Terrain & Capacity
   static const double mountainTerrainPenalty =

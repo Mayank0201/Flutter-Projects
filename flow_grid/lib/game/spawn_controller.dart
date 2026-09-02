@@ -31,12 +31,11 @@ class BuildingProfile {
 
   static const residential = BuildingProfile(
     influenceRadius: 6.0,
-    // [FIX] Was 0.60. Nudged down alongside the destination-size fix so
-    // houses read as clearly the smaller building type -- renderScale is
-    // visual-only (verified: not used by spacing/collision/placement
-    // logic, only by GridRenderer's draw calls), so this has no gameplay
-    // effect.
-    renderScale: 0.52,
+    // renderScale is visual-only (not used by spacing/collision/placement
+    // logic, only by GridRenderer's draw calls). Destinations are now a 2x2
+    // block, so houses can be Mini Motorways-sized (~2/3 of a tile) and
+    // still read as clearly the smaller building type.
+    renderScale: 0.60,
     sameColorSpacing: 4,
     interColorSpacing: 2,
     corridorLength: 2,
@@ -458,7 +457,7 @@ class SpawnController {
 
   void _placeStagedDestination(int colorIndex, DistrictPlan plan) {
     if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return;
-    if (!gridManager.grid[plan.destPos.y][plan.destPos.x].isEmpty) {
+    if (!gridManager.isDestinationFootprintFree(plan.destPos.x, plan.destPos.y, plan.destEntry)) {
       _log('STAGED DEST: dest spot ${plan.destPos} no longer empty; skipping');
       return;
     }
@@ -914,7 +913,7 @@ class SpawnController {
       // Place expansion destination
       gridManager.commitPlacement(() {
         if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return;
-        if (!gridManager.grid[plan.destPos.y][plan.destPos.x].isEmpty) {
+        if (!gridManager.isDestinationFootprintFree(plan.destPos.x, plan.destPos.y, plan.destEntry)) {
           _log('EXPANSION DEST: spot ${plan.destPos} no longer empty; skipping');
           return;
         }
@@ -1233,6 +1232,13 @@ class SpawnController {
     if (entry == null) {
       _log('DEST REJECTED: No entry side at $pos');
       lastFailure = SpawnFailure.space; // Effectively space limit
+      onAdaptiveExpansionRequired?.call();
+      return false;
+    }
+
+    if (!gridManager.isDestinationFootprintFree(pos.x, pos.y, entry)) {
+      _log('DEST REJECTED: 2x2 footprint at $pos ($entry) not free');
+      lastFailure = SpawnFailure.space;
       onAdaptiveExpansionRequired?.call();
       return false;
     }
@@ -1588,10 +1594,26 @@ class SpawnController {
     // [STRICT] Adjacency Check (Issue: Buildings touching each other)
     // Rule: New buildings must have a 2-tile clearance from other buildings and infrastructure ports.
     const int buildingClearance = 2;
+    // Destinations are 2x2: every footprint cell must itself be free and in
+    // bounds, and the clearance ring is checked around the whole block.
+    final footprint = nodeType == SpawnNodeType.destination
+        ? GridManager.destinationFootprint(pos, entrySide)
+        : <GridPosition>[pos];
+    for (final fp in footprint) {
+      if (!gridManager.isValid(fp.x, fp.y)) return false;
+      if (fp.x < minSpawnX || fp.x > maxSpawnX || fp.y < minSpawnY || fp.y > maxSpawnY) {
+        return false;
+      }
+      final fpCell = gridManager.grid[fp.y][fp.x];
+      if (!fpCell.isEmpty) return false;
+      if (fpCell.isReserved && stage.index < PlanningStage.stage4StrongRelax.index) return false;
+    }
+    for (final fp in footprint) {
     for (int dy = -buildingClearance; dy <= buildingClearance; dy++) {
       for (int dx = -buildingClearance; dx <= buildingClearance; dx++) {
-        final nx = pos.x + dx;
-        final ny = pos.y + dy;
+        final nx = fp.x + dx;
+        final ny = fp.y + dy;
+        if (footprint.any((f) => f.x == nx && f.y == ny)) continue;
 
         // Check against staged initial district spots to prevent overlap or tight adjacency during delayed committing
         if (_stagedInitialPlan != null) {
@@ -1615,6 +1637,7 @@ class SpawnController {
         // [NEW] Spacing Rule: Cannot spawn adjacent to infrastructure endpoints (tunnel/bridge mouths)
         if (cell.isConnectableEndpoint) return false;
       }
+    }
     }
 
     // ============================================================
@@ -1861,7 +1884,14 @@ class SpawnController {
     for (final dir in allowed) {
       final neighbor = pos.getNeighbor(dir);
       if (!gridManager.isValid(neighbor.x, neighbor.y)) continue;
-      
+
+      // A destination's 2x2 block hangs off its entry side; the entry is
+      // only usable if that whole block is free.
+      if (identical(profile, BuildingProfile.commercial) &&
+          !gridManager.isDestinationFootprintFree(pos.x, pos.y, dir)) {
+        continue;
+      }
+
       final cell = gridManager.grid[neighbor.y][neighbor.x];
       if (!cell.isEmpty && !cell.isRoad) continue;
 

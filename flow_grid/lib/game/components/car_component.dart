@@ -155,7 +155,10 @@ class CarComponent extends PositionComponent
     travelTime = 0.0;
     _waitingAtSignal = false;
     _distanceTraveled = 0.0;
-    _currentSpeedMultiplier = 1.0;
+    // Pull out from rest (startupAccelerationBonus brings it up quickly);
+    // reuseState() already did this for pooled cars, fresh ones popped out
+    // at full speed.
+    _currentSpeedMultiplier = 0.0;
     _currentCurveSpeedMultiplier = 1.0;
     _lastTargetMultiplier = 1.0;
     _currentLaneSign = 1.0;
@@ -412,7 +415,10 @@ class CarComponent extends PositionComponent
     // as too big -- the current sprite's bold white windows (much higher
     // contrast than the design this size was originally tuned for) stay
     // legible at this size too, so there's no need to keep the full bump.
-    final baseSize = cellSize * 0.46;
+    // Mini Motorways cars are roughly a fifth of a tile: small next to a
+    // house and tiny next to a 2x2 shop. 0.34 keeps the sprite legible on
+    // phones while restoring that size gap.
+    final baseSize = cellSize * 0.34;
     switch (vehicleType) {
       case VehicleType.car:
         size = Vector2(baseSize, baseSize);
@@ -738,8 +744,15 @@ class CarComponent extends PositionComponent
         segPath.quadraticBezierTo(cp.dx, cp.dy, endPoint.dx, endPoint.dy);
         currentPenPos = endPoint;
       }
-      // Exit transition for smart junctions
-      else if (p1.side != null && p2.side == null) {
+      // Exit transition for smart junctions.
+      // [FIX] Spawn wobble: this branch had no structural check, so it also
+      // fired for i == 0 on every trip -- the house/destination DOOR node
+      // carries a non-null `side` too -- and drew the car's very first
+      // segment as a roundabout-exit bezier swung through a control point
+      // ~0.87 cells off the driveway. The car visibly swerved while pulling
+      // out of the building. Gate it on a real junction node like the entry
+      // branch above already does.
+      else if (p1.side != null && p2.side == null && isJunctionNodeAt(i)) {
         final cx = offsetX + p1.x * cellSize + cellSize / 2;
         final cy = offsetY + p1.y * cellSize + cellSize / 2;
         final r = cellSize * 0.75;
@@ -1428,7 +1441,7 @@ class CarComponent extends PositionComponent
         ? 0
         : (_maxTrailPoints * speedFactor).round();
 
-    if (!arrived && !isWaiting && !isStopped) {
+    if (GameConstants.carTrails && !arrived && !isWaiting && !isStopped) {
       if (_trailPositions.isEmpty ||
           _trailPositions.first.distanceToSquared(position) > 0.05) {
         _trailPositions.insert(0, position.clone());
@@ -2501,6 +2514,10 @@ class CarComponent extends PositionComponent
   // One drawImageRect call per car; all 6 colors share one GPU texture.
   // ============================================================
 
+  static final Paint _spritePaint = Paint()
+    ..filterQuality = FilterQuality.medium
+    ..isAntiAlias = true;
+
   @override
   void render(Canvas canvas) {
     // Cars hide immediately on arrival at either end of the trip — same
@@ -2516,7 +2533,7 @@ class CarComponent extends PositionComponent
 
     // 1. Draw trailing paths in local space (before saving/translating/rotating canvas)
     final baseColor = GameConstants.getBuildingColor(colorIndex);
-    if (_trailPositions.length >= 2) {
+    if (GameConstants.carTrails && _trailPositions.length >= 2) {
       final trailPaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
@@ -2569,10 +2586,14 @@ class CarComponent extends PositionComponent
     // 2. [Removed shadow to avoid black highlight]
 
     // 3. Draw vehicle sprite
+    // Rotated sprites sampled nearest-neighbour shimmer as they move sub-pixel
+    // through a curve (every edge pixel flips on/off). Bilinear + AA keeps
+    // the silhouette stable.
     sprite.render(
       canvas,
       position: Vector2(-width / 2, -length / 2),
       size: Vector2(width, length),
+      overridePaint: _spritePaint,
     );
 
     canvas.restore();

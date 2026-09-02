@@ -52,6 +52,82 @@ class GridManager {
 
   String _key(GridPosition pos) => "${pos.x},${pos.y}";
 
+  // ---------------------------------------------------------------------
+  // 2x2 destination footprint
+  //
+  // The anchor cell is always the one the driveway touches, so every piece
+  // of per-destination state (demand, age, driveway, name) stays keyed by
+  // the anchor exactly as it was when destinations were a single tile. The
+  // other three cells are `partOf` cells: they block the tile and nothing
+  // else. The footprint hangs off the entry side so the anchor is never
+  // buried inside the block:
+  //   north / west entry -> anchor is the top-left cell,  extent (+1, +1)
+  //   south entry        -> anchor is the bottom-left,    extent (+1, -1)
+  //   east entry         -> anchor is the top-right,      extent (-1, +1)
+  // ---------------------------------------------------------------------
+
+  /// Which way the other three cells extend from the anchor, in cells.
+  static GridPosition destinationExtent(Direction entry) {
+    switch (entry) {
+      case Direction.south:
+        return GridPosition(1, -1);
+      case Direction.east:
+        return GridPosition(-1, 1);
+      case Direction.north:
+      case Direction.west:
+        return GridPosition(1, 1);
+    }
+  }
+
+  /// All cells of a destination anchored at [anchor] with the given entry.
+  /// The anchor is always element 0.
+  static List<GridPosition> destinationFootprint(
+    GridPosition anchor,
+    Direction entry,
+  ) {
+    final n = GameConstants.destinationFootprintSize;
+    if (n <= 1) return [anchor];
+    final ext = destinationExtent(entry);
+    final cells = <GridPosition>[];
+    for (int dy = 0; dy < n; dy++) {
+      for (int dx = 0; dx < n; dx++) {
+        cells.add(GridPosition(anchor.x + dx * ext.x, anchor.y + dy * ext.y));
+      }
+    }
+    return cells;
+  }
+
+  /// Anchor cell for any destination cell (anchor or part); null otherwise.
+  GridPosition? destinationAnchor(int x, int y) {
+    if (!isValid(x, y)) return null;
+    final cell = grid[y][x];
+    if (!cell.isDestination) return null;
+    return cell.partOf ?? GridPosition(x, y);
+  }
+
+  /// Footprint of the destination that owns [pos] (anchor or part). For
+  /// anything that is not a destination this is just `[pos]`.
+  List<GridPosition> footprintOf(GridPosition pos) {
+    final anchor = destinationAnchor(pos.x, pos.y);
+    if (anchor == null) return [pos];
+    final entry = grid[anchor.y][anchor.x].entrySide;
+    if (entry == null) return [anchor];
+    return destinationFootprint(anchor, entry);
+  }
+
+  /// True when every footprint cell for a destination anchored at (x, y)
+  /// with [entry] is on the grid, empty and not reserved for another
+  /// building's corridor.
+  bool isDestinationFootprintFree(int x, int y, Direction entry) {
+    for (final fp in destinationFootprint(GridPosition(x, y), entry)) {
+      if (!isValid(fp.x, fp.y)) return false;
+      final cell = grid[fp.y][fp.x];
+      if (!cell.isEmpty) return false;
+      if (cell.isReserved && (fp.x != x || fp.y != y)) return false;
+    }
+    return true;
+  }
+
   late List<List<GridCell>> grid;
 
   final List<GridPosition> houses = [];
@@ -804,6 +880,9 @@ class GridManager {
           isTunnelExtension: cellData['isTunnelExtension'] as bool? ?? false,
           hasTrafficLight: cellData['hasTrafficLight'] as bool? ?? false,
           entrySide: cellData['entrySide'] != null ? Direction.values[cellData['entrySide'] as int] : null,
+          partOf: (cellData['partOfX'] != null && cellData['partOfY'] != null)
+              ? GridPosition(cellData['partOfX'] as int, cellData['partOfY'] as int)
+              : null,
           isInfrastructureInternal: cellData['isInfrastructureInternal'] as bool? ?? false,
           isConnectableEndpoint: cellData['isConnectableEndpoint'] as bool? ?? false,
           infrastructureAxis: cellData['infrastructureAxis'] != null ? InfrastructureAxis.values[cellData['infrastructureAxis'] as int] : null,
@@ -812,7 +891,9 @@ class GridManager {
 
         final pos = GridPosition(x, y);
         if (type == CellType.house) houses.add(pos);
-        if (type == CellType.destination) destinations.add(pos);
+        if (type == CellType.destination && grid[y][x].partOf == null) {
+          destinations.add(pos);
+        }
 
         // Rebuild infrastructure list (Including buildings for rendering)
         if (type != CellType.empty &&
@@ -1215,9 +1296,44 @@ class GridManager {
     }
 
     updateNodeConnections(x, y);
+    // Mini Motorways rule: neighbouring road tiles are always one network.
+    // Until now an edge only existed between cells drawn in the SAME drag,
+    // so two roads placed side by side in separate gestures (or a road drawn
+    // up to a driveway stub) never joined.
+    if (finalType == CellType.road) {
+      _autoConnectNeighbours(x, y);
+    }
     // _resolveConnectivity(x, y); // Removed to ensure no side-effect reverts
     onTopologyChanged?.call(); // [NEW] Notify path cache invalidation
     return true;
+  }
+
+  /// Join a plain road tile to every plain road / signal tile next to it.
+  /// Tunnels, bridges, smart junctions, express lanes and one-way roads keep
+  /// their own stricter connection rules and are left alone.
+  void _autoConnectNeighbours(int x, int y) {
+    const offsets = [
+      [0, -1],
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+    ];
+    final self = grid[y][x];
+    if (self.isExpressLane || self.isOneWay) return;
+    for (final o in offsets) {
+      final nx = x + o[0];
+      final ny = y + o[1];
+      if (!isValid(nx, ny)) continue;
+      final n = grid[ny][nx];
+      final plainRoad =
+          n.type == CellType.road || n.type == CellType.trafficLight;
+      if (!plainRoad || n.isPendingDeletion) continue;
+      if (n.isExpressLane || n.isOneWay) continue;
+      if (hasEdge(x, y, nx, ny)) continue;
+      addEdge(x, y, nx, ny);
+      updateNodeConnections(nx, ny);
+    }
+    updateNodeConnections(x, y);
   }
 
   bool placeTunnel(int x, int y, {bool isExtension = false, bool consumeRoad = false, GridPosition? from, InfrastructureOwner owner = InfrastructureOwner.player}) {
@@ -2066,6 +2182,21 @@ class GridManager {
     
     destinations.add(pos);
     infrastructure.add(pos); // [FIX] Add to infrastructure for rendering
+
+    // The rest of the 2x2 block: blocking cells that point back at the
+    // anchor. Callers validate the footprint first
+    // (isDestinationFootprintFree); this only skips cells off the grid.
+    for (final part in destinationFootprint(pos, entrySide)) {
+      if ((part.x == x && part.y == y) || !isValid(part.x, part.y)) continue;
+      houses.removeWhere((p) => p.x == part.x && p.y == part.y);
+      houseCarTimers.remove(_key(part));
+      grid[part.y][part.x] = GridCell(
+        type: CellType.destination,
+        colorIndex: colorIndex,
+        partOf: pos,
+      );
+      if (!infrastructure.contains(part)) infrastructure.add(part);
+    }
 
     // Start at 0 demand and pre-load the demand timer so the first +1 fires
     // ~4s later. Without this, a brand-new destination shows a demand pip the

@@ -118,6 +118,12 @@ class GridRenderer extends PositionComponent
   //   - car_component.dart's `_maxSafeLaneOffsetMagnitude` surfaceHalfWidth
   //     constants (must equal the new half-widths or the lane-separation
   //     fix from earlier today silently loses most of its benefit)
+  final Paint _drivewayOutlinePaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt;
+  final Paint _drivewayPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt;
   final Paint _roadOutlinePaint = Paint()
     ..color = const Color(0xFF14161B)
     ..strokeWidth = GameConstants.cellSize * 0.76
@@ -298,10 +304,10 @@ class GridRenderer extends PositionComponent
     _drawChunks(canvas);
 
     // [TIME OF DAY] Ambient day/night overlay drawn over static terrain and buildings
-    _drawAmbientTimeOfDay(canvas);
+    if (GameConstants.ambientTimeOfDayTint) _drawAmbientTimeOfDay(canvas);
 
     // Tier 3: Per-Frame Overlay (Demand, Previews, Selection Highlights)
-    _drawParkingHighlights(canvas);
+    if (GameConstants.parkingHighlights) _drawParkingHighlights(canvas);
     _drawDemandIndicators(canvas);
     _drawExpressLanePreview(canvas);
     _drawRoadPreview(canvas);
@@ -726,6 +732,9 @@ class GridRenderer extends PositionComponent
     int maxY,
   ) {
     final roadPath = Path();
+    // Building driveway necks: drawn narrower than the road so a house
+    // (0.6 of a tile) covers them cleanly — Mini Motorways' little nub.
+    final drivewayPath = Path();
     final dirtRoadPath = Path();
     final tunnelPath = Path();
     final bridgePath = Path();
@@ -776,8 +785,8 @@ class GridRenderer extends PositionComponent
                 ey = midY;
               }
 
-              roadPath.moveTo(sx, sy);
-              roadPath.lineTo(ex, ey);
+              drivewayPath.moveTo(sx, sy);
+              drivewayPath.lineTo(ex, ey);
             }
           }
           continue;
@@ -878,6 +887,14 @@ class GridRenderer extends PositionComponent
     _roadPaint.strokeCap = StrokeCap.round;
     canvas.drawPath(roadPath, _roadOutlinePaint);
     canvas.drawPath(roadPath, _roadPaint);
+    _drivewayOutlinePaint
+      ..color = _roadOutlinePaint.color
+      ..strokeWidth = cellSize * 0.50;
+    _drivewayPaint
+      ..color = _roadPaint.color
+      ..strokeWidth = cellSize * 0.38;
+    canvas.drawPath(drivewayPath, _drivewayOutlinePaint);
+    canvas.drawPath(drivewayPath, _drivewayPaint);
 
     _tunnelOutlinePaint.strokeCap = StrokeCap.round;
     _tunnelPaint.strokeCap = StrokeCap.round;
@@ -1048,7 +1065,10 @@ class GridRenderer extends PositionComponent
         : -1.0;
     final arcHeight = length * 0.15 * perpSign;
     final mid = Offset((o1.dx + o2.dx) / 2, (o1.dy + o2.dy) / 2);
-    final cp = Offset(mid.dx + perp.dx * arcHeight, mid.dy + perp.dy * arcHeight);
+    final cp = Offset(
+      mid.dx + perp.dx * arcHeight,
+      mid.dy + perp.dy * arcHeight,
+    );
 
     final minX = math.min(o1.dx, math.min(o2.dx, cp.dx));
     final maxX = math.max(o1.dx, math.max(o2.dx, cp.dx));
@@ -1233,9 +1253,13 @@ class GridRenderer extends PositionComponent
     // 0.60 outline width). The ring extends into adjacent cells, covering
     // road stubs cleanly.
     const ringHalfThickness = 0.38; // (0.76 outline width) / 2
-    final outerR = cellSize * (0.75 + ringHalfThickness); // 1.13: asphalt outer edge
-    final innerR = cellSize * (0.75 - ringHalfThickness); // 0.37: center island boundary
-    final glowR = cellSize * 1.18; // barely-visible ambient glow ring (outerR + 0.05, same margin as before)
+    final outerR =
+        cellSize * (0.75 + ringHalfThickness); // 1.13: asphalt outer edge
+    final innerR =
+        cellSize * (0.75 - ringHalfThickness); // 0.37: center island boundary
+    final glowR =
+        cellSize *
+        1.18; // barely-visible ambient glow ring (outerR + 0.05, same margin as before)
 
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
@@ -1310,11 +1334,14 @@ class GridRenderer extends PositionComponent
   }
 
   void _drawBuildings(Canvas canvas, int minX, int minY, int maxX, int maxY) {
-    for (int x = minX; x < maxX; x++) {
-      for (int y = minY; y < maxY; y++) {
+    // Start one cell early: a 2x2 destination anchored just outside this
+    // chunk still has part cells inside it (the chunk clip trims the rest).
+    for (int x = minX - 1; x < maxX; x++) {
+      for (int y = minY - 1; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
-        if (!cell.isHouse && !cell.isDestination) continue;
+        if (!cell.isHouse && !cell.isDestinationAnchor) continue;
+        if (cell.isHouse && (x < minX || y < minY)) continue;
 
         final cx = offsetX + x * cellSize + cellSize / 2;
         final cy = offsetY + y * cellSize + cellSize / 2;
@@ -1340,104 +1367,25 @@ class GridRenderer extends PositionComponent
             connectedEntrySide,
           );
         } else {
+          final entry = cell.entrySide!;
+          final ext = GridManager.destinationExtent(entry);
+          final n = GameConstants.destinationFootprintSize;
+          // Centre of the whole block, not of the anchor cell.
+          final bx = cx + ext.x * cellSize * (n - 1) / 2;
+          final by = cy + ext.y * cellSize * (n - 1) / 2;
           _drawDestination(
             canvas,
-            cx,
-            cy,
+            bx,
+            by,
             color,
-            cell.entrySide!,
-            BuildingProfile.commercial.renderScale,
+            entry,
+            BuildingProfile.commercial.renderScale * n,
             districtType,
             x,
             y,
           );
         }
       }
-    }
-  }
-
-  void _drawMapSpecificBuildingDetails(Canvas canvas, Rect bRect, double size) {
-    switch (game.selectedMapType) {
-      case MapType.arctic:
-        // Snowy roof cap
-        final snowCapPaint = Paint()..color = const Color(0xFFF0F8FF);
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(
-              bRect.left + 1,
-              bRect.top + 1,
-              bRect.width - 2,
-              bRect.height * 0.4,
-            ),
-            Radius.circular(size * 0.08),
-          ),
-          snowCapPaint,
-        );
-        break;
-      case MapType.savanna:
-        // Thatch roof diagonal straws
-        final thatchPaint = Paint()
-          ..color = const Color(0xFFC0A477).withValues(alpha: 0.85)
-          ..strokeWidth = 1.0
-          ..style = PaintingStyle.stroke;
-        canvas.drawLine(
-          Offset(bRect.left + 3, bRect.top + 2),
-          Offset(bRect.left + 6, bRect.top + 6),
-          thatchPaint,
-        );
-        canvas.drawLine(
-          Offset(bRect.left + bRect.width / 2, bRect.top + 2),
-          Offset(bRect.left + bRect.width / 2 + 3, bRect.top + 6),
-          thatchPaint,
-        );
-        canvas.drawLine(
-          Offset(bRect.right - 6, bRect.top + 2),
-          Offset(bRect.right - 3, bRect.top + 6),
-          thatchPaint,
-        );
-        break;
-      case MapType.delta:
-        // Ivy/mossy details on corners
-        final mossPaint = Paint()..color = const Color(0xAA4CAF50);
-        canvas.drawCircle(
-          Offset(bRect.left + 2, bRect.bottom - 2),
-          2.0,
-          mossPaint,
-        );
-        canvas.drawCircle(
-          Offset(bRect.right - 2, bRect.bottom - 2),
-          1.5,
-          mossPaint,
-        );
-        canvas.drawCircle(
-          Offset(bRect.left + 2, bRect.top + 2),
-          1.0,
-          mossPaint,
-        );
-        break;
-      case MapType.andes:
-        // Stone details/slate texture
-        final stonePaint = Paint()
-          ..color = const Color(0xFF8D6E63).withValues(alpha: 0.5)
-          ..strokeWidth = 1.0;
-        canvas.drawRect(
-          Rect.fromLTWH(bRect.right - 3, bRect.top - 2, 2, 4),
-          stonePaint,
-        );
-        break;
-      case MapType.nile:
-        // Clay dome roof accent
-        final domePaint = Paint()..color = const Color(0xFFD7CCC8);
-        canvas.drawArc(
-          Rect.fromLTWH(bRect.left + bRect.width / 2 - 3, bRect.top - 2, 6, 4),
-          0,
-          math.pi,
-          true,
-          domePaint,
-        );
-        break;
-      default:
-        break;
     }
   }
 
@@ -1500,104 +1448,32 @@ class GridRenderer extends PositionComponent
     // method's per-neighbor evenOdd clip) is applied here from the opposite
     // side: instead of clipping the road out of the building's tile, the
     // building is grown to meet the road exactly where it actually arrives.
-    if (entrySide != null) {
-      // Half-width of the road's dark outline stroke (cellSize * 0.76 / 2),
-      // plus a small safety margin, so the lobe is guaranteed wider than
-      // anything the road can paint -- see the outline strokeWidth comment
-      // above _roadOutlinePaint for why 0.76 is the number to beat.
-      final lobeHalfWidth = cellSize * 0.40;
-      // How close the lobe comes to the tile edge -- deliberately short of
-      // the true edge (cellSize * 0.5) by the same small margin every other
-      // near-edge surface in this renderer leaves (see the destination
-      // lot's lotMaxScale comment), so adjacent tiles never visually touch.
-      final lobeReach = cellSize * 0.42;
-
-      final Rect lobeRect;
-      switch (entrySide) {
-        case Direction.north:
-          lobeRect = Rect.fromLTRB(
-            cx - lobeHalfWidth,
-            cy - lobeReach,
-            cx + lobeHalfWidth,
-            cy,
-          );
-          break;
-        case Direction.south:
-          lobeRect = Rect.fromLTRB(
-            cx - lobeHalfWidth,
-            cy,
-            cx + lobeHalfWidth,
-            cy + lobeReach,
-          );
-          break;
-        case Direction.east:
-          lobeRect = Rect.fromLTRB(
-            cx,
-            cy - lobeHalfWidth,
-            cx + lobeReach,
-            cy + lobeHalfWidth,
-          );
-          break;
-        case Direction.west:
-          lobeRect = Rect.fromLTRB(
-            cx - lobeReach,
-            cy - lobeHalfWidth,
-            cx,
-            cy + lobeHalfWidth,
-          );
-          break;
-      }
-
-      // Union of the house square and the lobe, as a single Path, so the
-      // shadow/fill below reads as one shape (no seam / no double-shadow at
-      // the join).
-      final housePath = Path()
-        ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(size * 0.2)));
-      final lobePath = Path()
-        ..addRRect(RRect.fromRectAndRadius(lobeRect, Radius.circular(size * 0.15)));
-      final bodyPath = Path.combine(PathOperation.union, housePath, lobePath);
-
-      // Shadow — flat offset (no blur) for cheap mobile rasterization.
-      canvas.drawPath(
-        bodyPath.shift(const Offset(0, 2)),
-        Paint()..color = Colors.black26,
-      );
-      // Body
-      canvas.drawPath(bodyPath, Paint()..color = color);
-    } else {
-      // No known entry side (shouldn't normally happen for a placed house,
-      // but the grid model allows entrySide to be null) -- fall back to the
-      // plain square with no lobe and no patch. Matches pre-lobe behavior.
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          rect.shift(const Offset(0, 2)),
-          Radius.circular(size * 0.2),
-        ),
-        Paint()..color = Colors.black26,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, Radius.circular(size * 0.2)),
-        Paint()..color = color,
-      );
-    }
-
-    // Roof highlight — stays on the original square only (not the lobe), so
-    // it keeps reading as the roof of the main house body.
+    // Plain rounded square with its thickness band. The driveway neck is
+    // drawn narrower than the house (see _drawRoadsAndExpressLanes), so
+    // nothing pokes out past the body and no lobe/patch is needed.
+    final radius = Radius.circular(size * 0.25);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(rect.left + 2, rect.top + 2, size - 4, size * 0.3),
-        Radius.circular(size * 0.1),
-      ),
-      Paint()..color = Colors.white24,
+      RRect.fromRectAndRadius(rect.shift(Offset(0, size * 0.10)), radius),
+      Paint()..color = _bevelShade(color),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, radius),
+      Paint()..color = color,
     );
 
-    // [NEW] Map-specific building details
-    _drawMapSpecificBuildingDetails(canvas, rect, size);
-
-    // [NEW] District Markers (Requested: Dots/Trucks)
-    _drawBuildingMarkers(canvas, cx, cy, size, districtType);
+    // Mini Motorways houses are one flat block of colour: no roof stripe,
+    // no per-map trim, no district glyph. The colour does the talking.
   }
 
+  /// Darker same-hue shade used for the "thickness" band under a building.
+  static Color _bevelShade(Color c) =>
+      Color.lerp(c, const Color(0xFF14161B), GameConstants.buildingBevelMix)!;
+
+  /// Mini Motorways shop: a soft lot card (no outline, one gentle shadow),
+  /// the driveway blending into it, and a smaller coloured shape sitting in
+  /// the middle with a darker band underneath for thickness. Called with the
+  /// CENTRE of the 2x2 block and a scale that already includes the footprint
+  /// size; [gridX]/[gridY] are the anchor cell.
   void _drawDestination(
     Canvas canvas,
     double cx,
@@ -1610,40 +1486,12 @@ class GridRenderer extends PositionComponent
     int gridY,
   ) {
     final size = cellSize * scale;
-
-    // [CHECKED 2026-09-01] Does the destination's lot need the same
-    // "generous margin except tight/flush at the stub" treatment just given
-    // to `_drawHouse`? No -- verified, not just assumed: `lotRect` below is
-    // a uniform square around the building regardless of `entry`, but even
-    // at the SMALLEST it ever gets (freshly placed, `lotMinScale` = 0.95, so
-    // half-width = 0.95 * 0.90 * cellSize / 2 = 0.4275 * cellSize) it is
-    // already wider than the road outline's own half-width (0.76 * cellSize
-    // / 2 = 0.38 * cellSize) that can bleed into this tile -- a 0.0475 *
-    // cellSize margin to spare at every maturity stage, not just once fully
-    // grown. And unlike the house's small square body, the lot is already
-    // the same road-surface color/style as the driveway itself, so even
-    // that margin bleeding onto the lot would blend in, not stand out. So
-    // there's no bleed bug here to fix. A direction-aware (asymmetric)
-    // lot shape purely for the "tight at the stub, open elsewhere" AESTHETIC
-    // the house now has would be a bigger, purely cosmetic redesign of a
-    // shape that's tuned by several prior commits (parking-lot growth
-    // animation, stall-tick layout, outline treatment) -- left as-is rather
-    // than risked without visual verification; a good candidate for a
-    // follow-up if the house's new asymmetric look is confirmed and the
-    // team wants the two building types to match stylistically.
-    //
-    // Maturity progress (0.0 freshly placed -> 1.0 fully mature), driven by
-    // the exact same age/maturityThresholdWeeks signal that also unlocks
-    // matureMaxDemand and the penthouse below — no separate timer.
     final age = game.gridManager?.destinationAges["$gridX,$gridY"] ?? 0;
     final maturityProgress = (age / GameConstants.maturityThresholdWeeks)
         .clamp(0.0, 1.0);
-    final isMature = maturityProgress >= 1.0;
 
-    // Foundation/Parking lot — grows with maturityProgress, like a parking
-    // lot expanding around a mall as it gets busier. Bounded by lotMaxScale
-    // (relative to `size`, itself 0.85 * cellSize) so it always stays inside
-    // this tile and never bleeds onto neighboring roads/buildings.
+    // Lot card. Grows a touch with maturity (same age signal as
+    // matureMaxDemand).
     final lotScale =
         GameConstants.lotMinScale +
         (GameConstants.lotMaxScale - GameConstants.lotMinScale) *
@@ -1654,263 +1502,62 @@ class GridRenderer extends PositionComponent
       width: lotSize,
       height: lotSize,
     );
-    // [FIX] Two prior rounds only enlarged lotMinScale/lotMaxScale, on the
-    // (correct but incomplete) theory that the lot was too small. It never
-    // was: at cellSize=40 the freshly-placed margin (lotMinScale 0.95) is
-    // already ~1.4px/side in world units, and every OTHER paved surface on
-    // this map (roads, the smart-junction ring, bridges) reads as clearly
-    // visible not because of size but because they're all drawn with the
-    // same double-pass technique — a dark 0xFF14161B outline under/around
-    // the colored fill (see _roadOutlinePaint/_roadPaint above, and the
-    // building body's own stroke a few lines below in this method). This
-    // lot rect was the one paved surface drawn as a bare flat fill with no
-    // border at all, so on warm dark palettes where roadColor (a cool
-    // blue-gray, 0xFF5F6572) sits closer in luminance to the map's own
-    // _mapBackgroundColor (e.g. Andes' warm 0xFF1E1612) than on other maps,
-    // and once the thin margin gets anti-aliased at typical camera zoom,
-    // the fill-only contrast wasn't enough for the lot to read as a
-    // distinct surface — it just looked like more empty ground around the
-    // (still clearly bordered) building. Adding the same dark-outline
-    // treatment here — not another size bump — gives the lot a crisp,
-    // zoom-independent edge so it reads as a parking apron regardless of
-    // how close roadColor happens to sit to any given map's background.
-    final lotRRect = RRect.fromRectAndRadius(
-      lotRect,
-      Radius.circular(size * 0.12),
-    );
-    canvas.drawRRect(lotRRect, Paint()..color = GameConstants.roadColor);
-    canvas.drawRRect(
-      lotRRect,
-      Paint()
-        ..color = const Color(0xFF14161B)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
+    final lotRadius = Radius.circular(lotSize * 0.16);
 
-    // Faint parking stall indicators — a couple more appear as the lot grows
-    // (2 lines when young, up to 4 once mature), still just simple ticks.
-    final parkingPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.10)
-      ..strokeWidth = 1.0;
-    final stallLength = lotSize * 0.12;
-    final stallCount = 2 + (maturityProgress * 2).round();
-    final stallSpacing = lotSize / (stallCount + 1);
-    for (int i = 0; i < stallCount; i++) {
-      final xOffset = lotRect.left + stallSpacing * (i + 1);
-      canvas.drawLine(
-        Offset(xOffset, lotRect.top + lotSize * 0.08),
-        Offset(xOffset, lotRect.top + lotSize * 0.08 + stallLength),
-        parkingPaint,
-      );
+    // Driveway tongue: the road stub stops at the tile edge, the card is
+    // inset from it — bridge the gap in road colour, lined up with the
+    // anchor cell (the driveway touches the anchor, not the block centre).
+    final ax = offsetX + gridX * cellSize + cellSize / 2;
+    final ay = offsetY + gridY * cellSize + cellSize / 2;
+    final roadW = cellSize * 0.64;
+    final reach = (size - lotSize) / 2 + cellSize * 0.10;
+    final Rect tongue;
+    switch (entry) {
+      case Direction.north:
+        tongue = Rect.fromLTWH(ax - roadW / 2, lotRect.top - reach, roadW, reach + 2);
+        break;
+      case Direction.south:
+        tongue = Rect.fromLTWH(ax - roadW / 2, lotRect.bottom - 2, roadW, reach + 2);
+        break;
+      case Direction.east:
+        tongue = Rect.fromLTWH(lotRect.right - 2, ay - roadW / 2, reach + 2, roadW);
+        break;
+      case Direction.west:
+        tongue = Rect.fromLTWH(lotRect.left - reach, ay - roadW / 2, reach + 2, roadW);
+        break;
     }
+    canvas.drawRect(tongue, Paint()..color = GameConstants.roadColor);
 
-    // Main building body (occupies the center-bottom portion of the lot).
-    // [FIX] History: was 0.72 x 0.65, which (combined with houses drawing
-    // at their full `size` with no further shrink) made destinations
-    // render SMALLER than houses despite a bigger renderScale -- raised to
-    // 0.98 x 0.92 to fix that, but that overshot: with `size` = cellSize *
-    // commercial.renderScale (now 0.90, was 0.85) and the OLD lotMinScale
-    // (0.78), a 0.98 building was actually wider than its own freshly-
-    // placed lot -- the building visibly overflowed its parking lot at
-    // low maturity. Settled on 0.78 x 0.85 together with the raised
-    // lotMinScale/lotMaxScale (see GameConstants) so the building is
-    // still clearly bigger than a house (renderScale 0.52) at every
-    // maturity stage, while staying comfortably smaller than its own lot
-    // (visible parking-lot margin all around it, growing over time) and
-    // the lot itself stays safely inside the tile (maxes out at
-    // ~0.97*cellSize).
-    final bSize = size * 0.78;
-    final bRect = Rect.fromCenter(
-      center: Offset(cx, cy + size * 0.06),
-      width: bSize,
-      height: bSize * 0.85,
-    );
-
-    // Drop shadow
+    // One soft shadow under the card, then the card itself. No outline.
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        bRect.shift(const Offset(0, 2)),
-        Radius.circular(size * 0.08),
+        lotRect.shift(Offset(0, lotSize * 0.03)),
+        lotRadius,
       ),
-      Paint()..color = Colors.black26,
+      Paint()..color = Colors.black.withValues(alpha: 0.25),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(lotRect, lotRadius),
+      Paint()..color = GameConstants.lotColor,
     );
 
-    // Main building body
+    // The shop: a rounded square of the district colour, about half the
+    // card, with its thickness band below it.
+    final bSize = lotSize * 0.50;
+    final bRect = Rect.fromCenter(
+      center: Offset(cx, cy - bSize * 0.04),
+      width: bSize,
+      height: bSize,
+    );
+    final bRadius = Radius.circular(bSize * 0.24);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(bRect, Radius.circular(size * 0.08)),
+      RRect.fromRectAndRadius(bRect.shift(Offset(0, bSize * 0.10)), bRadius),
+      Paint()..color = _bevelShade(color),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bRect, bRadius),
       Paint()..color = color,
     );
-
-    // Dark border/outline
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(bRect, Radius.circular(size * 0.08)),
-      Paint()
-        ..color = const Color(0xFF14161B)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-
-    // (age/isMature/maturityProgress already computed above for the lot)
-    if (isMature) {
-      final pWidth = bRect.width * 0.75;
-      final pHeight = bRect.height * 0.75;
-      final pRect = Rect.fromLTWH(
-        cx - pWidth / 2,
-        bRect.top - pHeight + 2,
-        pWidth,
-        pHeight,
-      );
-
-      // Drop shadow for penthouse
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          pRect.shift(const Offset(0, 1)),
-          Radius.circular(size * 0.06),
-        ),
-        Paint()..color = Colors.black12,
-      );
-
-      // Main penthouse body
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(pRect, Radius.circular(size * 0.06)),
-        Paint()..color = color,
-      );
-
-      // Dark border/outline for penthouse
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(pRect, Radius.circular(size * 0.06)),
-        Paint()
-          ..color = const Color(0xFF14161B)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2,
-      );
-
-      // Penthouse glass window
-      final pWindow = Rect.fromCenter(
-        center: Offset(cx, pRect.top + pHeight * 0.5),
-        width: pWidth * 0.4,
-        height: pHeight * 0.4,
-      );
-      canvas.drawRect(
-        pWindow,
-        Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.6),
-      );
-      canvas.drawRect(
-        pWindow,
-        Paint()
-          ..color = const Color(0xFF14161B)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.0,
-      );
-
-      // Antenna spire
-      final antennaPaint = Paint()
-        ..color = const Color(0xFF14161B)
-        ..strokeWidth = 1.5;
-      final antennaTop = pRect.top - size * 0.18;
-      canvas.drawLine(
-        Offset(cx, pRect.top),
-        Offset(cx, antennaTop),
-        antennaPaint,
-      );
-
-      // Blinking warning beacon light
-      final pulse =
-          (math.sin(DateTime.now().millisecondsSinceEpoch / 150) + 1.0) / 2.0;
-      final signalColor = Color.lerp(Colors.redAccent, Colors.red, pulse)!;
-      final signalPaint = Paint()
-        ..color = signalColor
-        ..style = PaintingStyle.fill;
-      canvas.drawCircle(Offset(cx, antennaTop), 2.0, signalPaint);
-    }
-
-    // Simple roof layer (flat highlight RRect on top half of building)
-    final roofRect = Rect.fromLTWH(
-      bRect.left + 2,
-      bRect.top + 2,
-      bRect.width - 4,
-      bRect.height * 0.35,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(roofRect, Radius.circular(size * 0.04)),
-      Paint()..color = Colors.white24,
-    );
-
-    // [NEW] Map-specific building details
-    _drawMapSpecificBuildingDetails(canvas, bRect, size);
-
-    // Simple glass double doors at the center bottom
-    final doorRect = Rect.fromCenter(
-      center: Offset(cx, bRect.bottom - bRect.height * 0.18),
-      width: bSize * 0.24,
-      height: bRect.height * 0.32,
-    );
-    canvas.drawRect(
-      doorRect,
-      Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.5),
-    );
-    canvas.drawRect(
-      doorRect,
-      Paint()
-        ..color = const Color(0xFF14161B)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0,
-    );
-
-    _drawBuildingMarkers(canvas, cx, cy, size, districtType);
-  }
-
-  void _drawBuildingMarkers(
-    Canvas canvas,
-    double cx,
-    double cy,
-    double size,
-    DistrictType type,
-  ) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.5)
-      ..style = PaintingStyle.fill;
-
-    switch (type) {
-      case DistrictType.residential:
-        // Three small dots (Residential pattern) - REMOVED for clean aesthetics
-        break;
-      case DistrictType.industrial:
-        // Simple Truck shape (Rectangle + small wheels)
-        final tw = size * 0.45;
-        final th = size * 0.25;
-        canvas.drawRect(
-          Rect.fromCenter(
-            center: Offset(cx, cy + size * 0.1),
-            width: tw,
-            height: th,
-          ),
-          paint,
-        );
-        // Cabin
-        canvas.drawRect(
-          Rect.fromLTWH(cx + tw * 0.2, cy + size * 0.05, tw * 0.25, th * 0.6),
-          paint,
-        );
-        // Small Wheels
-        canvas.drawCircle(
-          Offset(cx - tw * 0.3, cy + size * 0.25),
-          size * 0.06,
-          paint,
-        );
-        canvas.drawCircle(
-          Offset(cx + tw * 0.3, cy + size * 0.25),
-          size * 0.06,
-          paint,
-        );
-        break;
-      case DistrictType.commercial:
-        // Shop-style dots or cross - REMOVED for clean aesthetics
-        break;
-      case DistrictType.tech:
-        // Chip-style grid (4 small dots) - REMOVED for clean aesthetics
-        break;
-    }
   }
 
   // [ROAD WIDTH 2026-09-01] The opening (dark hole) width/offset below track
@@ -2279,7 +1926,10 @@ class GridRenderer extends PositionComponent
       final w = vertical ? barThickness : barLength;
       final h = vertical ? barLength : barThickness;
       final rect = Rect.fromCenter(center: Offset(cx, cy), width: w, height: h);
-      final rrect = RRect.fromRectAndRadius(rect, Radius.circular(barThickness / 2));
+      final rrect = RRect.fromRectAndRadius(
+        rect,
+        Radius.circular(barThickness / 2),
+      );
 
       if (active) {
         // Soft glow halo (flat low-alpha layer, no blur) behind the bright core.
@@ -2306,7 +1956,8 @@ class GridRenderer extends PositionComponent
       } else {
         canvas.drawRRect(
           rrect,
-          Paint()..color = GameConstants.roadColor.withValues(alpha: 0.35 * opacity),
+          Paint()
+            ..color = GameConstants.roadColor.withValues(alpha: 0.35 * opacity),
         );
       }
     }
@@ -2353,8 +2004,20 @@ class GridRenderer extends PositionComponent
       // Only draw demand if the cell at this position is still actually a destination
       if (!cell.isDestination) continue;
 
-      final cx = offsetX + pos.x * cellSize + cellSize / 2;
-      final cy = offsetY + pos.y * cellSize + cellSize / 2;
+      final fpN = GameConstants.destinationFootprintSize;
+      final ext = cell.entrySide != null
+          ? GridManager.destinationExtent(cell.entrySide!)
+          : GridPosition(0, 0);
+      final cx =
+          offsetX +
+          pos.x * cellSize +
+          cellSize / 2 +
+          ext.x * cellSize * (fpN - 1) / 2;
+      final cy =
+          offsetY +
+          pos.y * cellSize +
+          cellSize / 2 +
+          ext.y * cellSize * (fpN - 1) / 2;
       if (!viewport.contains(Offset(cx, cy))) continue;
 
       final demand = gridManager.getDemand(pos);
@@ -2371,7 +2034,7 @@ class GridRenderer extends PositionComponent
       // Draw Maturity Aura — flat alpha pulse (no blur) for mobile. Fades in
       // smoothly with maturityProgress instead of popping on at the mature
       // threshold.
-      if (maturityProgress > 0) {
+      if (GameConstants.maturityAura && maturityProgress > 0) {
         final t = game.elapsedTime * 2.0;
         final pulse = (0.5 + 0.5 * math.sin(t)).clamp(0.0, 1.0);
         final auraRadius = cellSize * (0.5 + pulse * 0.1 * maturityProgress);
@@ -2379,16 +2042,17 @@ class GridRenderer extends PositionComponent
         canvas.drawCircle(
           Offset(cx, cy),
           auraRadius,
-          Paint()..color = Colors.white.withValues(
-            alpha: (0.05 + pulse * 0.05) * maturityProgress,
-          ),
+          Paint()
+            ..color = Colors.white.withValues(
+              alpha: (0.05 + pulse * 0.05) * maturityProgress,
+            ),
         );
       }
 
       if (overflowLevel > 0) {
         // Draw Overflow Timer Circle (Big visual warning)
         final progress = overflowLevel.clamp(0.0, 1.0);
-        final radius = cellSize * 0.45;
+        final radius = cellSize * 0.45 * fpN;
 
         // Background dark circle
         canvas.drawCircle(
@@ -2459,28 +2123,8 @@ class GridRenderer extends PositionComponent
           canvas.drawPath(sandPath, Paint()..color = Colors.amberAccent);
         }
       } else {
-        // Normal pip drawing (shifted above building)
-        double indicatorY = offsetY + pos.y * cellSize - cellSize * 0.2;
-        if (isMature) {
-          // If mature, shift higher to avoid overlapping with penthouse structure & blinking beacon.
-          // [FIX] bSize/bRectHeight factors must match _drawDestination's own
-          // building-body math exactly (0.78 / 0.85, updated alongside the
-          // destination-size fix) -- this duplicate calculation existed only
-          // to derive the building's on-screen top edge for indicator
-          // placement, and had silently drifted out of sync when those
-          // factors changed, which would have positioned the indicator too
-          // low (overlapping the now-taller building).
-          final destScale = BuildingProfile.commercial.renderScale;
-          final size = cellSize * destScale;
-          final bSize = size * 0.78;
-          final bRectHeight = bSize * 0.85;
-          final cyLocal = offsetY + pos.y * cellSize + cellSize / 2;
-          final bRectTop = cyLocal + size * 0.06 - bRectHeight / 2;
-          final pHeight = bRectHeight * 0.75;
-          final pRectTop = bRectTop - pHeight + 2;
-          final antennaTop = pRectTop - size * 0.18;
-          indicatorY = antennaTop - 8.0;
-        }
+        // Pips sit just above the block.
+        final indicatorY = cy - cellSize * fpN / 2 - cellSize * 0.2;
         final pipR = cellSize * 0.06;
         final spacing = pipR * 2.5;
         final maxDemand = isMature

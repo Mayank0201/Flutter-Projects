@@ -82,6 +82,8 @@ class SaveManager {
           'hasTrafficLight': cell.hasTrafficLight,
           'speedMultiplier': cell.speedMultiplier,
           'entrySide': cell.entrySide?.index,
+          'partOfX': cell.partOf?.x,
+          'partOfY': cell.partOf?.y,
           'isInfrastructureInternal': cell.isInfrastructureInternal,
           'isConnectableEndpoint': cell.isConnectableEndpoint,
           'infrastructureAxis': cell.infrastructureAxis?.index,

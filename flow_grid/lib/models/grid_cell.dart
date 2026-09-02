@@ -71,6 +71,10 @@ class GridCell {
   final bool hasTrafficLight;
   final bool isTunnelExtension; // was: isBridgeExtension
   final Direction? entrySide;
+  /// Non-null on the three secondary cells of a 2x2 destination: points at
+  /// the anchor cell that owns the building's state. Null on the anchor
+  /// itself and on every other cell type.
+  final GridPosition? partOf;
   final MapRegion? region;
   
   final bool isReserved;
@@ -118,6 +122,7 @@ class GridCell {
     this.hasTrafficLight = false,
     this.isTunnelExtension = false,
     this.entrySide,
+    this.partOf,
     this.isReserved = false,
     this.connUp = false,
     this.connDown = false,
@@ -158,6 +163,7 @@ class GridCell {
     bool? hasTrafficLight,
     bool? isTunnelExtension,
     Direction? entrySide,
+    GridPosition? partOf,
     bool? isReserved,
     bool? connUp,
     bool? connDown,
@@ -195,6 +201,7 @@ class GridCell {
       hasTrafficLight: hasTrafficLight ?? this.hasTrafficLight,
       isTunnelExtension: isTunnelExtension ?? this.isTunnelExtension,
       entrySide: entrySide ?? this.entrySide,
+      partOf: partOf ?? this.partOf,
       isReserved: isReserved ?? this.isReserved,
       connUp: connUp ?? this.connUp,
       connDown: connDown ?? this.connDown,
@@ -231,6 +238,10 @@ class GridCell {
   bool get isRoad => type == CellType.road || type == CellType.tunnel || type == CellType.bridge || type == CellType.trafficLight;
   bool get isHouse => type == CellType.house;
   bool get isDestination => type == CellType.destination;
+  /// A secondary cell of a 2x2 destination (blocks the tile, owns no state).
+  bool get isDestinationPart => type == CellType.destination && partOf != null;
+  /// The state-owning cell of a destination (what `destinations` lists).
+  bool get isDestinationAnchor => type == CellType.destination && partOf == null;
   bool get isMountain => type == CellType.mountain;
   bool get isTunnel => type == CellType.tunnel;
   bool get isBridge => type == CellType.bridge;
