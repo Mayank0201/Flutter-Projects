@@ -165,7 +165,7 @@ class GameConstants {
     Color(0xFF6B5F6E),
   ];
   static const Color componentLeadColor = Color(0xFF9C7A4C);
-  static const double parkingCornerRadius = 0.28; // tiles, in-lot corners
+  static const double parkingCornerRadius = 0.20; // tiles, in-lot corners
   // Shop lot, measured from the anchor cell centre in tiles: positive
   // "along" is toward the road (the tongue mouth is at +0.5), "strip" runs
   // along the lot face the driveway meets. Cars come in through the tongue,

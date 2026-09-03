@@ -147,8 +147,9 @@ class GridRenderer extends PositionComponent
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt;
 
+  // Tunnel fill: the copper trace dimmed under the mountain.
   final Paint _tunnelPaint = Paint()
-    ..color = const Color(0xFF1E222A)
+    ..color = const Color(0xFF4B3B24)
     ..strokeWidth = GameConstants.cellSize * GameConstants.roadWidth
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt
@@ -776,22 +777,36 @@ class GridRenderer extends PositionComponent
           cellSize,
           cellSize,
         );
+        // Mesa: the tile union is the plateau, with a soft rounded foot
+        // around it. Adjacent tiles overlap so a cluster reads as one
+        // landform instead of a grid of buttons.
         basePath.addRRect(
           RRect.fromRectAndRadius(
-            rect.inflate(cellSize * 0.15),
+            rect.inflate(cellSize * 0.20),
             Radius.circular(cellSize * 0.45),
           ),
         );
         peaksPath.addRRect(
           RRect.fromRectAndRadius(
-            Rect.fromCenter(
-              center: rect.center.translate(0, -cellSize * 0.1),
-              width: cellSize * 0.6,
-              height: cellSize * 0.4,
-            ),
-            Radius.circular(cellSize * 0.2),
+            rect.inflate(cellSize * 0.01),
+            Radius.circular(cellSize * 0.30),
           ),
         );
+        // Where four mountain tiles meet, the rounded corners leave a small
+        // diamond gap in the plateau: fill it with a square on that corner.
+        for (final d in const [(1, 1), (1, -1), (-1, 1), (-1, -1)]) {
+          if (_isMountainAt(cell.x + d.$1, cell.y) &&
+              _isMountainAt(cell.x, cell.y + d.$2) &&
+              _isMountainAt(cell.x + d.$1, cell.y + d.$2)) {
+            final corner = Offset(
+              rect.center.dx + d.$1 * cellSize / 2,
+              rect.center.dy + d.$2 * cellSize / 2,
+            );
+            peaksPath.addRect(
+              Rect.fromCenter(center: corner, width: cellSize * 0.5, height: cellSize * 0.5),
+            );
+          }
+        }
         snowPath.addRRect(
           RRect.fromRectAndRadius(
             Rect.fromCenter(
@@ -809,8 +824,8 @@ class GridRenderer extends PositionComponent
     // Hills: darker lumps of the ground colour with a
     // slightly lighter crown, and a long shadow like the buildings cast.
     _drawLongShadow(canvas, basePath, cellSize * 0.5);
-    canvas.drawPath(basePath, Paint()..color = Colors.black.withValues(alpha: 0.28));
-    canvas.drawPath(peaksPath, Paint()..color = Colors.white.withValues(alpha: 0.05));
+    canvas.drawPath(basePath, Paint()..color = Colors.black.withValues(alpha: 0.30));
+    canvas.drawPath(peaksPath, Paint()..color = Colors.white.withValues(alpha: 0.045));
     // snowPath intentionally unused now.
     snowPath.reset();
   }
@@ -822,6 +837,9 @@ class GridRenderer extends PositionComponent
   /// paint the stub at all) and `_drawHouse` (decides whether to grow the
   /// house's own footprint to meet that stub) so the two can never disagree
   /// about whether a given side is actually connected.
+  bool _isMountainAt(int x, int y) =>
+      gridManager.isValid(x, y) && gridManager.grid[y][x].isMountain;
+
   bool _hasAdjacentRoad(int x, int y, Direction entryDir) {
     int adjX = x;
     int adjY = y;
@@ -1039,15 +1057,6 @@ class GridRenderer extends PositionComponent
       ..strokeWidth = cellSize * 0.34;
     canvas.drawPath(drivewayPath, _drivewayOutlinePaint);
     canvas.drawPath(drivewayPath, _drivewayPaint);
-    // Via pads over the trace ends and junctions: copper disc, lighter rim,
-    // dark drilled centre.
-    final viaR = cellSize * 0.30;
-    final rim = cellSize * GameConstants.roadEdge * 2;
-    for (final v in vias) {
-      canvas.drawCircle(v, viaR, Paint()..color = _roadOutlinePaint.color);
-      canvas.drawCircle(v, viaR - rim, Paint()..color = _roadPaint.color);
-      canvas.drawCircle(v, cellSize * 0.085, Paint()..color = _mapBackgroundColor);
-    }
 
     // Tunnel: the road's edges turn into a dashed line where
     // it passes under the mountain, nothing else.
@@ -1065,6 +1074,18 @@ class GridRenderer extends PositionComponent
     _bridgePaint.strokeCap = StrokeCap.round;
     canvas.drawPath(bridgePath, _bridgeOutlinePaint);
     canvas.drawPath(bridgePath, _bridgePaint);
+    // Redraw the trace fill so the bridge outline round cap does not show
+    // as a seam inside the copper at the shore joint, then the via pads.
+    canvas.drawPath(roadPath, _roadPaint);
+    // Via pads over the trace ends and junctions: copper disc, lighter rim,
+    // dark drilled centre.
+    final viaR = cellSize * 0.30;
+    final rim = cellSize * GameConstants.roadEdge * 2;
+    for (final v in vias) {
+      canvas.drawCircle(v, viaR, Paint()..color = _roadOutlinePaint.color);
+      canvas.drawCircle(v, viaR - rim, Paint()..color = _roadPaint.color);
+      canvas.drawCircle(v, cellSize * 0.085, Paint()..color = _mapBackgroundColor);
+    }
 
     _iceRoadOutlinePaint.strokeCap = StrokeCap.round;
     _iceRoadPaint.strokeCap = StrokeCap.round;
