@@ -142,6 +142,28 @@ class GameConstants {
   static const Color buildingShadowColor = Color(0x38000000);
   static const double buildingShadowLength = 0.9; // in building sizes
 
+  // Parking. A house keeps two cars nose-in on a small pavement apron in
+  // front of its block; a shop has two painted stalls. Cars drive a short
+  // spur on and off the spot (no teleport), fade their lane offset to zero
+  // over that spur so they land exactly on it, and pivot in place when
+  // they set off again.
+  static const int homeParkingSlots = 2;
+  static const double houseBlockBackShift = 0.12; // tiles, away from the road
+  static const double houseBlockScale = 0.85; // of the residential renderScale
+  static const double homeParkingAlong = 0.30; // tiles from the house centre
+  static const double homeParkingLateral = 0.115; // tiles off the driveway axis
+  static const double parkingLaneFadeTiles = 1.0;
+  static const double parkingCornerRadius = 0.28; // tiles, in-lot corners
+  // Shop lot, measured from the anchor cell centre in tiles: positive
+  // "along" is toward the road (the tongue mouth is at +0.5), "strip" runs
+  // along the lot face the driveway meets. Cars come in through the tongue,
+  // drive the corridor, and turn into a bay nose toward the block.
+  static const double shopCorridorAlong = 0.28;
+  static const double shopBayAlong = -0.07;
+  static const double shopBayFirst = 0.55; // strip offset of bay 0
+  static const double shopBayPitch = 0.48; // bay 1 is one pitch further
+  static const double carPivotRate = 20.0; // rad/s, max heading change
+
   // Mountain colors (replaces water)
   static const Color mountainColor = Color(0xFF2F4A44); // Dark teal-green rock
   static const Color mountainHighlightColor = Color(0xFF3E5E56); // Lighter crown

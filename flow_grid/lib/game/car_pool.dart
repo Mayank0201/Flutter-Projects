@@ -14,6 +14,8 @@ class CarPool {
     double offsetY = 0,
     VehicleType vehicleType = VehicleType.car,
     String? routeId,
+    int homeSlot = 0,
+    int stallSlot = 0,
   }) {
     if (_availableCars.isNotEmpty) {
       final car = _availableCars.removeLast();
@@ -24,6 +26,8 @@ class CarPool {
         targetDest: targetDest,
         vehicleType: vehicleType,
         routeId: routeId,
+        homeSlot: homeSlot,
+        stallSlot: stallSlot,
       );
       return car;
     } else {
@@ -37,6 +41,8 @@ class CarPool {
         offsetY: offsetY,
         vehicleType: vehicleType,
         routeId: routeId,
+        homeSlot: homeSlot,
+        stallSlot: stallSlot,
       );
     }
   }

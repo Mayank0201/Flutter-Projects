@@ -1037,6 +1037,8 @@ class FlowGridGame extends FlameGame
                 cellSize: cellSize,
                 offsetX: boardOffsetX,
                 offsetY: boardOffsetY,
+                homeSlot: _freeHomeSlot(housePos),
+                stallSlot: _freeStallSlot(dest),
               );
               _cars.add(car);
               world.add(car);
@@ -1053,6 +1055,39 @@ class FlowGridGame extends FlameGame
       }
       gridManager!.setHouseCarTimer(housePos, timer);
     }
+  }
+
+  /// Lowest home parking slot no car from [house] is currently using, so
+  /// the car that leaves is the one drawn in that bay and the other stays
+  /// put. With every slot out, cycle (the renderer then shows an empty
+  /// apron).
+  int _freeHomeSlot(GridPosition house) {
+    final used = <int>{};
+    for (final c in _cars) {
+      if (c.arrived) continue;
+      if (c.spawnHousePos.x == house.x && c.spawnHousePos.y == house.y) {
+        used.add(c.homeSlot);
+      }
+    }
+    for (int s = 0; s < GameConstants.homeParkingSlots; s++) {
+      if (!used.contains(s)) return s;
+    }
+    return used.length % GameConstants.homeParkingSlots;
+  }
+
+  /// Lowest shop stall no outbound car heading to [dest] has claimed.
+  int _freeStallSlot(GridPosition dest) {
+    final used = <int>{};
+    for (final c in _cars) {
+      if (c.arrived || c.isReturning) continue;
+      if (c.targetDest.x == dest.x && c.targetDest.y == dest.y) {
+        used.add(c.stallSlot);
+      }
+    }
+    for (int s = 0; s < 2; s++) {
+      if (!used.contains(s)) return s;
+    }
+    return used.length % 2;
   }
 
   GridPosition? _findDestination(GridPosition housePos) {

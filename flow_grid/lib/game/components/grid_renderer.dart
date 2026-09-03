@@ -404,37 +404,47 @@ class GridRenderer extends PositionComponent
     final sprites = game.vehicleSprites;
     if (sprites.isEmpty) return;
     final viewport = game.camera.visibleWorldRect.inflate(cellSize);
-    final out = <String>{};
+    // Slots currently out on a trip, per house.
+    final out = <String, Set<int>>{};
     for (final car in game.cars) {
       if (car.arrived) continue;
-      out.add('${car.spawnHousePos.x},${car.spawnHousePos.y}');
+      out
+          .putIfAbsent(
+            '${car.spawnHousePos.x},${car.spawnHousePos.y}',
+            () => <int>{},
+          )
+          .add(car.homeSlot);
     }
     final length = cellSize * 0.34;
     final width = length / game.vehicleSpriteAspect;
     for (final house in gridManager.houses) {
-      if (out.contains('${house.x},${house.y}')) continue;
-      final spot = CarComponent.homeParkingSpot(
-        gridManager,
-        house,
-        cellSize,
-        offsetX,
-        offsetY,
-      );
-      if (spot == null) continue;
-      final p = Offset(spot.$1.x, spot.$1.y);
-      if (!viewport.contains(p)) continue;
+      final taken = out['${house.x},${house.y}'] ?? const <int>{};
       final cell = gridManager.grid[house.y][house.x];
       final sprite = sprites[(cell.colorIndex ?? 0) % sprites.length];
-      canvas.save();
-      canvas.translate(p.dx, p.dy);
-      canvas.rotate(spot.$2 + math.pi / 2);
-      sprite.render(
-        canvas,
-        position: Vector2(-width / 2, -length / 2),
-        size: Vector2(width, length),
-        overridePaint: _parkedCarPaint,
-      );
-      canvas.restore();
+      for (int slot = 0; slot < GameConstants.homeParkingSlots; slot++) {
+        if (taken.contains(slot)) continue;
+        final spot = CarComponent.homeParkingSpot(
+          gridManager,
+          house,
+          cellSize,
+          offsetX,
+          offsetY,
+          slot,
+        );
+        if (spot == null) continue;
+        final p = Offset(spot.$1.x, spot.$1.y);
+        if (!viewport.contains(p)) continue;
+        canvas.save();
+        canvas.translate(p.dx, p.dy);
+        canvas.rotate(spot.$2 + math.pi / 2);
+        sprite.render(
+          canvas,
+          position: Vector2(-width / 2, -length / 2),
+          size: Vector2(width, length),
+          overridePaint: _parkedCarPaint,
+        );
+        canvas.restore();
+      }
     }
   }
 
@@ -877,7 +887,9 @@ class GridRenderer extends PositionComponent
         final midY = cy + cellSize / 2;
 
         if (cell.isHouse || cell.isDestination) {
-          final entryDir = cell.entrySide;
+          // Houses get a full-width apron from _drawHouse; only shops
+          // need the narrow neck.
+          final entryDir = cell.isHouse ? null : cell.entrySide;
           if (entryDir != null) {
             if (_hasAdjacentRoad(x, y, entryDir)) {
               double sx = midX;
@@ -1474,11 +1486,6 @@ class GridRenderer extends PositionComponent
         );
 
         if (cell.isHouse) {
-          final entrySide = cell.entrySide;
-          final connectedEntrySide =
-              (entrySide != null && _hasAdjacentRoad(x, y, entrySide))
-              ? entrySide
-              : null;
           _drawHouse(
             canvas,
             cx,
@@ -1486,7 +1493,7 @@ class GridRenderer extends PositionComponent
             color,
             BuildingProfile.residential.renderScale,
             districtType,
-            connectedEntrySide,
+            cell.entrySide,
           );
         } else {
           final entry = cell.entrySide!;
@@ -1554,13 +1561,61 @@ class GridRenderer extends PositionComponent
     DistrictType districtType,
     Direction? entrySide,
   ) {
-    final size = cellSize * scale;
-    final rect = Rect.fromCenter(center: Offset(cx, cy), width: size, height: size);
+    final size = cellSize * scale * GameConstants.houseBlockScale;
+    double bx = cx;
+    double by = cy;
+    if (entrySide != null) {
+      // Block sits at the back of its tile; a pavement apron exactly one
+      // road wide runs from the block face to the tile edge, where it meets
+      // the driveway stub. The house's two cars park on it
+      // (CarComponent.homeParkingSpot).
+      final e = _dirOffset(entrySide);
+      final shift = cellSize * GameConstants.houseBlockBackShift;
+      bx = cx - e.dx * shift;
+      by = cy - e.dy * shift;
+      final halfW = cellSize * GameConstants.roadWidth / 2;
+      final edge = cellSize * GameConstants.roadEdge;
+      final a0 = size / 2 - shift - cellSize * 0.06; // tucked under the block
+      final a1 = cellSize / 2; // tile edge
+      // Rectangle [from]..[to] along the entry axis, [hw] half-wide across.
+      Rect apron(double hw, double from, double to) {
+        if (e.dx != 0) {
+          final x0 = cx + e.dx * from;
+          final x1 = cx + e.dx * to;
+          return Rect.fromLTRB(math.min(x0, x1), cy - hw, math.max(x0, x1), cy + hw);
+        }
+        final y0 = cy + e.dy * from;
+        final y1 = cy + e.dy * to;
+        return Rect.fromLTRB(cx - hw, math.min(y0, y1), cx + hw, math.max(y0, y1));
+      }
+      canvas.drawRect(
+        apron(halfW + edge, a0, a1),
+        Paint()..color = GameConstants.roadEdgeColor,
+      );
+      canvas.drawRect(
+        apron(halfW, a0, a1 + cellSize * 0.03),
+        Paint()..color = GameConstants.roadColor,
+      );
+    }
+    final rect = Rect.fromCenter(center: Offset(bx, by), width: size, height: size);
     final idx = GameConstants.buildingColors.indexOf(color);
     final side = idx >= 0
         ? GameConstants.getBuildingDarkColor(idx)
         : _bevelShade(color);
     _drawBlock(canvas, rect, size * 0.22, color, side);
+  }
+
+  static Offset _dirOffset(Direction d) {
+    switch (d) {
+      case Direction.north:
+        return const Offset(0, -1);
+      case Direction.south:
+        return const Offset(0, 1);
+      case Direction.east:
+        return const Offset(1, 0);
+      case Direction.west:
+        return const Offset(-1, 0);
+    }
   }
 
   /// Darker same-hue shade used for the "thickness" band under a building.
@@ -1651,8 +1706,10 @@ class GridRenderer extends PositionComponent
     // The block sits toward the far corner from the driveway so the tarmac
     // in front of it stays open, like a real forecourt.
     final ext = GridManager.destinationExtent(entry);
-    final bSize = lotSize * 0.56;
-    final shift = lotSize * 0.09;
+    // Block pushed to the far corner, leaving a strip on the entry side
+    // wide enough for two bays plus the corridor cars use to reach them.
+    final bSize = lotSize * 0.50;
+    final shift = lotSize * 0.12;
     final bRect = Rect.fromCenter(
       center: Offset(cx + ext.x * shift, cy + ext.y * shift),
       width: bSize,
@@ -1669,22 +1726,17 @@ class GridRenderer extends PositionComponent
       ..color = GameConstants.roadEdgeColor.withValues(alpha: 0.6)
       ..strokeWidth = cellSize * 0.04
       ..strokeCap = StrokeCap.round;
-    final vertical = entry == Direction.north || entry == Direction.south;
-    final s0 = CarComponent.stallCenter(cx, cy, lotSize, entry, ext, 0);
-    final s1 = CarComponent.stallCenter(cx, cy, lotSize, entry, ext, 1);
-    final halfW = lotSize * 0.135; // half the stall pitch
-    final len = cellSize * 0.40; // stall line length
-    final lines = <Offset>[
-      Offset(s0.dx - (vertical ? halfW : 0), s0.dy - (vertical ? 0 : halfW)),
-      Offset(s0.dx + (vertical ? halfW : 0), s0.dy + (vertical ? 0 : halfW)),
-      Offset(s1.dx + (vertical ? halfW : 0), s1.dy + (vertical ? 0 : halfW)),
-    ];
-    for (final o in lines) {
-      if (vertical) {
-        canvas.drawLine(Offset(o.dx, o.dy - len / 2), Offset(o.dx, o.dy + len / 2), stallPaint);
-      } else {
-        canvas.drawLine(Offset(o.dx - len / 2, o.dy), Offset(o.dx + len / 2, o.dy), stallPaint);
-      }
+    // Bay lines: three strokes along the entry axis dividing the strip
+    // into the two bays cars pull into (CarComponent.stallFor).
+    final len = cellSize * 0.42;
+    final half = GameConstants.shopBayPitch / 2;
+    for (int k = 0; k < 3; k++) {
+      final strip = CarComponent.bayStrip(0) - half + k * GameConstants.shopBayPitch;
+      final a = CarComponent.shopPoint(gridX, gridY, entry, cellSize, offsetX, offsetY,
+          GameConstants.shopBayAlong - 0.5 * len / cellSize, strip);
+      final b = CarComponent.shopPoint(gridX, gridY, entry, cellSize, offsetX, offsetY,
+          GameConstants.shopBayAlong + 0.5 * len / cellSize, strip);
+      canvas.drawLine(a, b, stallPaint);
     }
 
     _drawBlock(canvas, bRect, bSize * 0.14, color, side);

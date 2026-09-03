@@ -41,6 +41,15 @@ class CarComponent extends PositionComponent
   bool arrived = false;
   bool isReturning = false;
   bool isWaiting = false;
+  /// Parking slot at home (0 or 1) held for the whole round trip, and the
+  /// shop stall this trip pulls into. Assigned by the spawner.
+  int homeSlot;
+  int stallSlot;
+  bool _fadeLaneAtStart = false;
+  bool _fadeLaneAtEnd = false;
+  // Real frame dt: _updatePosition gets dt pre-scaled by the speed ramp,
+  // which must not slow the in-place pivot.
+  double _frameDt = 0.0;
   double _waitTimer = 0.0;
   bool onExpressLane = false;
   double travelTime = 0.0;
@@ -122,6 +131,8 @@ class CarComponent extends PositionComponent
     this.speed = GameConstants.carSpeed,
     this.vehicleType = VehicleType.car,
     this.routeId,
+    this.homeSlot = 0,
+    this.stallSlot = 0,
     int? initialPathIndex,
     double? initialProgress,
     bool? initialReturning,
@@ -222,12 +233,16 @@ class CarComponent extends PositionComponent
       final tangent = _metric?.getTangentForOffset(_distanceTraveled);
       if (tangent != null) {
         final fwd = tangent.vector;
-        final lane = _safeLaneOffset();
+        final lane = _safeLaneOffset() * _laneFade(_distanceTraveled);
         position = Vector2(
           tangent.position.dx - fwd.dy * lane,
           tangent.position.dy + fwd.dx * lane,
         );
-        angle = -tangent.angle;
+        // A car setting off from its parking spot starts facing the
+        // building (how it parked) and pivots toward the road in update.
+        angle = _fadeLaneAtStart && _distanceTraveled == 0
+            ? _parkedHeading(0)
+            : -tangent.angle;
       }
     } else if (path.isNotEmpty) {
       final startPos = path[0];
@@ -443,6 +458,8 @@ class CarComponent extends PositionComponent
     required GridPosition targetDest,
     required VehicleType vehicleType,
     String? routeId,
+    int homeSlot = 0,
+    int stallSlot = 0,
   }) {
     this.path = path;
     this.colorIndex = colorIndex;
@@ -450,6 +467,8 @@ class CarComponent extends PositionComponent
     this.targetDest = targetDest;
     this.vehicleType = vehicleType;
     this.routeId = routeId;
+    this.homeSlot = homeSlot;
+    this.stallSlot = stallSlot;
 
     _currentPathIndex = 0;
     _distanceTraveled = 0;
@@ -486,12 +505,16 @@ class CarComponent extends PositionComponent
       final tangent = _metric?.getTangentForOffset(0);
       if (tangent != null) {
         final fwd = tangent.vector;
-        final lane = _safeLaneOffset();
+        final lane = _safeLaneOffset() * _laneFade(_distanceTraveled);
         position = Vector2(
           tangent.position.dx - fwd.dy * lane,
           tangent.position.dy + fwd.dx * lane,
         );
-        angle = -tangent.angle;
+        // A car setting off from its parking spot starts facing the
+        // building (how it parked) and pivots toward the road in update.
+        angle = _fadeLaneAtStart && _distanceTraveled == 0
+            ? _parkedHeading(0)
+            : -tangent.angle;
       }
     } else if (path.isNotEmpty) {
       final startPos = path[0];
@@ -502,90 +525,249 @@ class CarComponent extends PositionComponent
     }
   }
 
-  /// Cars don't vanish at the door: at a shop they pull into
-  /// a stall on the lot's open tarmac (next to the hatch marks), at home
-  /// they sit on the driveway. Sets position/angle for the whole dwell.
+  /// Cars don't vanish at the door: the smooth path already ends on the
+  /// parking spot (see the spurs in _rebuildSmoothPath), so this only snaps
+  /// away the last bit of float error and squares the car up in its bay.
   void _parkAtCurrentEnd() {
-    final gm = game.gridManager;
-    if (gm == null) return;
-    if (isReturning) {
-      final spot = CarComponent.homeParkingSpot(gm, spawnHousePos, cellSize, offsetX, offsetY);
-      if (spot != null) {
-        position = spot.$1;
-        angle = spot.$2;
-      }
-      return;
-    }
-    if (!gm.isValid(targetDest.x, targetDest.y)) return;
-    final entry = gm.getCell(targetDest.x, targetDest.y).entrySide;
-    if (entry == null) return;
-    int slot = 0;
-    for (final other in game.cars) {
-      if (identical(other, this) || other.arrived) continue;
-      if (other.isWaiting && !other.isReturning &&
-          other.targetDest.x == targetDest.x &&
-          other.targetDest.y == targetDest.y) {
-        slot++;
-      }
-    }
-    final ext = GridManager.destinationExtent(entry);
-    final n = GameConstants.destinationFootprintSize;
-    final bx = offsetX + targetDest.x * cellSize + cellSize / 2 + ext.x * cellSize * (n - 1) / 2;
-    final by = offsetY + targetDest.y * cellSize + cellSize / 2 + ext.y * cellSize * (n - 1) / 2;
-    final lot = cellSize * n * 0.90;
-    final stall = CarComponent.stallCenter(bx, by, lot, entry, ext, slot % 2);
-    position = Vector2(stall.dx, stall.dy);
-    final vertical = entry == Direction.north || entry == Direction.south;
-    angle = vertical ? -pi / 2 : 0;
+    if (path.isEmpty) return;
+    final i = path.length - 1;
+    if (!_parksAt(i)) return;
+    final spot = _parkingSpotFor(i);
+    position = Vector2(spot.dx, spot.dy);
+    angle = _parkedHeading(i);
   }
 
-  /// Centre of parking stall [index] (0 or 1) on a shop's lot. The open
-  /// strip runs along the face the driveway meets; the tongue takes the
-  /// anchor end of that strip, the two stalls sit further along it. Shared
-  /// with GridRenderer so the painted stall lines match where cars park.
-  static Offset stallCenter(
-    double bx,
-    double by,
-    double lot,
+  bool get _usesParking =>
+      vehicleType != VehicleType.bus && vehicleType != VehicleType.emergency;
+
+  /// True when path node [i] (first or last) is a building this car parks
+  /// at: its own house on the home end, its shop on the delivery end.
+  bool _parksAt(int i) {
+    if (!_usesParking || path.isEmpty) return false;
+    if (i != 0 && i != path.length - 1) return false;
+    final p = path[i];
+    if (p.side == null || _isJunctionNode(i)) return false;
+    final isHome = p.x == spawnHousePos.x && p.y == spawnHousePos.y;
+    final isDest = p.x == targetDest.x && p.y == targetDest.y;
+    if (i == 0) return isReturning ? isDest : isHome;
+    return isReturning ? isHome : isDest;
+  }
+
+  Offset _parkingSpotFor(int i) {
+    final p = path[i];
+    if (p.x == spawnHousePos.x && p.y == spawnHousePos.y) {
+      final spot = homeSpotFor(p.x, p.y, p.side!, cellSize, offsetX, offsetY, homeSlot);
+      return Offset(spot.$1.x, spot.$1.y);
+    }
+    return stallFor(p.x, p.y, p.side!, cellSize, offsetX, offsetY, stallSlot);
+  }
+
+  /// Heading of a car parked at node [i]: nose toward the building.
+  double _parkedHeading(int i) {
+    final side = path[i].side;
+    if (side == null) return angle;
+    final e = _unit(side);
+    return atan2(-e.y, -e.x);
+  }
+
+  /// Lane offset multiplier: 1 on the road, easing to 0 over the last
+  /// [GameConstants.parkingLaneFadeTiles] before a parking spot (and from 0
+  /// after leaving one) so the car lands centred in its bay.
+  double _laneFade(double d) {
+    if (!_fadeLaneAtStart && !_fadeLaneAtEnd) return 1.0;
+    final w = cellSize * GameConstants.parkingLaneFadeTiles;
+    if (w <= 0) return 1.0;
+    double f = 1.0;
+    if (_fadeLaneAtStart) f = min(f, (d / w).clamp(0.0, 1.0));
+    if (_fadeLaneAtEnd) f = min(f, ((_totalLength - d) / w).clamp(0.0, 1.0));
+    return f * f * (3 - 2 * f);
+  }
+
+  /// Rate-limited heading change. On the road the tangent turns far slower
+  /// than the cap, so this is a no-op; leaving a parking bay it turns the
+  /// instant 180-degree flip into a quick pivot.
+  double _approachAngle(double from, double to) {
+    final diff = _angleDelta(from, to);
+    final maxStep = GameConstants.carPivotRate * _frameDt;
+    if (maxStep <= 0) return from;
+    if (diff.abs() <= maxStep) return to;
+    return from + maxStep * diff.sign;
+  }
+
+  /// Signed shortest rotation from [from] to [to], in (-pi, pi].
+  static double _angleDelta(double from, double to) {
+    double diff = (to - from) % (2 * pi);
+    if (diff > pi) diff -= 2 * pi;
+    return diff;
+  }
+
+  static Vector2 _unit(Direction d) {
+    switch (d) {
+      case Direction.north:
+        return Vector2(0, -1);
+      case Direction.south:
+        return Vector2(0, 1);
+      case Direction.east:
+        return Vector2(1, 0);
+      case Direction.west:
+        return Vector2(-1, 0);
+    }
+  }
+
+  /// Direction the shop's parking strip runs (along the lot face the
+  /// driveway meets), for the shop anchored with entry side [entry].
+  static Vector2 stripDir(Direction entry) {
+    final ext = GridManager.destinationExtent(entry);
+    final vertical = entry == Direction.north || entry == Direction.south;
+    return vertical
+        ? Vector2(ext.x.toDouble(), 0)
+        : Vector2(0, ext.y.toDouble());
+  }
+
+  /// A point in the shop anchored at ([x],[y]): [along] tiles from the
+  /// anchor centre toward the road, [strip] tiles down the parking strip.
+  static Offset shopPoint(
+    int x,
+    int y,
     Direction entry,
-    GridPosition ext,
+    double cellSize,
+    double offsetX,
+    double offsetY,
+    double along,
+    double strip,
+  ) {
+    final e = _unit(entry);
+    final t = stripDir(entry);
+    final ax = offsetX + x * cellSize + cellSize / 2;
+    final ay = offsetY + y * cellSize + cellSize / 2;
+    return Offset(
+      ax + (e.x * along + t.x * strip) * cellSize,
+      ay + (e.y * along + t.y * strip) * cellSize,
+    );
+  }
+
+  /// Strip offset of bay [index] (0 or 1).
+  static double bayStrip(int index) =>
+      GameConstants.shopBayFirst + (index % 2) * GameConstants.shopBayPitch;
+
+  /// Centre of bay [index] on the shop anchored at ([x],[y]). Shared with
+  /// GridRenderer so the painted bay lines match where cars stop.
+  static Offset stallFor(
+    int x,
+    int y,
+    Direction entry,
+    double cellSize,
+    double offsetX,
+    double offsetY,
+    int index,
+  ) => shopPoint(x, y, entry, cellSize, offsetX, offsetY,
+      GameConstants.shopBayAlong, bayStrip(index));
+
+  /// The in-lot route between the tongue mouth and bay [index], listed from
+  /// the tongue inward: corridor entry on the axis, corridor beside the
+  /// bay, bay centre.
+  static List<Offset> shopRoute(
+    int x,
+    int y,
+    Direction entry,
+    double cellSize,
+    double offsetX,
+    double offsetY,
     int index,
   ) {
-    final along = 0.02 + index * 0.27; // fraction of lot from block centre
-    final vertical = entry == Direction.north || entry == Direction.south;
-    if (vertical) {
-      return Offset(bx + ext.x * lot * along, by - ext.y * lot * 0.33);
-    }
-    return Offset(bx - ext.x * lot * 0.33, by + ext.y * lot * along);
+    final corr = GameConstants.shopCorridorAlong;
+    final strip = bayStrip(index);
+    Offset pt(double a, double t) =>
+        shopPoint(x, y, entry, cellSize, offsetX, offsetY, a, t);
+    return [pt(0.5, 0), pt(corr, 0), pt(corr, strip), pt(GameConstants.shopBayAlong, strip)];
   }
 
-  /// Where a house's car sits when it is home: on the driveway tile, tucked
-  /// toward the house. Shared with GridRenderer so the parked glyph it draws
-  /// for idle houses lands on exactly the same spot.
+  /// Appends [pts] to both paths from [from] as straight runs joined by
+  /// rounded corners of radius up to [rMax] (kappa cubics, like the road
+  /// corners). Returns the new pen position.
+  static Offset _appendRoundedPolyline(
+    ui.Path a,
+    ui.Path b,
+    Offset from,
+    List<Offset> pts,
+    double rMax,
+  ) {
+    const kappa = 0.5522847498;
+    final all = <Offset>[from, ...pts];
+    for (int k = 1; k < all.length - 1; k++) {
+      final dIn = all[k] - all[k - 1];
+      final dOut = all[k + 1] - all[k];
+      final lIn = dIn.distance;
+      final lOut = dOut.distance;
+      if (lIn < 1e-6 || lOut < 1e-6) continue;
+      final uIn = dIn / lIn;
+      final uOut = dOut / lOut;
+      final cross = (uIn.dx * uOut.dy - uIn.dy * uOut.dx).abs();
+      final dot = uIn.dx * uOut.dx + uIn.dy * uOut.dy;
+      if (cross < 1e-3 && dot > 0) continue; // straight through
+      final r = min(rMax, min(lIn, lOut) * 0.5);
+      final s0 = all[k] - uIn * r;
+      final s1 = all[k] + uOut * r;
+      final cp1 = s0 + uIn * (r * kappa);
+      final cp2 = s1 - uOut * (r * kappa);
+      a.lineTo(s0.dx, s0.dy);
+      b.lineTo(s0.dx, s0.dy);
+      a.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, s1.dx, s1.dy);
+      b.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, s1.dx, s1.dy);
+    }
+    final last = all.last;
+    a.lineTo(last.dx, last.dy);
+    b.lineTo(last.dx, last.dy);
+    return last;
+  }
+
+  /// Cubic S-bend from [from] to [to] with both tangents along [dir].
+  static void _appendSBend(ui.Path a, ui.Path b, Offset from, Offset to, Offset dir) {
+    final len = (to - from).distance;
+    final cp1 = from + dir * (len * 0.45);
+    final cp2 = to - dir * (len * 0.45);
+    a.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, to.dx, to.dy);
+    b.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, to.dx, to.dy);
+  }
+
+  /// Where car number [slot] of the house at ([x],[y]) sits when it is
+  /// home: side by side on the apron in front of the block, nose toward the
+  /// house. Returns (position, heading). Pure geometry, see [stallFor].
+  static (Vector2, double) homeSpotFor(
+    int x,
+    int y,
+    Direction entry,
+    double cellSize,
+    double offsetX,
+    double offsetY,
+    int slot,
+  ) {
+    final e = _unit(entry);
+    final cx = offsetX + x * cellSize + cellSize / 2;
+    final cy = offsetY + y * cellSize + cellSize / 2;
+    final side = (slot % GameConstants.homeParkingSlots) == 0 ? -1.0 : 1.0;
+    final along = cellSize * GameConstants.homeParkingAlong;
+    final lat = cellSize * GameConstants.homeParkingLateral * side;
+    return (
+      Vector2(cx + e.x * along - e.y * lat, cy + e.y * along + e.x * lat),
+      atan2(-e.y, -e.x),
+    );
+  }
+
+  /// [homeSpotFor] looked up from the grid. Shared with GridRenderer so the
+  /// parked glyphs it draws for idle slots land exactly where cars park.
   static (Vector2, double)? homeParkingSpot(
     GridManager gm,
     GridPosition house,
     double cellSize,
     double offsetX,
     double offsetY,
+    int slot,
   ) {
     if (!gm.isValid(house.x, house.y)) return null;
     final entry = gm.getCell(house.x, house.y).entrySide;
     if (entry == null) return null;
-    final stub = house.getNeighbor(entry);
-    final sx = offsetX + stub.x * cellSize + cellSize / 2;
-    final sy = offsetY + stub.y * cellSize + cellSize / 2;
-    final back = cellSize * 0.12;
-    switch (entry) {
-      case Direction.north:
-        return (Vector2(sx, sy + back), -pi / 2);
-      case Direction.south:
-        return (Vector2(sx, sy - back), pi / 2);
-      case Direction.east:
-        return (Vector2(sx - back, sy), 0);
-      case Direction.west:
-        return (Vector2(sx + back, sy), pi);
-    }
+    return homeSpotFor(house.x, house.y, entry, cellSize, offsetX, offsetY, slot);
   }
 
   double get _vehicleSpeedMultiplier {
@@ -736,7 +918,17 @@ class CarComponent extends PositionComponent
       return (a.x - b.x).abs() > 1 || (a.y - b.y).abs() > 1;
     }
 
-    final start = getPos(0);
+    // Parking spurs. A trip that begins or ends at a parking spot drives a
+    // curve between the spot and the driveway tile instead of teleporting
+    // between the spot and the tile centre.
+    final Offset? startSpot = _parksAt(0) ? _parkingSpotFor(0) : null;
+    final Offset? endSpot =
+        _parksAt(path.length - 1) ? _parkingSpotFor(path.length - 1) : null;
+    _fadeLaneAtStart = startSpot != null;
+    _fadeLaneAtEnd = endSpot != null;
+    final int n = path.length;
+
+    final start = startSpot ?? getPos(0);
     _smoothPath.moveTo(start.dx, start.dy);
 
     segmentStartOffsets = List.filled(path.length, 0.0);
@@ -752,8 +944,88 @@ class CarComponent extends PositionComponent
       final segPath = ui.Path();
       segPath.moveTo(currentPenPos.dx, currentPenPos.dy);
 
+      // Pull out of the parking spot. Ends on the driveway axis at the
+      // point the plain corner logic below starts from (0.7 tiles out, the
+      // midpoint of door and stub), so the corner at the stub is unchanged.
+      if (i == 0 && startSpot != null) {
+        final e = _unit(p1.side!);
+        final eO = Offset(e.x, e.y);
+        final axis = Offset(
+          offsetX + p1.x * cellSize + cellSize / 2 + e.x * cellSize * 0.7,
+          offsetY + p1.y * cellSize + cellSize / 2 + e.y * cellSize * 0.7,
+        );
+        final isHome = p1.x == spawnHousePos.x && p1.y == spawnHousePos.y;
+        if (isHome) {
+          _appendSBend(_smoothPath, segPath, currentPenPos, axis, eO);
+        } else {
+          final route = shopRoute(
+            p1.x, p1.y, p1.side!, cellSize, offsetX, offsetY, stallSlot,
+          ).reversed.skip(1).toList();
+          _appendRoundedPolyline(
+            _smoothPath,
+            segPath,
+            currentPenPos,
+            [...route, axis],
+            cellSize * GameConstants.parkingCornerRadius,
+          );
+        }
+        currentPenPos = axis;
+      }
+
+      // Pull in: from the last road tile, round the stub corner, then
+      // either S-bend onto the home apron or follow the shop's in-lot
+      // route to the bay. Arrives nose toward the building.
+      if (endSpot != null &&
+          i == n - 3 &&
+          !isLongJumpAt(i) &&
+          !isJunctionTransitionAt(i) &&
+          !(p1.side != null && isJunctionNodeAt(i))) {
+        final bNode = path[i + 2];
+        final e = _unit(bNode.side!);
+        final inDir = Offset(-e.x, -e.y);
+        final bcx = offsetX + bNode.x * cellSize + cellSize / 2;
+        final bcy = offsetY + bNode.y * cellSize + cellSize / 2;
+        final isHome = bNode.x == spawnHousePos.x && bNode.y == spawnHousePos.y;
+        final r = cellSize * GameConstants.parkingCornerRadius;
+        if (isHome) {
+          final axis = Offset(bcx + e.x * cellSize * 0.7, bcy + e.y * cellSize * 0.7);
+          final pen = _appendRoundedPolyline(
+            _smoothPath, segPath, currentPenPos, [c2, axis], cellSize * 0.3,
+          );
+          _appendSBend(_smoothPath, segPath, pen, endSpot, inDir);
+        } else {
+          final route = shopRoute(
+            bNode.x, bNode.y, bNode.side!, cellSize, offsetX, offsetY, stallSlot,
+          );
+          _appendRoundedPolyline(
+            _smoothPath, segPath, currentPenPos, [c2, ...route], r,
+          );
+        }
+        currentPenPos = endSpot;
+      }
+      // Last hop into the spot from wherever the previous segment left the
+      // pen (very short trips, or a special segment just before the stub).
+      else if (endSpot != null && i == n - 2) {
+        if ((endSpot - currentPenPos).distance > 0.5) {
+          final e = _unit(p2.side!);
+          final inDir = Offset(-e.x, -e.y);
+          final isHome = p2.x == spawnHousePos.x && p2.y == spawnHousePos.y;
+          if (isHome) {
+            _appendSBend(_smoothPath, segPath, currentPenPos, endSpot, inDir);
+          } else {
+            final route = shopRoute(
+              p2.x, p2.y, p2.side!, cellSize, offsetX, offsetY, stallSlot,
+            );
+            _appendRoundedPolyline(
+              _smoothPath, segPath, currentPenPos, route,
+              cellSize * GameConstants.parkingCornerRadius,
+            );
+          }
+        }
+        currentPenPos = endSpot;
+      }
       // Long jump (express lane): bezier with a perpendicular arc.
-      if (isLongJumpAt(i)) {
+      else if (isLongJumpAt(i)) {
         final delta = c2 - c1;
         final dist = delta.distance;
         final mid = (c1 + c2) / 2;
@@ -989,6 +1261,16 @@ class CarComponent extends PositionComponent
     }
     final curveSpeedMultiplier = _currentCurveSpeedMultiplier;
 
+    // Leaving a parking spot the car faces the building; swing round on the
+    // spot first, then drive. Without the hold it slid sideways while turning.
+    bool holdForPivot = false;
+    if (_fadeLaneAtStart && tangent != null && _distanceTraveled < cellSize * 0.5) {
+      if (_angleDelta(angle, -tangent.angle).abs() > 0.25) {
+        holdForPivot = true;
+        _currentSpeedMultiplier = 0.0;
+      }
+    }
+
     // Rule 7: Curve Speed Reduction inside roundabout (~80% speed)
     // [FIX] Was a bare `side != null` check, which is also true on a plain
     // house/destination entry node — so every car got an unintended ~20%
@@ -1001,12 +1283,14 @@ class CarComponent extends PositionComponent
       roundaboutSpeedMultiplier = 0.80;
     }
 
-    _distanceTraveled +=
-        dt *
-        speed *
-        game.timeScale *
-        curveSpeedMultiplier *
-        roundaboutSpeedMultiplier;
+    if (!holdForPivot) {
+      _distanceTraveled +=
+          dt *
+          speed *
+          game.timeScale *
+          curveSpeedMultiplier *
+          roundaboutSpeedMultiplier;
+    }
     if (_distanceTraveled >= _totalLength) {
       _distanceTraveled = _totalLength;
     }
@@ -1019,13 +1303,13 @@ class CarComponent extends PositionComponent
       // _currentLaneSign flips the offset (+1 right, -1 left) so a car can
       // pull alongside a parked one in the other lane.
       final fwd = finalTangent.vector;
-      final lane = _safeLaneOffset();
+      final lane = _safeLaneOffset() * _laneFade(_distanceTraveled);
 
       position = Vector2(
         finalTangent.position.dx - fwd.dy * lane,
         finalTangent.position.dy + fwd.dx * lane,
       );
-      angle = -finalTangent.angle;
+      angle = _approachAngle(angle, -finalTangent.angle);
     }
   }
 
@@ -1161,42 +1445,9 @@ class CarComponent extends PositionComponent
       return;
     }
 
-    if (arrived || isReturning) {
-      _targetLaneSign = 1.0;
-      return;
-    }
-    // Only swap when approaching the final cell — within the last 3 path nodes
-    // (building + driveway + last road tile). Earlier swaps look like aimless
-    // weaving.
-    if (path.length < 2 || _currentPathIndex < path.length - 3) {
-      _targetLaneSign = 1.0;
-      return;
-    }
-    final gWidth = game.gridWidth;
-    if (gWidth <= 0) {
-      _targetLaneSign = 1.0;
-      return;
-    }
-    final destKeyX = targetDest.x;
-    final destKeyY = targetDest.y;
-    bool parkedAtDest = false;
-    for (int dy = -1; dy <= 1 && !parkedAtDest; dy++) {
-      for (int dx = -1; dx <= 1 && !parkedAtDest; dx++) {
-        final bucketKey = (destKeyX + dx) + (destKeyY + dy) * gWidth;
-        final bucket = game.carGrid[bucketKey];
-        if (bucket == null) continue;
-        for (final other in bucket) {
-          if (identical(other, this) || other.arrived) continue;
-          if (!other.isWaiting || other.isReturning) continue;
-          if (other.targetDest.x == destKeyX &&
-              other.targetDest.y == destKeyY) {
-            parkedAtDest = true;
-            break;
-          }
-        }
-      }
-    }
-    _targetLaneSign = parkedAtDest ? -1.0 : 1.0;
+    // Waiting cars sit in stalls off the road, so there is nothing to pull
+    // alongside at the destination any more: keep to the driving side.
+    _targetLaneSign = 1.0;
   }
 
   GridPosition? get currentTarget {
@@ -1519,6 +1770,7 @@ class CarComponent extends PositionComponent
   @override
   void update(double dt) {
     super.update(dt);
+    _frameDt = dt;
     if (game.paused || game.timeScale == 0.0) return;
 
     final isStopped =

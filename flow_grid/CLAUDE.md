@@ -97,10 +97,16 @@ Two things about it are easy to miss:
   ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane
   offset in step (`CarComponent._maxSafeLaneOffsetMagnitude` reads
   `GameConstants.roadWidth`).
-- **Cars park instead of vanishing.** At a shop a waiting car sits in one of two
-  painted stalls (`CarComponent.stallCenter`, shared by the renderer's stall lines);
-  at home it sits on the driveway (`CarComponent.homeParkingSpot`), and
-  `GridRenderer._drawParkedCars` draws the same spot for any house with no car out.
+- **Cars park instead of vanishing, and drive to the spot.** A house keeps two cars
+  nose-in on a pavement apron in front of its block (`CarComponent.homeSpotFor`,
+  slots assigned by `FlowGridGame._freeHomeSlot`; `GridRenderer._drawParkedCars`
+  draws the glyph for every slot with no car out). A shop has two bays reached via
+  the tongue and an in-lot corridor (`CarComponent.shopRoute` / `stallFor`, all
+  measured from the anchor cell in `GameConstants.shop*`). `_rebuildSmoothPath`
+  appends these spurs to the smooth path, fades the lane offset to zero over them
+  (`_laneFade`), and a departing car pivots in place before it moves
+  (`_approachAngle`, timed from the real frame dt because `_updatePosition` gets a
+  speed-scaled dt). Never teleport a car to a parking spot.
 - Utility glyphs: roundabout = one-road-width ring on the
   `junctionRingRadius` pathing circle with a ground-colour island, signals = red/green lamps per
   approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
