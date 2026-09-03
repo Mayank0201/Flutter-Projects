@@ -123,24 +123,24 @@ class GameConstants {
   static const double truckSpeedMultiplier = 0.6;
   static const double serviceVanSpeedMultiplier = 1.3;
 
-  // Colors - deep green-slate dark mode. The whole ground/road/water family
-  // sits on a cool green hue so the game has its own identity.
-  static const Color backgroundColor = Color(0xFF22302C);
-  static const Color gridLineColor = Color(0xFF1C2724);
+  // Colors - deep teal-ink dark mode. The whole ground/road/water family
+  // sits on a cool teal hue so the game has its own identity.
+  static const Color backgroundColor = Color(0xFF1D2A30);
+  static const Color gridLineColor = Color(0xFF18232A);
   // Roads are a shade darker than the ground and carry a thin light kerb
   // line; the kerb is what makes them read against the ground.
-  static const Color roadColor = Color(0xFF1F2D29);
-  static const Color roadFillColor = Color(0xFF1F2D29);
-  static const Color roadEdgeColor = Color(0xFF8CA89E);
+  static const Color roadColor = Color(0xFF19262B);
+  static const Color roadFillColor = Color(0xFF19262B);
+  static const Color roadEdgeColor = Color(0xFF7FA3A6);
   static const double roadWidth = 0.50; // fill, fraction of a tile
   static const double roadEdge = 0.045; // edge line, fraction of a tile
   // Smart-junction ring centreline radius, fraction of a tile. Cars drive
   // this circle and the renderer paints one road-width around it, so 0.5
   // keeps the roundabout inside its own tile.
   static const double junctionRingRadius = 0.5;
-  // Long, soft, single-light-source shadow every building casts.
-  static const Color buildingShadowColor = Color(0x38000000);
-  static const double buildingShadowLength = 0.9; // in building sizes
+  // Short, soft drop shadow under every building (lit from above).
+  static const Color buildingShadowColor = Color(0x46000000);
+  static const double buildingShadowLength = 0.16; // in building sizes
 
   // Parking. A house keeps two cars nose-in on a small pavement apron in
   // front of its block; a shop has two painted stalls. Cars drive a short
@@ -153,6 +153,11 @@ class GameConstants {
   static const double homeParkingAlong = 0.30; // tiles from the house centre
   static const double homeParkingLateral = 0.115; // tiles off the driveway axis
   static const double parkingLaneFadeTiles = 1.0;
+
+  // Trees: olive ovals with a lighter cap and a tiny trunk.
+  static const Color treeColor = Color(0xFF6F8F5C);
+  static const Color treeHighlightColor = Color(0xFF86A46C);
+  static const Color treeTrunkColor = Color(0xFF3E3A33);
   static const double parkingCornerRadius = 0.28; // tiles, in-lot corners
   // Shop lot, measured from the anchor cell centre in tiles: positive
   // "along" is toward the road (the tongue mouth is at +0.5), "strip" runs
@@ -165,15 +170,15 @@ class GameConstants {
   static const double carPivotRate = 20.0; // rad/s, max heading change
 
   // Mountain colors (replaces water)
-  static const Color mountainColor = Color(0xFF2F4A44); // Dark teal-green rock
-  static const Color mountainHighlightColor = Color(0xFF3E5E56); // Lighter crown
+  static const Color mountainColor = Color(0xFF2A4147); // Dark teal rock
+  static const Color mountainHighlightColor = Color(0xFF37545B); // Lighter crown
   static const Color mountainSnowColor = Color(0xFFD0D3DA); // (unused now)
-  static const Color mountainEdgeColor = Color(0xFF243A35); // Cliff edge
+  static const Color mountainEdgeColor = Color(0xFF1F3239); // Cliff edge
 
   // Tunnel & Express Lane
   static const Color tunnelColor = Color(0xFF8A7D6B);
-  static const Color waterColor = Color(0xFF2E4F58); // deep teal river
-  static const Color waterEdgeColor = Color(0xFF8FC0B6);
+  static const Color waterColor = Color(0xFF2A5563); // deep teal river
+  static const Color waterEdgeColor = Color(0xFF86BFC9);
   static const Color bridgeColor = roadColor; // the road just continues over water
   static const Color expressLaneColor = Color(0xFF8E7FD8); // violet express band
   static const Color expressLaneBorderColor = Color(0xFF5D51A3);
@@ -183,7 +188,7 @@ class GameConstants {
   static const Color congestionLowColor = Color(0xFFC9A24B);
   static const Color congestionHighColor = Color(0xFFC17A5E);
 
-  static const Color hudBackground = Color(0xFF1B2321);
+  static const Color hudBackground = Color(0xFF161F23);
   static const Color hudText = Color(0xFFD8DCE2);
 
   static const Color carWindowColor = Color(0x80FFFFFF);

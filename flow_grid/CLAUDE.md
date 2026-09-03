@@ -87,13 +87,13 @@ Two things about it are easy to miss:
   and the weekly reward popup commits any in-progress drag before pausing.
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
   `GameConstants` presentation flags and are off for the calm look.
-- **Visual language is a calm green-slate dark mode**: deep green-slate ground with soft hill
-  blobs and tree clusters (trees only on empty cells, painted in the chunk layer), roads
+- **Visual language is a calm teal-ink dark mode**: deep teal ground with soft hill
+  blobs and olive oval trees (trees only on empty cells, painted in the chunk layer), roads
   darker than the ground with a thin light edge (`roadColor` / `roadEdgeColor` /
   `roadWidth` / `roadEdge` in `GameConstants`), buildings as flat blocks with a darker
-  side band and one long shadow (`GridRenderer._drawBlock` / `_drawLongShadow`), shop
+  side band and a short soft drop shadow (`GridRenderer._drawBlock` / `_drawLongShadow`), shop
   lots styled as pavement with stall lines and a white parcel chip, demand shown as parcel chips and
-  overflow as a thin ring. New buildings pop in with an ease-out-back scale under a
+  overflow as a gauge bar above the chips. New buildings pop in with an ease-out-back scale under a
   ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane
   offset in step (`CarComponent._maxSafeLaneOffsetMagnitude` reads
   `GameConstants.roadWidth`).
@@ -113,6 +113,10 @@ Two things about it are easy to miss:
   portal, express lanes = violet band with pale dashes and round white ramp badges.
 - **Never name other games in code, comments, docs, the store listing or commit
   messages.** See `changes_required.md` for why. Describe what the game does instead.
+  Keep the look its own: no long single-light cast shadows, no ring timers, no map
+  pins. Cars stay colour-coded capsules because that is how a player reads them.
+- Houses spawn at most `GameConstants.homeParkingSlots` cars at a time
+  (`FlowGridGame._carsOutFrom`); the timer holds at the threshold until one is home.
 
 ## Open work
 

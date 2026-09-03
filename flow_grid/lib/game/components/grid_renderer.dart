@@ -463,17 +463,17 @@ class GridRenderer extends PositionComponent
   Color get _mapBackgroundColor {
     switch (game.selectedMapType) {
       case MapType.zen:
-        return const Color(0xFF33423D);
+        return const Color(0xFF2A3A40);
       case MapType.andes:
         return const Color(0xFF3F3731);
       case MapType.nile:
-        return const Color(0xFF313F41);
+        return const Color(0xFF2C4448);
       case MapType.arctic:
         return const Color(0xFF35434E);
       case MapType.savanna:
         return const Color(0xFF443C31);
       case MapType.delta:
-        return const Color(0xFF30433D);
+        return const Color(0xFF2B4038);
     }
   }
 
@@ -719,15 +719,21 @@ class GridRenderer extends PositionComponent
   // not a full scan-and-filter over every mountain cluster in the whole
   // map on every chunk build -- see that index's field comment for the
   // Andes-map lag this fixed.
-  /// Scattered tree clusters (three overlapping discs with a small long
-  /// shadow) on empty tiles. Placement is a hash of the cell, so it is
+  /// Scattered trees (an olive oval canopy with a lighter cap and a tiny
+  /// trunk) on empty tiles. Placement is a hash of the cell, so it is
   /// stable, and a tree simply disappears when something is built on its
   /// tile because the chunk is repainted from the grid.
   void _drawTrees(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     final seed = game.selectedMapType.index * 1000003 + 17;
-    final canopy = Paint()..color = const Color(0xFF5C8A72);
-    final canopyDark = Paint()..color = const Color(0xFF4A7660);
-    final shadow = Paint()..color = GameConstants.buildingShadowColor;
+    final canopy = Paint()..color = GameConstants.treeColor;
+    final cap = Paint()..color = GameConstants.treeHighlightColor;
+    final trunk = Paint()
+      ..color = GameConstants.treeTrunkColor
+      ..strokeWidth = cellSize * 0.05
+      ..strokeCap = StrokeCap.round;
+    final shadow = Paint()
+      ..color = GameConstants.buildingShadowColor
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.05);
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
@@ -741,19 +747,15 @@ class GridRenderer extends PositionComponent
         final v = ((h >> 16) & 0xFFFF) / 65535.0;
         final cx = offsetX + x * cellSize + cellSize * (0.35 + v * 0.3);
         final cy = offsetY + y * cellSize + cellSize * (0.35 + u * 6.0);
-        final r = cellSize * (0.14 + v * 0.05);
-        final pts = [
-          Offset(cx, cy - r * 0.55),
-          Offset(cx - r * 0.75, cy + r * 0.45),
-          Offset(cx + r * 0.75, cy + r * 0.45),
-        ];
-        final sd = r * 0.9;
-        for (final o in pts) {
-          canvas.drawCircle(o + Offset(sd, sd * 0.62), r, shadow);
-        }
-        for (int i = 0; i < pts.length; i++) {
-          canvas.drawCircle(pts[i], r, i == 2 ? canopyDark : canopy);
-        }
+        final r = cellSize * (0.15 + v * 0.05);
+        final body = Rect.fromCenter(center: Offset(cx, cy), width: r * 2.2, height: r * 1.7);
+        canvas.drawOval(body.shift(Offset(0, r * 0.35)), shadow);
+        canvas.drawLine(Offset(cx, cy + r * 0.6), Offset(cx, cy + r * 1.15), trunk);
+        canvas.drawOval(body, canopy);
+        canvas.drawOval(
+          Rect.fromCenter(center: Offset(cx - r * 0.25, cy - r * 0.3), width: r * 1.1, height: r * 0.7),
+          cap,
+        );
       }
     }
   }
@@ -1521,17 +1523,13 @@ class GridRenderer extends PositionComponent
   /// Long soft shadow every building casts toward the bottom-right, like
   /// A single light source. Drawn into one alpha layer so the
   /// overlapping copies don't stack up darker.
+  /// Short, soft drop shadow straight below [shape], offset by [length]:
+  /// a lit-from-above look. (Name kept from the earlier long cast shadow.)
   void _drawLongShadow(Canvas canvas, Path shape, double length) {
-    final bounds = shape.getBounds().inflate(length + 4);
-    canvas.saveLayer(bounds, Paint()..color = GameConstants.buildingShadowColor);
-    const steps = 10;
-    final dx = length / steps;
-    final dy = length * 0.62 / steps;
-    final p = Paint()..color = Colors.black;
-    for (int i = 0; i <= steps; i++) {
-      canvas.drawPath(shape.shift(Offset(dx * i, dy * i)), p);
-    }
-    canvas.restore();
+    final p = Paint()
+      ..color = GameConstants.buildingShadowColor
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, length * 0.5);
+    canvas.drawPath(shape.shift(Offset(0, length)), p);
   }
 
   /// A building block: flat top face of the colour, a darker band along
@@ -2042,30 +2040,26 @@ class GridRenderer extends PositionComponent
       }
 
       if (overflowLevel > 0) {
-        // Overflow timer: a thin ring around the whole
-        // block with the red arc eating round it. No dark disc, no hourglass;
-        // the pins keep showing the queue underneath.
+        // Overflow timer: a thin gauge bar above the parcel chips that
+        // fills red as the shop runs out of patience.
         final progress = overflowLevel.clamp(0.0, 1.0);
-        final radius = cellSize * 0.62 * fpN;
-        canvas.drawCircle(
-          Offset(cx, cy),
-          radius,
-          Paint()
-            ..color = Colors.white.withValues(alpha: 0.35)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = cellSize * 0.06,
-        );
-        canvas.drawArc(
-          Rect.fromCircle(center: Offset(cx, cy), radius: radius),
-          -math.pi / 2,
-          2 * math.pi * progress,
-          false,
-          Paint()
-            ..color = const Color(0xFFF04A5E)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = cellSize * 0.09
-            ..strokeCap = StrokeCap.round,
-        );
+        final w = cellSize * fpN * 0.78;
+        final y = cy - cellSize * fpN / 2 - cellSize * 0.50;
+        final track = Paint()
+          ..color = Colors.white.withValues(alpha: 0.28)
+          ..strokeWidth = cellSize * 0.08
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(Offset(cx - w / 2, y), Offset(cx + w / 2, y), track);
+        if (progress > 0.01) {
+          canvas.drawLine(
+            Offset(cx - w / 2, y),
+            Offset(cx - w / 2 + w * progress, y),
+            Paint()
+              ..color = const Color(0xFFF04A5E)
+              ..strokeWidth = cellSize * 0.08
+              ..strokeCap = StrokeCap.round,
+          );
+        }
       }
       {
         // Parcel chips sit just above the block.

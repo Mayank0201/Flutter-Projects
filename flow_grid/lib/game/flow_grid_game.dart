@@ -995,6 +995,13 @@ class FlowGridGame extends FlameGame
       double timer = gridManager!.getHouseCarTimer(housePos) + dt;
 
       if (timer >= GameConstants.carSpawnInterval) {
+        // A house owns homeParkingSlots cars. With all of them out, hold the
+        // timer at the threshold so the next trip starts the moment one is
+        // back on the apron.
+        if (_carsOutFrom(housePos) >= GameConstants.homeParkingSlots) {
+          gridManager!.setHouseCarTimer(housePos, GameConstants.carSpawnInterval);
+          continue;
+        }
         // Try to spawn
         final dest = _findDestination(housePos);
         if (dest != null) {
@@ -1055,6 +1062,16 @@ class FlowGridGame extends FlameGame
       }
       gridManager!.setHouseCarTimer(housePos, timer);
     }
+  }
+
+  int _carsOutFrom(GridPosition house) {
+    int n = 0;
+    for (final c in _cars) {
+      if (!c.arrived && c.spawnHousePos.x == house.x && c.spawnHousePos.y == house.y) {
+        n++;
+      }
+    }
+    return n;
   }
 
   /// Lowest home parking slot no car from [house] is currently using, so
