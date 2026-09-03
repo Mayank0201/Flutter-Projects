@@ -1,4 +1,4 @@
-package com.example.flow_grid
+package com.mayank.flowgrid
 
 import io.flutter.embedding.android.FlutterActivity
 

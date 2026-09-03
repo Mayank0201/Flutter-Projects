@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flow_grid"
+    namespace = "com.mayank.flowgrid"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -20,8 +20,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.flow_grid"
+        applicationId = "com.mayank.flowgrid"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
