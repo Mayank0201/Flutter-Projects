@@ -33,7 +33,7 @@ class BuildingProfile {
     influenceRadius: 6.0,
     // renderScale is visual-only (not used by spacing/collision/placement
     // logic, only by GridRenderer's draw calls). Destinations are now a 2x2
-    // block, so houses can be Mini Motorways-sized (~2/3 of a tile) and
+    // block, so houses can be small (~2/3 of a tile) and
     // still read as clearly the smaller building type.
     renderScale: 0.60,
     sameColorSpacing: 4,
@@ -90,7 +90,7 @@ class SpawnConfig {
   // ============================================================
   // [NEW] District Locality & Spacing Rules (Issue 1 & 2)
   // ============================================================
-  // Sized for a Mini-Motorways style starting region (~20x14). Larger
+  // Sized for a small starting region (~20x14). Larger
   // separations would force the spawn planner to push buildings across the
   // whole grid, which is impossible to connect with the early road budget.
   static const int maxDistrictExpansionRadius = 14;
@@ -1676,7 +1676,7 @@ class SpawnController {
            // [FIX] This must be a genuinely lower threshold than the outer
            // trigger (destinationToDestinationMinDistance = 7) or stage4/5
            // relaxation above can never actually take effect.
-           if (dist < 4) return false; // Hard minimum (Mini Motorways spread)
+           if (dist < 4) return false; // Hard minimum spread
          }
        }
     }

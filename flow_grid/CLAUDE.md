@@ -1,6 +1,6 @@
 # flow_grid
 
-A Mini Motorways-style traffic-flow game built with Flutter + Flame. The player draws
+A minimalist traffic-flow puzzle game built with Flutter + Flame. The player draws
 roads between colour-coded houses and destinations; demand builds at each destination
 and the run ends when one overflows.
 
@@ -86,13 +86,13 @@ Two things about it are easy to miss:
   (`_seedDragPathFromPressStart`), because the 24 px drag threshold otherwise skips it,
   and the weekly reward popup commits any in-progress drag before pausing.
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
-  `GameConstants` presentation flags and are off for the Mini Motorways calm look.
-- **Visual language is a Mini Motorways dark-mode copy**: slate ground with soft hill
+  `GameConstants` presentation flags and are off for the calm look.
+- **Visual language is a calm green-slate dark mode**: deep green-slate ground with soft hill
   blobs and tree clusters (trees only on empty cells, painted in the chunk layer), roads
   darker than the ground with a thin light edge (`roadColor` / `roadEdgeColor` /
   `roadWidth` / `roadEdge` in `GameConstants`), buildings as flat blocks with a darker
   side band and one long shadow (`GridRenderer._drawBlock` / `_drawLongShadow`), shop
-  lots styled as pavement with hatch marks and a white pin, demand shown as pins and
+  lots styled as pavement with stall lines and a white parcel chip, demand shown as parcel chips and
   overflow as a thin ring. New buildings pop in with an ease-out-back scale under a
   ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane
   offset in step (`CarComponent._maxSafeLaneOffsetMagnitude` reads
@@ -101,10 +101,12 @@ Two things about it are easy to miss:
   painted stalls (`CarComponent.stallCenter`, shared by the renderer's stall lines);
   at home it sits on the driveway (`CarComponent.homeParkingSpot`), and
   `GridRenderer._drawParkedCars` draws the same spot for any house with no car out.
-- Utilities follow the Mini Motorways glyphs: roundabout = one-road-width ring on the
-  r = 0.75 pathing circle with a ground-colour island, signals = red/green lamps per
+- Utility glyphs: roundabout = one-road-width ring on the
+  `junctionRingRadius` pathing circle with a ground-colour island, signals = red/green lamps per
   approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
-  portal, express lanes = gold band with pale dashes and round white ramp badges.
+  portal, express lanes = violet band with pale dashes and round white ramp badges.
+- **Never name other games in code, comments, docs, the store listing or commit
+  messages.** See `changes_required.md` for why. Describe what the game does instead.
 
 ## Open work
 

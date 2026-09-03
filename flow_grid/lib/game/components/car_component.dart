@@ -106,7 +106,7 @@ class CarComponent extends PositionComponent
   bool get isRoundaboutInner => _roundaboutInnerLane ?? (hashCode % 2 == 0);
 
   // Acceleration
-  // Gentle Mini Motorways easing: ~1 s to full speed, soft stops.
+  // Gentle easing: ~1 s to full speed, soft stops.
   static const double accelerationRate = 1.1;
   static const double decelerationRate = 2.2;
   static const double startupAccelerationBonus = 1.3;
@@ -418,7 +418,7 @@ class CarComponent extends PositionComponent
     // as too big -- the current sprite's bold white windows (much higher
     // contrast than the design this size was originally tuned for) stay
     // legible at this size too, so there's no need to keep the full bump.
-    // Mini Motorways cars are roughly a fifth of a tile: small next to a
+    // Cars are roughly a fifth of a tile: small next to a
     // house and tiny next to a 2x2 shop. 0.34 keeps the sprite legible on
     // phones while restoring that size gap.
     final baseSize = cellSize * 0.34;
@@ -502,7 +502,7 @@ class CarComponent extends PositionComponent
     }
   }
 
-  /// Mini Motorways cars don't vanish at the door: at a shop they pull into
+  /// Cars don't vanish at the door: at a shop they pull into
   /// a stall on the lot's open tarmac (next to the hatch marks), at home
   /// they sit on the driveway. Sets position/angle for the whole dwell.
   void _parkAtCurrentEnd() {

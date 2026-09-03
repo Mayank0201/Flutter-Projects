@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class GameConstants {
   static const double cellSize = 40.0;
-  // Timing (Longer weeks, calmer demand — Mini Motorways pacing)
+  // Timing (longer weeks, calmer demand)
   static const double weekDuration = 85.0;
   static const double initialSpawnDelay = 15.0; // Ignored by new scheduler
   static const double minSpawnDelay = 8.0; // Ignored by new scheduler
@@ -13,7 +13,7 @@ class GameConstants {
   static const double overflowRecoveryDuration = 50.0;
   static const double overflowDeliveryRecovery = 0.06;
 
-  // Maturity (Mini Motorways style evolution)
+  // Maturity (shops grow with age)
   static const int maturityThresholdWeeks = 4;
   static const int matureMaxDemand = 9;
   static const double matureRequestSpeedMultiplier = 1.15;
@@ -63,14 +63,14 @@ class GameConstants {
   // Car
   static const double carSpeed = 130.0;
 
-  // Presentation — Mini Motorways "calm" pass. Each of these switched a
+  // Presentation — calm-look pass. Each of these switched a
   // decorative layer off; kept as flags so they can be brought back cheaply.
   static const bool ambientTimeOfDayTint = false; // warm/indigo week tint
   static const bool carTrails = false; // motion streak behind each car
   static const bool parkingHighlights = false; // yellow pulse under parked cars
   static const bool maturityAura = false; // white halo around mature shops
 
-  // Building look (Mini Motorways): a shape is its flat colour plus the same
+  // Building look: a shape is its flat colour plus the same
   // hue pushed ~30% toward the outline colour, offset downward, for a soft
   // "thickness" — no black drop shadows, no outlines on buildings.
   static const double buildingBevelMix = 0.30;
@@ -123,55 +123,56 @@ class GameConstants {
   static const double truckSpeedMultiplier = 0.6;
   static const double serviceVanSpeedMultiplier = 1.3;
 
-  // Colors - Soft Dark Mode
-  static const Color backgroundColor = Color(0xFF2B303B);
-  static const Color gridLineColor = Color(0xFF232830);
-  // Mini Motorways dark mode: roads are a shade DARKER than the ground and
-  // carry a thin light edge line; that edge is what makes them read.
-  static const Color roadColor = Color(0xFF2C313B);
-  static const Color roadFillColor = Color(0xFF2C313B);
-  static const Color roadEdgeColor = Color(0xFF8C95A8);
+  // Colors - deep green-slate dark mode. The whole ground/road/water family
+  // sits on a cool green hue so the game has its own identity.
+  static const Color backgroundColor = Color(0xFF22302C);
+  static const Color gridLineColor = Color(0xFF1C2724);
+  // Roads are a shade darker than the ground and carry a thin light kerb
+  // line; the kerb is what makes them read against the ground.
+  static const Color roadColor = Color(0xFF1F2D29);
+  static const Color roadFillColor = Color(0xFF1F2D29);
+  static const Color roadEdgeColor = Color(0xFF8CA89E);
   static const double roadWidth = 0.50; // fill, fraction of a tile
   static const double roadEdge = 0.045; // edge line, fraction of a tile
   // Smart-junction ring centreline radius, fraction of a tile. Cars drive
   // this circle and the renderer paints one road-width around it, so 0.5
-  // keeps the roundabout inside its own tile like Mini Motorways'.
+  // keeps the roundabout inside its own tile.
   static const double junctionRingRadius = 0.5;
   // Long, soft, single-light-source shadow every building casts.
   static const Color buildingShadowColor = Color(0x38000000);
   static const double buildingShadowLength = 0.9; // in building sizes
 
   // Mountain colors (replaces water)
-  static const Color mountainColor = Color(0xFF3A3D45); // Dark rocky gray
-  static const Color mountainHighlightColor = Color(0xFF4A4E58); // Lighter peak
+  static const Color mountainColor = Color(0xFF2F4A44); // Dark teal-green rock
+  static const Color mountainHighlightColor = Color(0xFF3E5E56); // Lighter crown
   static const Color mountainSnowColor = Color(0xFFD0D3DA); // (unused now)
-  static const Color mountainEdgeColor = Color(0xFF2E3138); // Cliff edge
+  static const Color mountainEdgeColor = Color(0xFF243A35); // Cliff edge
 
   // Tunnel & Express Lane
   static const Color tunnelColor = Color(0xFF8A7D6B);
-  static const Color waterColor = Color(0xFF34485F); // MM dark-mode river
-  static const Color waterEdgeColor = Color(0xFF8FA6C2);
-  static const Color bridgeColor = roadColor; // MM: the road just continues over water
-  static const Color expressLaneColor = Color(0xFFF2B65A); // MM motorway gold
-  static const Color expressLaneBorderColor = Color(0xFFB8843A);
+  static const Color waterColor = Color(0xFF2E4F58); // deep teal river
+  static const Color waterEdgeColor = Color(0xFF8FC0B6);
+  static const Color bridgeColor = roadColor; // the road just continues over water
+  static const Color expressLaneColor = Color(0xFF8E7FD8); // violet express band
+  static const Color expressLaneBorderColor = Color(0xFF5D51A3);
 
   // Congestion — muted ochre/terracotta instead of flat-UI traffic-light
   // yellow/red, so it reads as calm information rather than an alarm.
   static const Color congestionLowColor = Color(0xFFC9A24B);
   static const Color congestionHighColor = Color(0xFFC17A5E);
 
-  static const Color hudBackground = Color(0xFF22262E);
+  static const Color hudBackground = Color(0xFF1B2321);
   static const Color hudText = Color(0xFFD8DCE2);
 
   static const Color carWindowColor = Color(0x80FFFFFF);
 
   // Muted, desaturated building colors
-  // Mini Motorways identity set: clean, fairly saturated, one per district.
+  // Identity set: clean, fairly saturated, one per district.
   static const List<Color> buildingColors = [
     Color(0xFFF04A5E), // 0: Red
     Color(0xFF3E86C6), // 1: Blue
     Color(0xFF5AC878), // 2: Green
-    Color(0xFFF5A742), // 3: Orange
+    Color(0xFFE8853C), // 3: Orange
     Color(0xFFA65BA0), // 4: Purple
     Color(0xFFF2CF55), // 5: Yellow
   ];
@@ -181,7 +182,7 @@ class GameConstants {
     Color(0xFFB43847), // 0: Red
     Color(0xFF2E6494), // 1: Blue
     Color(0xFF43965A), // 2: Green
-    Color(0xFFB87D31), // 3: Orange
+    Color(0xFFA85E26), // 3: Orange
     Color(0xFF7C4478), // 4: Purple
     Color(0xFFB59B40), // 5: Yellow
   ];

@@ -94,7 +94,7 @@ class GridRenderer extends PositionComponent
   // [ROAD WIDTH] Widened 2026-09-01 from fill 0.48 / outline 0.60 to fill
   // 0.64 / outline 0.76 (inlined below on every Paint — there is no shared
   // named constant, so any future change here must touch all ten fill/
-  // outline strokeWidths), chasing Mini Motorways' measured ~3x
+  // outline strokeWidths), chasing a roughly 3x
   // road-to-car width ratio. Full 3x would be cellSize*0.79 (3x the
   // car's actual painted silhouette, cellSize*0.2634 — see
   // `_maxSafeLaneOffsetMagnitude` in car_component.dart) but that pushes
@@ -324,7 +324,7 @@ class GridRenderer extends PositionComponent
     );
     if (_spawnAnimations.isEmpty) return;
 
-    // Mini Motorways pop-in: the cached building is hidden under a
+    // Pop-in: the cached building is hidden under a
     // ground-coloured veil while a live copy scales up with a small
     // overshoot, then the veil drops and the cached one shows through.
     final ground = _mapBackgroundColor;
@@ -398,8 +398,8 @@ class GridRenderer extends PositionComponent
     }
   }
 
-  /// Idle houses show their car parked on the driveway (Mini Motorways
-  /// houses always have their car home when it isn't out on a trip).
+  /// Idle houses show their car parked on the driveway (a house always has
+  /// its car home when it isn't out on a trip).
   void _drawParkedCars(Canvas canvas) {
     final sprites = game.vehicleSprites;
     if (sprites.isEmpty) return;
@@ -453,7 +453,7 @@ class GridRenderer extends PositionComponent
   Color get _mapBackgroundColor {
     switch (game.selectedMapType) {
       case MapType.zen:
-        return const Color(0xFF3A404E);
+        return const Color(0xFF33423D);
       case MapType.andes:
         return const Color(0xFF3F3731);
       case MapType.nile:
@@ -541,7 +541,7 @@ class GridRenderer extends PositionComponent
     }
 
     // Ambient ground: a few big, very soft darker "hill" blobs and a couple
-    // of lighter ones, like the terrain shading behind a Mini Motorways map.
+    // of lighter ones, like soft terrain shading behind the map.
     // Same seed per map so the landscape is stable across chunk rebuilds.
     final hills = math.Random(game.selectedMapType.index * 7919 + 11);
     // Each blob is three concentric discs at low alpha so its edge fades
@@ -568,7 +568,7 @@ class GridRenderer extends PositionComponent
       blob(hx, hy, r, lightHill);
     }
 
-    // Mini Motorways ground is flat otherwise: no grid marks in the play area.
+    // The ground is flat otherwise: no grid marks in the play area.
 
     return recorder.endRecording();
   }
@@ -672,7 +672,7 @@ class GridRenderer extends PositionComponent
     if (!any) return;
 
     // Shoreline first, fill on top: the fill covers every interior stroke,
-    // so only the outer coastline keeps its pale edge (Mini Motorways).
+    // so only the outer coastline keeps its pale edge.
     final borderPaint = Paint()
       ..color = GameConstants.waterEdgeColor.withValues(alpha: 0.6)
       ..style = PaintingStyle.stroke
@@ -797,7 +797,7 @@ class GridRenderer extends PositionComponent
     }
 
     if (!any) return;
-    // Mini Motorways hills: darker lumps of the ground colour with a
+    // Hills: darker lumps of the ground colour with a
     // slightly lighter crown, and a long shadow like the buildings cast.
     _drawLongShadow(canvas, basePath, cellSize * 0.5);
     canvas.drawPath(basePath, Paint()..color = Colors.black.withValues(alpha: 0.28));
@@ -849,7 +849,7 @@ class GridRenderer extends PositionComponent
   ) {
     final roadPath = Path();
     // Building driveway necks: drawn narrower than the road so a house
-    // (0.6 of a tile) covers them cleanly — Mini Motorways' little nub.
+    // (0.6 of a tile) covers them cleanly — a little nub.
     final drivewayPath = Path();
     final dirtRoadPath = Path();
     final tunnelPath = Path();
@@ -1012,7 +1012,7 @@ class GridRenderer extends PositionComponent
     canvas.drawPath(drivewayPath, _drivewayOutlinePaint);
     canvas.drawPath(drivewayPath, _drivewayPaint);
 
-    // Mini Motorways tunnel: the road's edges turn into a dashed line where
+    // Tunnel: the road's edges turn into a dashed line where
     // it passes under the mountain, nothing else.
     _tunnelPaint.strokeCap = StrokeCap.butt;
     canvas.drawPath(tunnelPath, _tunnelPaint);
@@ -1236,7 +1236,7 @@ class GridRenderer extends PositionComponent
     // Left independent of the car's own painted width (still comfortably
     // covers it either way; see _maxSafeLaneOffsetMagnitude in
     // car_component.dart for that real number, cellSize*0.2634).
-    // Mini Motorways motorway: a gold band a bit wider than a road, pale
+    // Express lane: a violet band a bit wider than a road, pale
     // diagonal dashes along it, and a round white ramp badge at each end.
     final laneStroke = cellSize * GameConstants.roadWidth * 1.3;
     final lanePaint = Paint()
@@ -1309,7 +1309,7 @@ class GridRenderer extends PositionComponent
       if (metrics.isNotEmpty) {
         final metric = metrics.first;
         final totalLen = metric.length;
-        // Pale slanted dashes across the band (the MM motorway texture).
+        // Pale slanted dashes across the band (the express-lane texture).
         final half = laneStroke * 0.42;
         for (double d = cellSize * 0.5; d < totalLen - cellSize * 0.4; d += cellSize * 0.42) {
           final tan = metric.getTangentForOffset(d);
@@ -1512,7 +1512,7 @@ class GridRenderer extends PositionComponent
   }
 
   /// Long soft shadow every building casts toward the bottom-right, like
-  /// Mini Motorways' single light source. Drawn into one alpha layer so the
+  /// A single light source. Drawn into one alpha layer so the
   /// overlapping copies don't stack up darker.
   void _drawLongShadow(Canvas canvas, Path shape, double length) {
     final bounds = shape.getBounds().inflate(length + 4);
@@ -1527,7 +1527,7 @@ class GridRenderer extends PositionComponent
     canvas.restore();
   }
 
-  /// A Mini Motorways block: flat top face of the colour, a darker band along
+  /// A building block: flat top face of the colour, a darker band along
   /// the bottom for thickness, long shadow underneath.
   void _drawBlock(Canvas canvas, Rect rect, double radius, Color color, Color side) {
     final band = rect.height * 0.16;
@@ -1567,7 +1567,7 @@ class GridRenderer extends PositionComponent
   static Color _bevelShade(Color c) =>
       Color.lerp(c, const Color(0xFF14161B), GameConstants.buildingBevelMix)!;
 
-  /// Mini Motorways shop: a pavement lot card (road fill, light edge line)
+  /// Shop: a pavement lot card (road fill, light edge line)
   /// with the driveway running into it, hatch marks on the free tarmac, and
   /// a big bevelled block of the district colour casting its long shadow.
   /// Called with the CENTRE of the 2x2 block and a scale that already
@@ -1689,21 +1689,34 @@ class GridRenderer extends PositionComponent
 
     _drawBlock(canvas, bRect, bSize * 0.14, color, side);
 
-    // White pin badge on the block, the Mini Motorways destination mark.
-    _drawPin(canvas, Offset(bRect.left + bSize * 0.22, bRect.top + bSize * 0.02), cellSize * 0.30, Colors.white);
+    // White parcel chip on the block: the destination mark.
+    _drawParcel(canvas, Offset(bRect.left + bSize * 0.22, bRect.top + bSize * 0.02), cellSize * 0.30, Colors.white);
   }
 
-  /// Map-pin glyph: teardrop with a dark hole, tip at [tip].
-  void _drawPin(Canvas canvas, Offset tip, double h, Color color) {
-    final r = h * 0.36;
-    final c = Offset(tip.dx, tip.dy - h + r);
-    final path = Path()
-      ..moveTo(tip.dx, tip.dy)
-      ..lineTo(c.dx - r * 0.95, c.dy + r * 0.32)
-      ..arcToPoint(Offset(c.dx + r * 0.95, c.dy + r * 0.32), radius: Radius.circular(r), largeArc: true)
-      ..close();
-    canvas.drawPath(path, Paint()..color = color);
-    canvas.drawCircle(c, r * 0.42, Paint()..color = const Color(0xFF2B303B));
+  /// Parcel-chip glyph: a small rounded box with a ground-coloured strap
+  /// across it, standing on [base] (bottom centre), [h] tall. Reads as
+  /// "a delivery is waiting here".
+  void _drawParcel(Canvas canvas, Offset base, double h, Color color) {
+    final w = h * 0.82;
+    final bh = h * 0.68;
+    final box = Rect.fromLTWH(base.dx - w / 2, base.dy - bh, w, bh);
+    final rr = RRect.fromRectAndRadius(box, Radius.circular(w * 0.18));
+    canvas.drawRRect(rr, Paint()..color = color);
+    // Strap and flap line in the ground colour so they read as cut-outs.
+    final strap = Paint()
+      ..color = _mapBackgroundColor
+      ..strokeWidth = w * 0.14
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(base.dx, box.top + bh * 0.12),
+      Offset(base.dx, box.bottom - bh * 0.12),
+      strap,
+    );
+    canvas.drawLine(
+      Offset(box.left + w * 0.14, box.top + bh * 0.34),
+      Offset(box.right - w * 0.14, box.top + bh * 0.34),
+      strap..strokeWidth = w * 0.09,
+    );
   }
 
   // [ROAD WIDTH 2026-09-01] The opening (dark hole) width/offset below track
@@ -1745,11 +1758,11 @@ class GridRenderer extends PositionComponent
   }
 
   void _drawTunnelPortal(Canvas canvas, double cx, double cy, Direction dir) {
-    // Tunnels read through their dashed edges alone (Mini Motorways); the
+    // Tunnels read through their dashed edges alone; the
     // old concrete headwall portal is gone.
   }
 
-  /// Mini Motorways bridge: the road simply continues over the water, and a
+  /// Bridge: the road simply continues over the water, and a
   /// pair of short dark tick marks across it at each shore says "bridge".
   void _drawBridgeRails(Canvas canvas, double cx, double cy, GridCell cell) {
     final tick = Paint()
@@ -1879,7 +1892,7 @@ class GridRenderer extends PositionComponent
       ..strokeWidth = 1.2;
 
     // One lamp per approach, sitting on the right-hand side of that lane at
-    // the stop line — the Mini Motorways red/green dot pairs.
+    // the stop line — red/green lamp pairs.
     final d = cellSize * 0.30; // distance from centre to the stop line
     final o = cellSize * 0.14; // lateral offset to the lane's right side
     final r = cellSize * 0.07;
@@ -1977,7 +1990,7 @@ class GridRenderer extends PositionComponent
       }
 
       if (overflowLevel > 0) {
-        // Overflow timer, Mini Motorways style: a thin ring around the whole
+        // Overflow timer: a thin ring around the whole
         // block with the red arc eating round it. No dark disc, no hourglass;
         // the pins keep showing the queue underneath.
         final progress = overflowLevel.clamp(0.0, 1.0);
@@ -2003,7 +2016,7 @@ class GridRenderer extends PositionComponent
         );
       }
       {
-        // Pips sit just above the block.
+        // Parcel chips sit just above the block.
         final indicatorY = cy - cellSize * fpN / 2 - cellSize * 0.2;
         final pinH = cellSize * 0.34;
         final spacing = cellSize * 0.22;
@@ -2012,7 +2025,7 @@ class GridRenderer extends PositionComponent
             : GameConstants.maxDemand;
 
         for (int i = 0; i < demand; i++) {
-          _drawPin(
+          _drawParcel(
             canvas,
             Offset(cx - (demand - 1) * spacing / 2 + i * spacing, indicatorY + pinH * 0.5),
             pinH,

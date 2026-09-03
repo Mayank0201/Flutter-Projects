@@ -1,6 +1,9 @@
-# flow_grid
+# Flow Grid
 
-A new Flutter project.
+A minimalist traffic-flow puzzle game built with Flutter and Flame. Draw roads between
+colour-coded houses and shops, keep every delivery moving, and survive as the city grows.
+
+All rights reserved. See `LICENSE`.
 
 ## Getting Started
 

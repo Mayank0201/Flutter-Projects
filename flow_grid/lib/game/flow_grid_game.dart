@@ -170,7 +170,7 @@ class FlowGridGame extends FlameGame
   int gridRows = 10;
   double hudPanelWidth = 140;
 
-  // Active region (Mini-Motorways style): a smaller centered rectangle that
+  // Active region: a smaller centered rectangle that
   // grows each week. Both spawning AND player builds are confined to this
   // region; the camera zoom is derived from its size so it always fills the
   // visible area with a bit of padding.
@@ -390,8 +390,7 @@ class FlowGridGame extends FlameGame
     // 'normal_vehicles.png' is a flat, minimal rounded-capsule car (no cabin
     // block, no wheel nubs, no heavy outline) — the toy-car-looking cabin/
     // wheel design tested earlier ('vehicles_option_a.png') was rejected as
-    // too cartoonish; this matches the game's calmer, Mini-Motorways-style
-    // aesthetic instead.
+    // too cartoonish; this matches the game's calmer aesthetic instead.
     final image = await images.load('normal_vehicles.png');
     const cols = 6;
     final cellW = image.width / cols;
@@ -518,7 +517,7 @@ class FlowGridGame extends FlameGame
       }
     } else {
       // New Game
-      // Mini-Motorways style — the active play region grows from ~20x14 to
+      // The active play region grows from ~20x14 to
       // around 32x22 by late game, so generating a 64x40 grid was 2-3x more
       // cells than the player can ever see. The extra cells were a major
       // mobile cost (chunk pictures, terrain scans, pathfinding) for no
@@ -614,7 +613,7 @@ class FlowGridGame extends FlameGame
     // instantiated above so any code reading their (permanently empty) state
     // (e.g. `activeEvents`) keeps working without null checks everywhere.
     // This keeps the core loop to just: houses, destinations, plain cars,
-    // roads/tunnels/bridges/signals — closer to Mini Motorways' scope.
+    // roads/tunnels/bridges/signals.
     debugPrint("[WORLD_INIT] Components added to game tree");
 
     // Connect callbacks
@@ -1933,7 +1932,7 @@ class FlowGridGame extends FlameGame
 
     switch (activeTool) {
       case BuildTool.road:
-        // Mini-Motorways behaviour: a road drag auto-digs tunnels through
+        // A road drag auto-digs tunnels through
         // mountains and auto-spans bridges over water without the player
         // having to switch tools mid-gesture.
         if (cell.type == CellType.mountain || cell.isTunnel) {
@@ -2082,7 +2081,7 @@ class FlowGridGame extends FlameGame
   void _updateMapSpecificEvents(double dt) {
     // LOWKEY MVP: map-specific road-blocking hazards (blizzard/dust storm/
     // flash flood/drawbridge) are disabled — they read as a "big feature"
-    // more than the calm, low-drama Mini Motorways feel we're going for.
+    // more than the calm, low-drama feel we're going for.
     // Terrain variety (ice roads, mountains, water) stays; only the
     // road-blocking weather EVENTS are turned off.
     return;

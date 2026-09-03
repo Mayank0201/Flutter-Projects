@@ -1296,7 +1296,7 @@ class GridManager {
     }
 
     updateNodeConnections(x, y);
-    // Mini Motorways rule: neighbouring road tiles are always one network.
+    // Neighbouring road tiles are always one network.
     // Until now an edge only existed between cells drawn in the SAME drag,
     // so two roads placed side by side in separate gestures (or a road drawn
     // up to a driveway stub) never joined.
