@@ -76,7 +76,9 @@ class GameConstants {
   static const double buildingBevelMix = 0.30;
   // Destination lot card: a shade lighter than the road so the shop reads as
   // its own paved island, not more road.
-  static const Color lotColor = roadColor; // lot cards are pavement
+  // Shop lot pad: a dark socket a shade lighter than the board, with a
+  // copper outline; copper fill is reserved for traces and via pads.
+  static const Color lotColor = Color(0xFF223A3E); // lot cards are pavement
 
   // Destinations occupy a 2x2 footprint: the anchor cell (the one that owns
   // demand/age/driveway state) plus three `partOf` cells. See
@@ -123,15 +125,16 @@ class GameConstants {
   static const double truckSpeedMultiplier = 0.6;
   static const double serviceVanSpeedMultiplier = 1.3;
 
-  // Colors - deep teal-ink dark mode. The whole ground/road/water family
-  // sits on a cool teal hue so the game has its own identity.
-  static const Color backgroundColor = Color(0xFF1D2A30);
-  static const Color gridLineColor = Color(0xFF18232A);
-  // Roads are a shade darker than the ground and carry a thin light kerb
-  // line; the kerb is what makes them read against the ground.
-  static const Color roadColor = Color(0xFF19262B);
-  static const Color roadFillColor = Color(0xFF19262B);
-  static const Color roadEdgeColor = Color(0xFF7FA3A6);
+  // Colors - circuit board. Deep board-ink ground, copper traces for
+  // roads, chips for buildings, glowing dots for cars.
+  static const Color backgroundColor = Color(0xFF14262A);
+  static const Color gridLineColor = Color(0xFF1A2F33);
+  // Roads are copper traces: a muted copper fill with a lighter copper
+  // edge, straight runs, 45-degree chamfered corners, via pads at ends and
+  // junctions (GridRenderer paints the pads).
+  static const Color roadColor = Color(0xFF7E5F36);
+  static const Color roadFillColor = Color(0xFF7E5F36);
+  static const Color roadEdgeColor = Color(0xFFBF945C);
   static const double roadWidth = 0.50; // fill, fraction of a tile
   static const double roadEdge = 0.045; // edge line, fraction of a tile
   // Smart-junction ring centreline radius, fraction of a tile. Cars drive
@@ -154,10 +157,14 @@ class GameConstants {
   static const double homeParkingLateral = 0.115; // tiles off the driveway axis
   static const double parkingLaneFadeTiles = 1.0;
 
-  // Trees: olive ovals with a lighter cap and a tiny trunk.
-  static const Color treeColor = Color(0xFF6F8F5C);
-  static const Color treeHighlightColor = Color(0xFF86A46C);
-  static const Color treeTrunkColor = Color(0xFF3E3A33);
+  // Ambient board components (small resistor-like pills with two leads)
+  // scattered on empty tiles where trees used to be.
+  static const List<Color> componentColors = [
+    Color(0xFF4F6B70),
+    Color(0xFF5E6A5A),
+    Color(0xFF6B5F6E),
+  ];
+  static const Color componentLeadColor = Color(0xFF9C7A4C);
   static const double parkingCornerRadius = 0.28; // tiles, in-lot corners
   // Shop lot, measured from the anchor cell centre in tiles: positive
   // "along" is toward the road (the tongue mouth is at +0.5), "strip" runs
@@ -177,18 +184,18 @@ class GameConstants {
 
   // Tunnel & Express Lane
   static const Color tunnelColor = Color(0xFF8A7D6B);
-  static const Color waterColor = Color(0xFF2A5563); // deep teal river
-  static const Color waterEdgeColor = Color(0xFF86BFC9);
+  static const Color waterColor = Color(0xFF1F4B57); // deep teal pool
+  static const Color waterEdgeColor = Color(0xFF6FB3BE);
   static const Color bridgeColor = roadColor; // the road just continues over water
-  static const Color expressLaneColor = Color(0xFF8E7FD8); // violet express band
-  static const Color expressLaneBorderColor = Color(0xFF5D51A3);
+  static const Color expressLaneColor = Color(0xFFB9C4CC); // tinned (silver) trace
+  static const Color expressLaneBorderColor = Color(0xFF6E7B84);
 
   // Congestion — muted ochre/terracotta instead of flat-UI traffic-light
   // yellow/red, so it reads as calm information rather than an alarm.
   static const Color congestionLowColor = Color(0xFFC9A24B);
   static const Color congestionHighColor = Color(0xFFC17A5E);
 
-  static const Color hudBackground = Color(0xFF161F23);
+  static const Color hudBackground = Color(0xFF10191C);
   static const Color hudText = Color(0xFFD8DCE2);
 
   static const Color carWindowColor = Color(0x80FFFFFF);

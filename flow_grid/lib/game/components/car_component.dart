@@ -2861,10 +2861,6 @@ class CarComponent extends PositionComponent
   // One drawImageRect call per car; all 6 colors share one GPU texture.
   // ============================================================
 
-  static final Paint _spritePaint = Paint()
-    ..filterQuality = FilterQuality.medium
-    ..isAntiAlias = true;
-
   @override
   void render(Canvas canvas) {
     // Cars hide immediately on arrival at either end of the trip — same
@@ -2873,10 +2869,6 @@ class CarComponent extends PositionComponent
     // per user request; keep both cases simple and consistent.
     if (arrived) return;
     // Waiting cars stay visible: they are parked (see _parkAtCurrentEnd).
-
-    final sprites = game.vehicleSprites;
-    if (sprites.isEmpty) return;
-    final sprite = sprites[colorIndex % sprites.length];
 
     // 1. Draw trailing paths in local space (before saving/translating/rotating canvas)
     final baseColor = GameConstants.getBuildingColor(colorIndex);
@@ -2918,31 +2910,21 @@ class CarComponent extends PositionComponent
       }
     }
 
-    // Flame's render() canvas has (0,0) at the component's top-left, not at
-    // the anchor — so we have to translate to size/2 to land on the world
-    // `position` (= the road centerline) before rotating + drawing.
-    canvas.save();
-    canvas.translate(size.x / 2, size.y / 2);
-    canvas.rotate(pi / 2);
-
-    // Source art faces "up" (north); after the pi/2 rotation that maps to +x
-    // (east), which is the component's forward direction.
-    final length = size.x;
-    final width = length / game.vehicleSpriteAspect;
-
-    // 2. [Removed shadow to avoid black highlight]
-
-    // 3. Draw vehicle sprite
-    // Rotated sprites sampled nearest-neighbour shimmer as they move sub-pixel
-    // through a curve (every edge pixel flips on/off). Bilinear + AA keeps
-    // the silhouette stable.
-    sprite.render(
-      canvas,
-      position: Vector2(-width / 2, -length / 2),
-      size: Vector2(width, length),
-      overridePaint: _spritePaint,
-    );
-
-    canvas.restore();
+    // Cars are glowing dots gliding along the traces. The render canvas
+    // origin is the component's top-left, so the dot sits at size/2.
+    drawDot(canvas, Offset(size.x / 2, size.y / 2), size.x * 0.40, baseColor);
   }
+
+  /// The car glyph: a soft halo, a solid core and a small highlight.
+  /// Shared with GridRenderer's parked-car pass so both match.
+  static void drawDot(Canvas canvas, Offset c, double r, Color color) {
+    canvas.drawCircle(c, r * 1.9, Paint()..color = color.withValues(alpha: 0.18));
+    canvas.drawCircle(c, r, Paint()..color = color);
+    canvas.drawCircle(
+      Offset(c.dx - r * 0.3, c.dy - r * 0.3),
+      r * 0.28,
+      Paint()..color = Colors.white.withValues(alpha: 0.55),
+    );
+  }
+
 }

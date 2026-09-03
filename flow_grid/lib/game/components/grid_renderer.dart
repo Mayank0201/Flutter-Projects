@@ -401,8 +401,6 @@ class GridRenderer extends PositionComponent
   /// Idle houses show their car parked on the driveway (a house always has
   /// its car home when it isn't out on a trip).
   void _drawParkedCars(Canvas canvas) {
-    final sprites = game.vehicleSprites;
-    if (sprites.isEmpty) return;
     final viewport = game.camera.visibleWorldRect.inflate(cellSize);
     // Slots currently out on a trip, per house.
     final out = <String, Set<int>>{};
@@ -415,12 +413,11 @@ class GridRenderer extends PositionComponent
           )
           .add(car.homeSlot);
     }
-    final length = cellSize * 0.34;
-    final width = length / game.vehicleSpriteAspect;
+    final r = cellSize * 0.34 * 0.40;
     for (final house in gridManager.houses) {
       final taken = out['${house.x},${house.y}'] ?? const <int>{};
       final cell = gridManager.grid[house.y][house.x];
-      final sprite = sprites[(cell.colorIndex ?? 0) % sprites.length];
+      final color = GameConstants.getBuildingColor(cell.colorIndex ?? 0);
       for (int slot = 0; slot < GameConstants.homeParkingSlots; slot++) {
         if (taken.contains(slot)) continue;
         final spot = CarComponent.homeParkingSpot(
@@ -434,23 +431,10 @@ class GridRenderer extends PositionComponent
         if (spot == null) continue;
         final p = Offset(spot.$1.x, spot.$1.y);
         if (!viewport.contains(p)) continue;
-        canvas.save();
-        canvas.translate(p.dx, p.dy);
-        canvas.rotate(spot.$2 + math.pi / 2);
-        sprite.render(
-          canvas,
-          position: Vector2(-width / 2, -length / 2),
-          size: Vector2(width, length),
-          overridePaint: _parkedCarPaint,
-        );
-        canvas.restore();
+        CarComponent.drawDot(canvas, p, r, color);
       }
     }
   }
-
-  static final Paint _parkedCarPaint = Paint()
-    ..filterQuality = FilterQuality.medium
-    ..isAntiAlias = true;
 
   /// The actual visible board background for the current map -- each
   /// MapType has its own distinct tint (Andes' is a warm dark brown,
@@ -463,17 +447,17 @@ class GridRenderer extends PositionComponent
   Color get _mapBackgroundColor {
     switch (game.selectedMapType) {
       case MapType.zen:
-        return const Color(0xFF2A3A40);
+        return const Color(0xFF1B3136);
       case MapType.andes:
-        return const Color(0xFF3F3731);
+        return const Color(0xFF3A3129);
       case MapType.nile:
-        return const Color(0xFF2C4448);
+        return const Color(0xFF1E3A3E);
       case MapType.arctic:
-        return const Color(0xFF35434E);
+        return const Color(0xFF243541);
       case MapType.savanna:
-        return const Color(0xFF443C31);
+        return const Color(0xFF3D3628);
       case MapType.delta:
-        return const Color(0xFF2B4038);
+        return const Color(0xFF203A30);
     }
   }
 
@@ -719,21 +703,19 @@ class GridRenderer extends PositionComponent
   // not a full scan-and-filter over every mountain cluster in the whole
   // map on every chunk build -- see that index's field comment for the
   // Andes-map lag this fixed.
-  /// Scattered trees (an olive oval canopy with a lighter cap and a tiny
-  /// trunk) on empty tiles. Placement is a hash of the cell, so it is
-  /// stable, and a tree simply disappears when something is built on its
-  /// tile because the chunk is repainted from the grid.
+  /// Ambient board components: small resistor-like pills with two short
+  /// leads, scattered on empty tiles. Placement is a hash of the cell, so it
+  /// is stable, and a component simply disappears when something is built
+  /// on its tile because the chunk is repainted from the grid.
   void _drawTrees(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     final seed = game.selectedMapType.index * 1000003 + 17;
-    final canopy = Paint()..color = GameConstants.treeColor;
-    final cap = Paint()..color = GameConstants.treeHighlightColor;
-    final trunk = Paint()
-      ..color = GameConstants.treeTrunkColor
-      ..strokeWidth = cellSize * 0.05
+    final lead = Paint()
+      ..color = GameConstants.componentLeadColor
+      ..strokeWidth = cellSize * 0.04
       ..strokeCap = StrokeCap.round;
     final shadow = Paint()
       ..color = GameConstants.buildingShadowColor
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.05);
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.04);
     for (int x = minX; x < maxX; x++) {
       for (int y = minY; y < maxY; y++) {
         if (!gridManager.isValid(x, y)) continue;
@@ -747,15 +729,30 @@ class GridRenderer extends PositionComponent
         final v = ((h >> 16) & 0xFFFF) / 65535.0;
         final cx = offsetX + x * cellSize + cellSize * (0.35 + v * 0.3);
         final cy = offsetY + y * cellSize + cellSize * (0.35 + u * 6.0);
-        final r = cellSize * (0.15 + v * 0.05);
-        final body = Rect.fromCenter(center: Offset(cx, cy), width: r * 2.2, height: r * 1.7);
-        canvas.drawOval(body.shift(Offset(0, r * 0.35)), shadow);
-        canvas.drawLine(Offset(cx, cy + r * 0.6), Offset(cx, cy + r * 1.15), trunk);
-        canvas.drawOval(body, canopy);
-        canvas.drawOval(
-          Rect.fromCenter(center: Offset(cx - r * 0.25, cy - r * 0.3), width: r * 1.1, height: r * 0.7),
-          cap,
-        );
+        final vertical = ((h >> 8) & 1) == 1;
+        final color = GameConstants
+            .componentColors[(h >> 4) % GameConstants.componentColors.length];
+        final len = cellSize * 0.26;
+        final wid = cellSize * 0.12;
+        final body = vertical
+            ? Rect.fromCenter(center: Offset(cx, cy), width: wid, height: len)
+            : Rect.fromCenter(center: Offset(cx, cy), width: len, height: wid);
+        final rr = RRect.fromRectAndRadius(body, Radius.circular(wid * 0.5));
+        final ext = cellSize * 0.10;
+        if (vertical) {
+          canvas.drawLine(Offset(cx, body.top - ext), Offset(cx, body.bottom + ext), lead);
+        } else {
+          canvas.drawLine(Offset(body.left - ext, cy), Offset(body.right + ext, cy), lead);
+        }
+        canvas.drawRRect(rr.shift(Offset(0, cellSize * 0.03)), shadow);
+        canvas.drawRRect(rr, Paint()..color = color);
+        // A single band across the body, like a resistor stripe.
+        final band = Paint()..color = GameConstants.roadEdgeColor.withValues(alpha: 0.7);
+        if (vertical) {
+          canvas.drawRect(Rect.fromLTWH(body.left, cy - wid * 0.18, wid, wid * 0.36), band);
+        } else {
+          canvas.drawRect(Rect.fromLTWH(cx - wid * 0.18, body.top, wid * 0.36, wid), band);
+        }
       }
     }
   }
@@ -860,6 +857,8 @@ class GridRenderer extends PositionComponent
     int maxY,
   ) {
     final roadPath = Path();
+    // Via pads: copper discs at trace ends and junctions.
+    final vias = <Offset>[];
     // Building driveway necks: drawn narrower than the road so a house
     // (0.6 of a tile) covers them cleanly — a little nub.
     final drivewayPath = Path();
@@ -928,6 +927,7 @@ class GridRenderer extends PositionComponent
         final w = cell.connLeft;
 
         int connCount = (n ? 1 : 0) + (e ? 1 : 0) + (s ? 1 : 0) + (w ? 1 : 0);
+        final k = cellSize * 0.22; // chamfer size
 
         final Path targetPath;
         if (cell.isIceRoad) {
@@ -941,6 +941,10 @@ class GridRenderer extends PositionComponent
           targetPath = dirtRoadPath;
         } else {
           targetPath = roadPath;
+        }
+        final plainTrace = identical(targetPath, roadPath);
+        if (plainTrace && (connCount == 1 || connCount > 2)) {
+          vias.add(Offset(midX, midY));
         }
 
         if (connCount == 0) {
@@ -977,18 +981,28 @@ class GridRenderer extends PositionComponent
             targetPath.moveTo(cx, midY);
             targetPath.lineTo(cx + cellSize, midY);
           } else {
+            // Circuit-trace corner: two straight runs joined by a 45-degree
+            // chamfer instead of a rounded arc.
             if (n && e) {
               targetPath.moveTo(midX, cy);
-              targetPath.quadraticBezierTo(midX, midY, cx + cellSize, midY);
+              targetPath.lineTo(midX, midY - k);
+              targetPath.lineTo(midX + k, midY);
+              targetPath.lineTo(cx + cellSize, midY);
             } else if (e && s) {
               targetPath.moveTo(cx + cellSize, midY);
-              targetPath.quadraticBezierTo(midX, midY, midX, cy + cellSize);
+              targetPath.lineTo(midX + k, midY);
+              targetPath.lineTo(midX, midY + k);
+              targetPath.lineTo(midX, cy + cellSize);
             } else if (s && w) {
               targetPath.moveTo(midX, cy + cellSize);
-              targetPath.quadraticBezierTo(midX, midY, cx, midY);
+              targetPath.lineTo(midX, midY + k);
+              targetPath.lineTo(midX - k, midY);
+              targetPath.lineTo(cx, midY);
             } else if (w && n) {
               targetPath.moveTo(cx, midY);
-              targetPath.quadraticBezierTo(midX, midY, midX, cy);
+              targetPath.lineTo(midX - k, midY);
+              targetPath.lineTo(midX, midY - k);
+              targetPath.lineTo(midX, cy);
             }
           }
         } else if (connCount > 2) {
@@ -1025,6 +1039,15 @@ class GridRenderer extends PositionComponent
       ..strokeWidth = cellSize * 0.34;
     canvas.drawPath(drivewayPath, _drivewayOutlinePaint);
     canvas.drawPath(drivewayPath, _drivewayPaint);
+    // Via pads over the trace ends and junctions: copper disc, lighter rim,
+    // dark drilled centre.
+    final viaR = cellSize * 0.30;
+    final rim = cellSize * GameConstants.roadEdge * 2;
+    for (final v in vias) {
+      canvas.drawCircle(v, viaR, Paint()..color = _roadOutlinePaint.color);
+      canvas.drawCircle(v, viaR - rim, Paint()..color = _roadPaint.color);
+      canvas.drawCircle(v, cellSize * 0.085, Paint()..color = _mapBackgroundColor);
+    }
 
     // Tunnel: the road's edges turn into a dashed line where
     // it passes under the mountain, nothing else.
@@ -1525,29 +1548,14 @@ class GridRenderer extends PositionComponent
   /// overlapping copies don't stack up darker.
   /// Short, soft drop shadow straight below [shape], offset by [length]:
   /// a lit-from-above look. (Name kept from the earlier long cast shadow.)
-  void _drawLongShadow(Canvas canvas, Path shape, double length) {
+  void _drawLongShadow(Canvas canvas, Path shape, double length) =>
+      _drawLongShadowAt(canvas, shape, Offset(0, length));
+
+  void _drawLongShadowAt(Canvas canvas, Path shape, Offset by) {
     final p = Paint()
       ..color = GameConstants.buildingShadowColor
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, length * 0.5);
-    canvas.drawPath(shape.shift(Offset(0, length)), p);
-  }
-
-  /// A building block: flat top face of the colour, a darker band along
-  /// the bottom for thickness, long shadow underneath.
-  void _drawBlock(Canvas canvas, Rect rect, double radius, Color color, Color side) {
-    final band = rect.height * 0.16;
-    final full = RRect.fromRectAndRadius(rect, Radius.circular(radius));
-    final top = RRect.fromRectAndRadius(
-      Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height - band),
-      Radius.circular(radius),
-    );
-    _drawLongShadow(
-      canvas,
-      Path()..addRRect(full),
-      rect.width * GameConstants.buildingShadowLength,
-    );
-    canvas.drawRRect(full, Paint()..color = side);
-    canvas.drawRRect(top, Paint()..color = color);
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, by.distance * 0.5);
+    canvas.drawPath(shape.shift(by), p);
   }
 
   void _drawHouse(
@@ -1595,12 +1603,37 @@ class GridRenderer extends PositionComponent
         Paint()..color = GameConstants.roadColor,
       );
     }
-    final rect = Rect.fromCenter(center: Offset(bx, by), width: size, height: size);
     final idx = GameConstants.buildingColors.indexOf(color);
     final side = idx >= 0
         ? GameConstants.getBuildingDarkColor(idx)
         : _bevelShade(color);
-    _drawBlock(canvas, rect, size * 0.22, color, side);
+    _drawDiamondChip(canvas, Offset(bx, by), size, color, side);
+  }
+
+  /// House glyph: a small chip set on the diagonal with a darker rim and a
+  /// dark drilled centre, so it reads as a component, not a block.
+  void _drawDiamondChip(Canvas canvas, Offset c, double size, Color color, Color rim) {
+    final s = size * 0.74;
+    final rr = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset.zero, width: s, height: s),
+      Radius.circular(s * 0.16),
+    );
+    canvas.save();
+    canvas.translate(c.dx, c.dy);
+    canvas.rotate(math.pi / 4);
+    // Shadow still falls straight down on screen: rotate the offset back.
+    final len = s * GameConstants.buildingShadowLength;
+    _drawLongShadowAt(canvas, Path()..addRRect(rr), Offset(len * 0.7071, len * 0.7071));
+    canvas.drawRRect(rr, Paint()..color = color);
+    canvas.drawRRect(
+      rr,
+      Paint()
+        ..color = rim
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = s * 0.11,
+    );
+    canvas.drawCircle(Offset.zero, s * 0.13, Paint()..color = _mapBackgroundColor);
+    canvas.restore();
   }
 
   static Offset _dirOffset(Direction d) {
@@ -1737,35 +1770,63 @@ class GridRenderer extends PositionComponent
       canvas.drawLine(a, b, stallPaint);
     }
 
-    _drawBlock(canvas, bRect, bSize * 0.14, color, side);
+    final vertical = entry == Direction.north || entry == Direction.south;
+    _drawIcChip(canvas, bRect, color, side, vertical);
 
-    // White parcel chip on the block: the destination mark.
-    _drawParcel(canvas, Offset(bRect.left + bSize * 0.22, bRect.top + bSize * 0.02), cellSize * 0.30, Colors.white);
+    // Status LED near pin 1.
+    _drawLed(canvas, Offset(bRect.left + bSize * 0.20, bRect.top + bSize * 0.20), cellSize * 0.26, Colors.white);
   }
 
-  /// Parcel-chip glyph: a small rounded box with a ground-coloured strap
-  /// across it, standing on [base] (bottom centre), [h] tall. Reads as
-  /// "a delivery is waiting here".
-  void _drawParcel(Canvas canvas, Offset base, double h, Color color) {
-    final w = h * 0.82;
-    final bh = h * 0.68;
-    final box = Rect.fromLTWH(base.dx - w / 2, base.dy - bh, w, bh);
-    final rr = RRect.fromRectAndRadius(box, Radius.circular(w * 0.18));
+  /// Shop glyph: an IC package. Body in the district colour with a darker
+  /// inset line, a dark pin-1 dot, and short copper legs along the two sides
+  /// parallel to the driveway.
+  void _drawIcChip(Canvas canvas, Rect body, Color color, Color inset, bool vertical) {
+    final r = Radius.circular(body.width * 0.10);
+    final rr = RRect.fromRectAndRadius(body, r);
+    final legW = body.width * 0.07;
+    final legL = body.width * 0.13;
+    final leg = Paint()..color = GameConstants.roadEdgeColor;
+    const pins = 4;
+    for (int i = 0; i < pins; i++) {
+      final t = (i + 0.5) / pins;
+      if (vertical) {
+        // driveway runs north-south: legs on the east and west sides
+        final y = body.top + body.height * t;
+        canvas.drawRect(Rect.fromLTWH(body.left - legL, y - legW / 2, legL + 2, legW), leg);
+        canvas.drawRect(Rect.fromLTWH(body.right - 2, y - legW / 2, legL + 2, legW), leg);
+      } else {
+        final x = body.left + body.width * t;
+        canvas.drawRect(Rect.fromLTWH(x - legW / 2, body.top - legL, legW, legL + 2), leg);
+        canvas.drawRect(Rect.fromLTWH(x - legW / 2, body.bottom - 2, legW, legL + 2), leg);
+      }
+    }
+    _drawLongShadow(canvas, Path()..addRRect(rr), body.width * GameConstants.buildingShadowLength);
     canvas.drawRRect(rr, Paint()..color = color);
-    // Strap and flap line in the ground colour so they read as cut-outs.
-    final strap = Paint()
-      ..color = _mapBackgroundColor
-      ..strokeWidth = w * 0.14
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      Offset(base.dx, box.top + bh * 0.12),
-      Offset(base.dx, box.bottom - bh * 0.12),
-      strap,
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(body.deflate(body.width * 0.12), Radius.circular(body.width * 0.05)),
+      Paint()
+        ..color = inset
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = body.width * 0.035,
     );
-    canvas.drawLine(
-      Offset(box.left + w * 0.14, box.top + bh * 0.34),
-      Offset(box.right - w * 0.14, box.top + bh * 0.34),
-      strap..strokeWidth = w * 0.09,
+    canvas.drawCircle(
+      Offset(body.right - body.width * 0.18, body.bottom - body.width * 0.18),
+      body.width * 0.05,
+      Paint()..color = _mapBackgroundColor,
+    );
+  }
+
+  /// LED glyph: a small lit dot with a soft halo, standing on [base]
+  /// (bottom centre), [h] tall. Demand reads as a row of lit LEDs.
+  void _drawLed(Canvas canvas, Offset base, double h, Color color) {
+    final r = h * 0.26;
+    final c = Offset(base.dx, base.dy - h * 0.5);
+    canvas.drawCircle(c, r * 2.0, Paint()..color = color.withValues(alpha: 0.16));
+    canvas.drawCircle(c, r, Paint()..color = color);
+    canvas.drawCircle(
+      Offset(c.dx - r * 0.3, c.dy - r * 0.3),
+      r * 0.3,
+      Paint()..color = Colors.white.withValues(alpha: 0.7),
     );
   }
 
@@ -2040,7 +2101,7 @@ class GridRenderer extends PositionComponent
       }
 
       if (overflowLevel > 0) {
-        // Overflow timer: a thin gauge bar above the parcel chips that
+        // Overflow timer: a thin gauge bar above the demand LEDs that
         // fills red as the shop runs out of patience.
         final progress = overflowLevel.clamp(0.0, 1.0);
         final w = cellSize * fpN * 0.78;
@@ -2062,7 +2123,7 @@ class GridRenderer extends PositionComponent
         }
       }
       {
-        // Parcel chips sit just above the block.
+        // Demand LEDs sit just above the chip.
         final indicatorY = cy - cellSize * fpN / 2 - cellSize * 0.2;
         final pinH = cellSize * 0.34;
         final spacing = cellSize * 0.22;
@@ -2071,7 +2132,7 @@ class GridRenderer extends PositionComponent
             : GameConstants.maxDemand;
 
         for (int i = 0; i < demand; i++) {
-          _drawParcel(
+          _drawLed(
             canvas,
             Offset(cx - (demand - 1) * spacing / 2 + i * spacing, indicatorY + pinH * 0.5),
             pinH,

@@ -87,13 +87,17 @@ Two things about it are easy to miss:
   and the weekly reward popup commits any in-progress drag before pausing.
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
   `GameConstants` presentation flags and are off for the calm look.
-- **Visual language is a calm teal-ink dark mode**: deep teal ground with soft hill
-  blobs and olive oval trees (trees only on empty cells, painted in the chunk layer), roads
-  darker than the ground with a thin light edge (`roadColor` / `roadEdgeColor` /
-  `roadWidth` / `roadEdge` in `GameConstants`), buildings as flat blocks with a darker
-  side band and a short soft drop shadow (`GridRenderer._drawBlock` / `_drawLongShadow`), shop
-  lots styled as pavement with stall lines and a white parcel chip, demand shown as parcel chips and
-  overflow as a gauge bar above the chips. New buildings pop in with an ease-out-back scale under a
+- **Visual language is a calm circuit board.** Deep board-ink ground with soft darker
+  patches and small resistor-like components on empty tiles (`_drawTrees`, hash-placed,
+  chunk layer). Roads are copper traces: muted copper fill, lighter copper edge, straight
+  runs with 45-degree chamfered corners, and via pads (copper disc, rim, dark drilled
+  centre) at every dead end and junction (`vias` in the road pass). Houses are small
+  diamond chips (`_drawDiamondChip`); shops are IC packages with copper pin legs on a
+  pavement pad (`_drawIcChip` inside `_drawDestination`), with a white status LED.
+  Demand is a row of LEDs (`_drawLed`), overflow a gauge bar above them. Cars are glowing
+  dots drawn procedurally (`CarComponent.drawDot`, also used for parked cars); the sprite
+  atlas is loaded but no longer drawn. Buildings cast a short soft drop shadow
+  (`_drawLongShadow`). New buildings pop in with an ease-out-back scale under a
   ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane
   offset in step (`CarComponent._maxSafeLaneOffsetMagnitude` reads
   `GameConstants.roadWidth`).
@@ -110,11 +114,13 @@ Two things about it are easy to miss:
 - Utility glyphs: roundabout = one-road-width ring on the
   `junctionRingRadius` pathing circle with a ground-colour island, signals = red/green lamps per
   approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
-  portal, express lanes = violet band with pale dashes and round white ramp badges.
+  portal, express lanes = tinned silver band with pale dashes and round white ramp badges.
 - **Never name other games in code, comments, docs, the store listing or commit
   messages.** See `changes_required.md` for why. Describe what the game does instead.
   Keep the look its own: no long single-light cast shadows, no ring timers, no map
-  pins. Cars stay colour-coded capsules because that is how a player reads them.
+  pins, no rounded-square blocks, no free-curving rounded-stroke roads. The circuit
+  metaphor (traces, vias, chips, LEDs) is the identity; cars stay colour-coded because
+  that is how a player reads them.
 - Houses spawn at most `GameConstants.homeParkingSlots` cars at a time
   (`FlowGridGame._carsOutFrom`); the timer holds at the threshold until one is home.
 
