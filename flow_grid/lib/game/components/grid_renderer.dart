@@ -1775,8 +1775,8 @@ class GridRenderer extends PositionComponent
     final ext = GridManager.destinationExtent(entry);
     // Block pushed to the far corner, leaving a strip on the entry side
     // wide enough for two bays plus the corridor cars use to reach them.
-    final bSize = lotSize * 0.50;
-    final shift = lotSize * 0.12;
+    final bSize = lotSize * 0.45;
+    final shift = lotSize * 0.17;
     final bRect = Rect.fromCenter(
       center: Offset(cx + ext.x * shift, cy + ext.y * shift),
       width: bSize,
@@ -1797,7 +1797,7 @@ class GridRenderer extends PositionComponent
     // into the two bays cars pull into (CarComponent.stallFor).
     final len = cellSize * 0.42;
     final half = GameConstants.shopBayPitch / 2;
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k <= GameConstants.shopBays; k++) {
       final strip = CarComponent.bayStrip(0) - half + k * GameConstants.shopBayPitch;
       final a = CarComponent.shopPoint(gridX, gridY, entry, cellSize, offsetX, offsetY,
           GameConstants.shopBayAlong - 0.5 * len / cellSize, strip);

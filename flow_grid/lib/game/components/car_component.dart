@@ -47,6 +47,10 @@ class CarComponent extends PositionComponent
   int stallSlot;
   bool _fadeLaneAtStart = false;
   bool _fadeLaneAtEnd = false;
+  /// Arc length of the in-lot part of the path (tongue mouth to bay) when
+  /// the trip starts or ends at a shop; 0 otherwise. Drives the lot lock and
+  /// the reduced lane offset inside the lot.
+  double _lotRouteLength = 0.0;
   double _waitTimer = 0.0;
   bool onExpressLane = false;
   double travelTime = 0.0;
@@ -553,18 +557,33 @@ class CarComponent extends PositionComponent
     return stallFor(p.x, p.y, p.side!, cellSize, offsetX, offsetY, stallSlot);
   }
 
-  /// Lane offset multiplier: 1 on the road, easing to 0 over the last
-  /// [GameConstants.parkingLaneFadeTiles] before a parking spot (and from 0
-  /// after leaving one) so the car lands centred in its bay.
+  /// Lane offset multiplier. 1 on the road; inside a shop lot it drops to
+  /// [GameConstants.lotLaneScale] so drones going in and coming out keep to
+  /// opposite sides of the corridor; over the last
+  /// [GameConstants.parkingLaneFadeTiles] before a spot (and the first after
+  /// one) it eases to 0 so the drone sits centred in its bay.
   double _laneFade(double d) {
     if (!_fadeLaneAtStart && !_fadeLaneAtEnd) return 1.0;
     final w = cellSize * GameConstants.parkingLaneFadeTiles;
+    final lot = _lotRouteLength;
     if (w <= 0) return 1.0;
     double f = 1.0;
-    if (_fadeLaneAtStart) f = min(f, (d / w).clamp(0.0, 1.0));
-    if (_fadeLaneAtEnd) f = min(f, ((_totalLength - d) / w).clamp(0.0, 1.0));
-    return f * f * (3 - 2 * f);
+    if (_fadeLaneAtStart) {
+      f = min(f, (d / w).clamp(0.0, 1.0));
+      if (_startsAtShop && d < lot) f = min(f, GameConstants.lotLaneScale);
+    }
+    if (_fadeLaneAtEnd) {
+      final left = _totalLength - d;
+      f = min(f, (left / w).clamp(0.0, 1.0));
+      if (_endsAtShop && left < lot) f = min(f, GameConstants.lotLaneScale);
+    }
+    return f;
   }
+
+  bool get _startsAtShop =>
+      path.isNotEmpty && !(path.first.x == spawnHousePos.x && path.first.y == spawnHousePos.y);
+  bool get _endsAtShop =>
+      path.isNotEmpty && !(path.last.x == spawnHousePos.x && path.last.y == spawnHousePos.y);
 
   static Vector2 _unit(Direction d) {
     switch (d) {
@@ -613,7 +632,8 @@ class CarComponent extends PositionComponent
 
   /// Strip offset of bay [index] (0 or 1).
   static double bayStrip(int index) =>
-      GameConstants.shopBayFirst + (index % 2) * GameConstants.shopBayPitch;
+      GameConstants.shopBayFirst +
+      (index % GameConstants.shopBays) * GameConstants.shopBayPitch;
 
   /// Centre of bay [index] on the shop anchored at ([x],[y]). Shared with
   /// GridRenderer so the painted bay lines match where cars stop.
@@ -645,6 +665,40 @@ class CarComponent extends PositionComponent
     Offset pt(double a, double t) =>
         shopPoint(x, y, entry, cellSize, offsetX, offsetY, a, t);
     return [pt(0.5, 0), pt(corr, 0), pt(corr, strip), pt(GameConstants.shopBayAlong, strip)];
+  }
+
+  static double _polylineLength(List<Offset> pts) {
+    double len = 0;
+    for (int i = 1; i < pts.length; i++) {
+      len += (pts[i] - pts[i - 1]).distance;
+    }
+    return len;
+  }
+
+  /// True while this drone is driving inside a shop lot (past the tongue
+  /// mouth on the way in, or not yet out of it on the way out). Parked
+  /// drones and drones held at the gate do not count.
+  bool get _movingInsideLot {
+    if (arrived || isWaiting || _lotRouteLength <= 0) return false;
+    if (!isReturning && _endsAtShop) {
+      return _totalLength - _distanceTraveled < _lotRouteLength - 0.5;
+    }
+    if (isReturning && _startsAtShop) {
+      return _distanceTraveled > 0.5 && _distanceTraveled < _lotRouteLength;
+    }
+    return false;
+  }
+
+  /// One drone moves inside a lot at a time: the corridor is too narrow to
+  /// pass in. Others hold at the driveway (entering) or stay in their bay
+  /// (leaving) until it is clear.
+  bool _lotBusy() {
+    for (final other in game.cars) {
+      if (identical(other, this) || other.arrived) continue;
+      if (other.targetDest.x != targetDest.x || other.targetDest.y != targetDest.y) continue;
+      if (other._movingInsideLot) return true;
+    }
+    return false;
   }
 
   /// Appends [pts] to both paths from [from] as straight runs joined by
@@ -891,6 +945,7 @@ class CarComponent extends PositionComponent
         _parksAt(path.length - 1) ? _parkingSpotFor(path.length - 1) : null;
     _fadeLaneAtStart = startSpot != null;
     _fadeLaneAtEnd = endSpot != null;
+    _lotRouteLength = 0.0;
     final int n = path.length;
 
     final start = startSpot ?? getPos(0);
@@ -923,9 +978,11 @@ class CarComponent extends PositionComponent
         if (isHome) {
           _appendSBend(_smoothPath, segPath, currentPenPos, axis, eO);
         } else {
-          final route = shopRoute(
+          final full = shopRoute(
             p1.x, p1.y, p1.side!, cellSize, offsetX, offsetY, stallSlot,
-          ).reversed.skip(1).toList();
+          );
+          _lotRouteLength = _polylineLength(full);
+          final route = full.reversed.skip(1).toList();
           _appendRoundedPolyline(
             _smoothPath,
             segPath,
@@ -962,6 +1019,7 @@ class CarComponent extends PositionComponent
           final route = shopRoute(
             bNode.x, bNode.y, bNode.side!, cellSize, offsetX, offsetY, stallSlot,
           );
+          _lotRouteLength = _polylineLength(route);
           _appendRoundedPolyline(
             _smoothPath, segPath, currentPenPos, [c2, ...route], r,
           );
@@ -981,6 +1039,7 @@ class CarComponent extends PositionComponent
             final route = shopRoute(
               p2.x, p2.y, p2.side!, cellSize, offsetX, offsetY, stallSlot,
             );
+            _lotRouteLength = _polylineLength(route);
             _appendRoundedPolyline(
               _smoothPath, segPath, currentPenPos, route,
               cellSize * GameConstants.parkingCornerRadius,
@@ -1228,8 +1287,6 @@ class CarComponent extends PositionComponent
 
     // Leaving a parking spot the car faces the building; swing round on the
     // spot first, then drive. Without the hold it slid sideways while turning.
-    // Drones have no nose, so there is nothing to swing round: never hold.
-    const holdForPivot = false;
 
     // Rule 7: Curve Speed Reduction inside roundabout (~80% speed)
     // [FIX] Was a bare `side != null` check, which is also true on a plain
@@ -1243,14 +1300,22 @@ class CarComponent extends PositionComponent
       roundaboutSpeedMultiplier = 0.80;
     }
 
-    if (!holdForPivot) {
-      _distanceTraveled +=
-          dt *
-          speed *
-          game.timeScale *
-          curveSpeedMultiplier *
-          roundaboutSpeedMultiplier;
+    double advance =
+        dt * speed * game.timeScale * curveSpeedMultiplier * roundaboutSpeedMultiplier;
+    if (_lotRouteLength > 0 && advance > 0) {
+      if (!isReturning && _endsAtShop) {
+        // Gate on the driveway tile, half a tile short of the tongue mouth.
+        final gate = _totalLength - _lotRouteLength - cellSize * 0.5;
+        if (_distanceTraveled < gate + 0.5 && _distanceTraveled + advance > gate && _lotBusy()) {
+          advance = (gate - _distanceTraveled).clamp(0.0, advance);
+          _currentSpeedMultiplier = 0.0;
+        }
+      } else if (isReturning && _startsAtShop && _distanceTraveled <= 0.5 && _lotBusy()) {
+        advance = 0.0;
+        _currentSpeedMultiplier = 0.0;
+      }
     }
+    _distanceTraveled += advance;
     if (_distanceTraveled >= _totalLength) {
       _distanceTraveled = _totalLength;
     }
@@ -2409,6 +2474,8 @@ class CarComponent extends PositionComponent
         if (identical(other, this) || other.onExpressLane || other.arrived) {
           continue;
         }
+        // Parked drones sit in a bay or on a pad, off the trace.
+        if (other.isWaiting) continue;
         if (_ignoredObstacles.contains(other)) continue;
 
         // Oncoming check: if the other car is moving in the opposite direction along our path, ignore it

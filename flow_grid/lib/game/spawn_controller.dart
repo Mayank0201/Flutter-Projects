@@ -118,6 +118,33 @@ class SpawnConfig {
   static const int initialHubSearchRadiusStage1 = 16;
   static const int initialHubSearchRadiusStage2 = 26;
   static const int initialHubSearchRadiusStage3 = 36;
+
+  // ============================================================
+  // Staged-Shop Recovery
+  // ============================================================
+  // A district is placed in beats (house 1, shop 2 s later, house 2 after
+  // 5 s). If the shop's 2x2 footprint or driveway is built over during that
+  // window the shop is re-sited near the district's houses instead of being
+  // dropped; if nothing is free yet the plan is kept and retried.
+  /// Seconds between placement retries of a staged shop that has no free spot.
+  static const double stagedDestinationRetryInterval = 3.0;
+  /// Manhattan half-width of the box around the residential centre scanned
+  /// when a staged shop has to be re-sited.
+  static const int destinationResiteRadius = 14;
+  /// A re-sited shop keeps at least this far from the residential centre so
+  /// it does not sit on top of the houses it serves (one tile less at the
+  /// most relaxed stage).
+  static const int destinationResiteMinDistance = 5;
+  /// How often the controller looks for colours that have houses but no shop
+  /// and gives them one near their houses.
+  static const double orphanDistrictCheckInterval = 3.0;
+}
+
+/// A shop anchor plus the entry side its 2x2 block hangs off.
+class DestinationSpot {
+  final GridPosition pos;
+  final Direction entry;
+  const DestinationSpot(this.pos, this.entry);
 }
 
 enum SpawnNodeType { house, destination }
@@ -305,6 +332,13 @@ class SpawnController {
 
     _processStagedInitialDistrict();
     _processStagedExpansionDistrict();
+
+    _orphanCheckTimer += dt;
+    if (_orphanCheckTimer >= SpawnConfig.orphanDistrictCheckInterval) {
+      _orphanCheckTimer = 0;
+      _repairOrphanedColors();
+    }
+
     _maybeEnqueueDemandDrivenHouse();
     _processQueue();
   }
@@ -313,6 +347,7 @@ class SpawnController {
   void reset() {
     _elapsedTime = 0;
     _pressureTimer = 0;
+    _orphanCheckTimer = 0;
     _lastSpawnTime = -SpawnConfig.spawnCooldown;
     _queue.clear();
     clusterCenters.clear();
@@ -337,7 +372,8 @@ class SpawnController {
     _elapsedTime = elapsedTime;
     _lastSpawnTime = elapsedTime; // Prevent immediate spawns on load
     _pressureTimer = 0;
-    
+    _orphanCheckTimer = 0;
+
     // Clear all staged actions
     _stagedInitialPlan = null;
     _stagedInitialColor = null;
@@ -422,14 +458,29 @@ class SpawnController {
   static const double _stagedDestDelay = 2.0;
   static const double _stagedHouse2Delay = 5.0;
 
+  /// Timer for the houses-without-a-shop safety net (see _repairOrphanedColors).
+  double _orphanCheckTimer = 0;
+
   void _processStagedInitialDistrict() {
-    final plan = _stagedInitialPlan;
+    var plan = _stagedInitialPlan;
     final ci = _stagedInitialColor;
     if (plan == null || ci == null) return;
 
     if (_stagedDestSpawnAt != null && _elapsedTime >= _stagedDestSpawnAt!) {
+      final placedPlan = _placeOrResiteStagedDestination(ci, plan, tag: 'STAGED DEST');
+      if (placedPlan == null) {
+        // Nothing is free right now. Keep the plan and try again shortly;
+        // house 2 waits as well so the colour never gains a house it cannot
+        // deliver from.
+        _stagedDestSpawnAt = _elapsedTime + SpawnConfig.stagedDestinationRetryInterval;
+        return;
+      }
       _stagedDestSpawnAt = null;
-      gridManager.commitPlacement(() => _placeStagedDestination(ci, plan));
+      if (!identical(placedPlan, plan)) {
+        plan = placedPlan;
+        _stagedInitialPlan = placedPlan;
+        colorAllowedDestZones[ci] = [_getZoneAt(placedPlan.destPos.x, placedPlan.destPos.y)];
+      }
       onSpawnComplete?.call();
 
       // If there is no second house scheduled (plan had only 1 house),
@@ -440,12 +491,19 @@ class SpawnController {
         _stagedInitialColor = null;
         return;
       }
+      // A shop that landed late should not pop in on the same tick as house 2.
+      if (_stagedHouse2SpawnAt! <= _elapsedTime) {
+        _stagedHouse2SpawnAt = _elapsedTime + _stagedDestDelay;
+      }
     }
+
+    // House 2 only lands once the shop is on the board.
+    if (_stagedDestSpawnAt != null) return;
 
     if (_stagedHouse2SpawnAt != null && _elapsedTime >= _stagedHouse2SpawnAt!) {
       _stagedHouse2SpawnAt = null;
       if (plan.houses.length >= 2) {
-        gridManager.commitPlacement(() => _placeStagedSecondHouse(ci, plan));
+        gridManager.commitPlacement(() => _placeStagedSecondHouse(ci, plan!));
         onSpawnComplete?.call();
       }
       // Clear the slot — staging is complete regardless of whether house 2
@@ -455,11 +513,174 @@ class SpawnController {
     }
   }
 
-  void _placeStagedDestination(int colorIndex, DistrictPlan plan) {
-    if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return;
+  /// True when the shop of [plan] can still go where it was planned: the
+  /// whole 2x2 footprint is free and the driveway tile is empty or a road.
+  bool _isPlannedDestinationFree(DistrictPlan plan) {
+    if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return false;
     if (!gridManager.isDestinationFootprintFree(plan.destPos.x, plan.destPos.y, plan.destEntry)) {
-      _log('STAGED DEST: dest spot ${plan.destPos} no longer empty; skipping');
-      return;
+      return false;
+    }
+    final driveway = plan.destPos.getNeighbor(plan.destEntry);
+    if (!gridManager.isValid(driveway.x, driveway.y)) return false;
+    final cell = gridManager.grid[driveway.y][driveway.x];
+    return cell.isEmpty || cell.isRoad;
+  }
+
+  /// Puts the staged shop of [plan] on the board. If its planned spot has
+  /// been built over since planning, the shop is re-sited to the nearest
+  /// valid spot around the plan's residential centre. Returns the plan that
+  /// was actually placed (the original or the re-sited one), or null when no
+  /// spot is free right now so the caller keeps the plan and retries.
+  DistrictPlan? _placeOrResiteStagedDestination(int colorIndex, DistrictPlan plan, {required String tag}) {
+    DistrictPlan target = plan;
+    if (!_isPlannedDestinationFree(plan)) {
+      final resited = _resiteStagedDestination(colorIndex, plan);
+      if (resited == null) {
+        _log('$tag: spot ${plan.destPos} no longer free and nothing valid near '
+            '${plan.resCenter}; retrying in ${SpawnConfig.stagedDestinationRetryInterval}s');
+        return null;
+      }
+      _log('$tag: spot ${plan.destPos} no longer free; re-sited to '
+          '${resited.destPos} (entry ${resited.destEntry.name})');
+      target = resited;
+    }
+
+    bool placed = false;
+    gridManager.commitPlacement(() {
+      placed = _placeStagedDestination(colorIndex, target);
+    });
+    if (!placed) return null;
+
+    if (!identical(target, plan)) clusterCenters[colorIndex] = target.destPos;
+    return target;
+  }
+
+  /// Same plan with the shop moved to the nearest valid spot around the
+  /// residential centre, or null if there is none right now.
+  DistrictPlan? _resiteStagedDestination(int colorIndex, DistrictPlan plan) {
+    final spot = _findReplacementDestinationSpot(colorIndex, near: plan.resCenter, original: plan.destPos);
+    if (spot == null) return null;
+    return DistrictPlan(
+      destPos: spot.pos,
+      destEntry: spot.entry,
+      houses: plan.houses,
+      resCenter: plan.resCenter,
+    );
+  }
+
+  /// Entry side for a shop anchored at [pos] if the tile passes the normal
+  /// spawn validation at [stage] (as an expansion, so the district radius cap
+  /// does not apply), the 2x2 block is free and the driveway is usable.
+  Direction? _destinationEntryIfValid(GridPosition pos, int colorIndex, PlanningStage stage) {
+    if (!gridManager.isValid(pos.x, pos.y)) return null;
+    if (!gridManager.grid[pos.y][pos.x].isEmpty) return null;
+    if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.destination, isExpansion: true)) {
+      return null;
+    }
+    final entry = findValidEntrySide(pos, profile: BuildingProfile.commercial, stage: stage);
+    if (entry == null) return null;
+    if (!gridManager.isDestinationFootprintFree(pos.x, pos.y, entry)) return null;
+    final driveway = pos.getNeighbor(entry);
+    if (!gridManager.isValid(driveway.x, driveway.y)) return null;
+    final cell = gridManager.grid[driveway.y][driveway.x];
+    if (!cell.isEmpty && !cell.isRoad) return null;
+    return entry;
+  }
+
+  /// Nearest valid shop spot around [near] (a residential centre), using the
+  /// relaxed planning stages so a crowded district can still get its shop.
+  /// [original] is tried first with whatever entry side is still free: the
+  /// 2x2 block hangs off the entry side, so another orientation often fits
+  /// where the planned one no longer does. Among the nearest candidates the
+  /// best-scoring one wins.
+  DestinationSpot? _findReplacementDestinationSpot(int colorIndex, {required GridPosition near, GridPosition? original}) {
+    const stages = [PlanningStage.stage4StrongRelax, PlanningStage.stage5ExtremeRelax];
+    for (final stage in stages) {
+      if (original != null) {
+        final entry = _destinationEntryIfValid(original, colorIndex, stage);
+        if (entry != null) return DestinationSpot(original, entry);
+      }
+
+      final r = SpawnConfig.destinationResiteRadius;
+      int minDist = SpawnConfig.destinationResiteMinDistance;
+      if (stage == PlanningStage.stage5ExtremeRelax) minDist = max(2, minDist - 1);
+
+      final candidates = <DestinationSpot>[];
+      for (int y = max(minSpawnY, near.y - r); y <= min(maxSpawnY, near.y + r); y++) {
+        for (int x = max(minSpawnX, near.x - r); x <= min(maxSpawnX, near.x + r); x++) {
+          final pos = GridPosition(x, y);
+          final d = pos.manhattanDistance(near);
+          if (d < minDist || d > r) continue;
+          final entry = _destinationEntryIfValid(pos, colorIndex, stage);
+          if (entry == null) continue;
+          candidates.add(DestinationSpot(pos, entry));
+        }
+      }
+      if (candidates.isEmpty) continue;
+
+      // Nearest band first, best-scoring spot inside it.
+      candidates.sort((a, b) => a.pos.manhattanDistance(near).compareTo(b.pos.manhattanDistance(near)));
+      final nearest = candidates.first.pos.manhattanDistance(near);
+      final band = candidates.where((c) => c.pos.manhattanDistance(near) <= nearest + 2).toList();
+      band.sort((a, b) {
+        final sA = scoringService.scoreDestination(a.pos, colorIndex, stage, anchor: near);
+        final sB = scoringService.scoreDestination(b.pos, colorIndex, stage, anchor: near);
+        return sB.compareTo(sA);
+      });
+      return band.first;
+    }
+    return null;
+  }
+
+  /// Safety net: a colour with houses but no shop can never deliver, so give
+  /// it a shop near its houses. The staged pipeline normally prevents this;
+  /// this catches anything that slips through (a save restored mid-staging,
+  /// an unexpected placement failure). Colours whose shop is still staged are
+  /// left to the staging retry.
+  void _repairOrphanedColors() {
+    for (int c = 0; c < activeColorCount; c++) {
+      if (_stagedInitialPlan != null && _stagedInitialColor == c) continue;
+      if (_stagedExpansionPlan != null && _stagedExpansionColor == c && _stagedExpansionDestAt != null) {
+        continue;
+      }
+      final houses = gridManager.getHousesForColor(c);
+      if (houses.isEmpty) continue;
+      if (gridManager.getDestinationsForColor(c).isNotEmpty) continue;
+
+      int sumX = 0;
+      int sumY = 0;
+      for (final h in houses) {
+        sumX += h.x;
+        sumY += h.y;
+      }
+      final near = GridPosition((sumX / houses.length).round(), (sumY / houses.length).round());
+
+      final spot = _findReplacementDestinationSpot(c, near: near);
+      if (spot == null) {
+        _log('ORPHAN REPAIR: Color $c has ${houses.length} house(s) and no shop; nothing free near $near yet');
+        continue;
+      }
+      final plan = DistrictPlan(destPos: spot.pos, destEntry: spot.entry, houses: const [], resCenter: near);
+      bool placed = false;
+      gridManager.commitPlacement(() {
+        placed = _placeStagedDestination(c, plan);
+      });
+      if (!placed) continue;
+
+      clusterCenters[c] = spot.pos;
+      colorAllowedDestZones[c] = [_getZoneAt(spot.pos.x, spot.pos.y)];
+      residentialCenters.putIfAbsent(c, () => near);
+      _log('ORPHAN REPAIR: Color $c had ${houses.length} house(s) and no shop; placed one at ${spot.pos}');
+      onSpawnComplete?.call();
+    }
+  }
+
+  /// Places the shop of [plan] with its driveway stub. Returns false (and
+  /// places nothing) when the footprint or driveway is no longer free.
+  bool _placeStagedDestination(int colorIndex, DistrictPlan plan) {
+    if (!_isPlannedDestinationFree(plan)) {
+      _log('STAGED DEST: dest spot ${plan.destPos} no longer free; not placed');
+      return false;
     }
     final profile = districtPlanner.getProfileFor(colorIndex);
     final name = DistrictNameGenerator.generate(profile.type);
@@ -471,6 +692,7 @@ class SpawnController {
     gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
     districtPlanner.claimSector(colorIndex, plan.destPos, isCommercial: true);
     _log('STAGED DEST PLACED: Color $colorIndex at ${plan.destPos}');
+    return true;
   }
 
   void _placeStagedSecondHouse(int colorIndex, DistrictPlan plan) {
@@ -494,6 +716,14 @@ class SpawnController {
   /// Returns true if the entire district was successfully placed.
   bool spawnInitialPair(int colorIndex) {
     _log('ATOMIC DISTRICT REQUEST: Color $colorIndex');
+
+    // One staged district at a time: committing a new one would overwrite
+    // the pending shop of the previous colour.
+    if (_stagedInitialPlan != null) {
+      _log('ATOMIC DISTRICT DEFERRED: Color $_stagedInitialColor still has a staged district pending');
+      lastFailure = SpawnFailure.other;
+      return false;
+    }
 
     for (final stage in PlanningStage.values) {
       _log('PLANNER: Attempting Stage ${stage.index + 1} (${stage.name}) for Color $colorIndex');
@@ -592,28 +822,36 @@ class SpawnController {
   /// building so that the player cannot build roads on top of it before the
   /// building appears.  Called by GridManager.placeRoad.
   bool isStagedBuildingPosition(int x, int y) {
+    return _pendingStagedCells().any((c) => c.x == x && c.y == y);
+  }
+
+  /// Every cell a staged (planned but not yet placed) building will occupy:
+  /// the full 2x2 shop footprint while the shop is pending, plus the pending
+  /// houses. Player road drags (GridManager.placeRoad) and other spawns'
+  /// clearance checks both keep clear of these, so the shop's spot cannot be
+  /// built over during the staging beats.
+  List<GridPosition> _pendingStagedCells() {
+    final cells = <GridPosition>[];
     final plan = _stagedInitialPlan;
     if (plan != null) {
-      for (final spot in plan.allSpots) {
-        if (spot.x == x && spot.y == y) return true;
+      if (_stagedDestSpawnAt != null) {
+        cells.addAll(GridManager.destinationFootprint(plan.destPos, plan.destEntry));
+      }
+      for (final h in plan.houses) {
+        cells.add(h.pos);
       }
     }
     final expPlan = _stagedExpansionPlan;
     if (expPlan != null) {
       // Only dest and house2 are still pending — house1 is already placed.
-      // Check dest
-      if (expPlan.destPos.x == x && expPlan.destPos.y == y &&
-          _stagedExpansionDestAt != null) {
-        return true;
+      if (_stagedExpansionDestAt != null) {
+        cells.addAll(GridManager.destinationFootprint(expPlan.destPos, expPlan.destEntry));
       }
-      // Check house2
-      if (expPlan.houses.length >= 2 &&
-          expPlan.houses[1].pos.x == x && expPlan.houses[1].pos.y == y &&
-          _stagedExpansionHouse2At != null) {
-        return true;
+      if (expPlan.houses.length >= 2 && _stagedExpansionHouse2At != null) {
+        cells.add(expPlan.houses[1].pos);
       }
     }
-    return false;
+    return cells;
   }
 
   void _commitInitialDistrict(int colorIndex, DistrictPlan plan) {
@@ -749,6 +987,14 @@ class SpawnController {
   /// Returns true only if ALL 3 parts succeed. Rolls back on failure.
   bool spawnExpansionPackage(int colorIndex) {
     _log('EXPANSION PACKAGE REQUEST: Color $colorIndex');
+
+    // One staged expansion at a time: committing a new one would overwrite
+    // the pending shop of the previous package.
+    if (_stagedExpansionPlan != null) {
+      _log('EXPANSION PACKAGE DEFERRED: Color $_stagedExpansionColor still has a staged expansion pending');
+      lastFailure = SpawnFailure.other;
+      return false;
+    }
 
     for (final stage in PlanningStage.values) {
       _log('EXPANSION PLANNER: Attempting Stage ${stage.index + 1} (${stage.name}) for Color $colorIndex');
@@ -903,31 +1149,26 @@ class SpawnController {
   }
 
   void _processStagedExpansionDistrict() {
-    final plan = _stagedExpansionPlan;
+    var plan = _stagedExpansionPlan;
     final ci = _stagedExpansionColor;
     final zone = _stagedExpansionZone;
     if (plan == null || ci == null || zone == null) return;
 
     if (_stagedExpansionDestAt != null && _elapsedTime >= _stagedExpansionDestAt!) {
+      final placedPlan = _placeOrResiteStagedDestination(ci, plan, tag: 'EXPANSION DEST');
+      if (placedPlan == null) {
+        // Keep the plan and retry; house 2 waits for the shop.
+        _stagedExpansionDestAt = _elapsedTime + SpawnConfig.stagedDestinationRetryInterval;
+        return;
+      }
       _stagedExpansionDestAt = null;
-      // Place expansion destination
-      gridManager.commitPlacement(() {
-        if (!gridManager.isValid(plan.destPos.x, plan.destPos.y)) return;
-        if (!gridManager.isDestinationFootprintFree(plan.destPos.x, plan.destPos.y, plan.destEntry)) {
-          _log('EXPANSION DEST: spot ${plan.destPos} no longer empty; skipping');
-          return;
-        }
-        final profile = districtPlanner.getProfileFor(ci);
-        final name = DistrictNameGenerator.generate(profile.type);
-        gridManager.placeDestination(plan.destPos.x, plan.destPos.y, ci, plan.destEntry, name: name);
-        onBuildingSpawned?.call(plan.destPos);
-        scoringService.reserveEntranceCorridor(plan.destPos, plan.destEntry, isDestination: true);
-        final dDP = plan.destPos.getNeighbor(plan.destEntry);
-        gridManager.placeRoad(dDP.x, dDP.y, owner: InfrastructureOwner.systemGenerated);
-        gridManager.connectBuilding(plan.destPos.x, plan.destPos.y, dDP.x, dDP.y);
-        districtPlanner.claimSector(ci, plan.destPos, isCommercial: true);
-        _log('EXPANSION DEST PLACED: Color $ci at ${plan.destPos}');
-      });
+      if (!identical(placedPlan, plan)) {
+        plan = placedPlan;
+        _stagedExpansionPlan = placedPlan;
+        final newZone = _getZoneAt(placedPlan.destPos.x, placedPlan.destPos.y);
+        final destZones = colorAllowedDestZones.putIfAbsent(ci, () => []);
+        if (!destZones.contains(newZone)) destZones.add(newZone);
+      }
       onSpawnComplete?.call();
 
       if (_stagedExpansionHouse2At == null) {
@@ -936,7 +1177,14 @@ class SpawnController {
         _stagedExpansionZone = null;
         return;
       }
+      // A shop that landed late should not pop in on the same tick as house 2.
+      if (_stagedExpansionHouse2At! <= _elapsedTime) {
+        _stagedExpansionHouse2At = _elapsedTime + _stagedDestDelay;
+      }
     }
+
+    // House 2 only lands once the shop is on the board.
+    if (_stagedExpansionDestAt != null) return;
 
     if (_stagedExpansionHouse2At != null && _elapsedTime >= _stagedExpansionHouse2At!) {
       _stagedExpansionHouse2At = null;
@@ -1435,9 +1683,13 @@ class SpawnController {
         final y = anchor.y + dy;
         final pos = GridPosition(x, y);
         final d = pos.manhattanDistance(anchor);
-        
+
         if (d < minDist || d > maxDist) continue;
         if (!gridManager.isValid(x, y)) continue;
+        // Keep the centre inside the active region; the houses found around
+        // it must be inside it anyway, and a centre outside it skews their
+        // cohesion scores toward the region edge.
+        if (x < minSpawnX || x > maxSpawnX || y < minSpawnY || y > maxSpawnY) continue;
         if (!gridManager.grid[y][x].isEmpty) continue;
         
         candidates.add(pos);
@@ -1599,6 +1851,10 @@ class SpawnController {
     final footprint = nodeType == SpawnNodeType.destination
         ? GridManager.destinationFootprint(pos, entrySide)
         : <GridPosition>[pos];
+    // Cells of staged buildings that are not on the board yet (initial and
+    // expansion districts alike, full shop footprints included) so a new
+    // spawn cannot land on or hug a pending shop or house.
+    final stagedCells = _pendingStagedCells();
     for (final fp in footprint) {
       if (!gridManager.isValid(fp.x, fp.y)) return false;
       if (fp.x < minSpawnX || fp.x > maxSpawnX || fp.y < minSpawnY || fp.y > maxSpawnY) {
@@ -1615,13 +1871,8 @@ class SpawnController {
         final ny = fp.y + dy;
         if (footprint.any((f) => f.x == nx && f.y == ny)) continue;
 
-        // Check against staged initial district spots to prevent overlap or tight adjacency during delayed committing
-        if (_stagedInitialPlan != null) {
-          for (final spot in _stagedInitialPlan!.allSpots) {
-            if (spot.x == nx && spot.y == ny) {
-              return false;
-            }
-          }
+        for (final spot in stagedCells) {
+          if (spot.x == nx && spot.y == ny) return false;
         }
 
         if (dx == 0 && dy == 0) continue;

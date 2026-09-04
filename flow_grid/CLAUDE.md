@@ -65,7 +65,10 @@ Two things about it are easy to miss:
 - `GridPosition` carries an optional `side` for smart-junction sub-nodes; its `key`
   getter is what all the `Map<String, ...>` state in `GridManager` is indexed by.
 - Gameplay code must not spawn buildings directly — go through
-  `SpawnController.requestSpawn`, and let `ProgressionDirector` decide timing.
+  `SpawnController.requestSpawn`, and let `ProgressionDirector` decide timing. A staged
+  shop whose planned spot got built over is re-sited nearby
+  (`_findAlternativeDestination`) or retried, never skipped: houses without a shop of
+  their colour are a dead district.
 - Tunables (timings, capacities, speeds, colours, tick rates) belong in
   `models/game_constants.dart`, not inline in the systems.
 - Logging is `debugPrint` with a bracketed tag (`[BOOT]`, `[SPAWN]`, `[SYNC]`), gated
@@ -107,7 +110,7 @@ Two things about it are easy to miss:
 - **Cars park instead of vanishing, and drive to the spot.** A house keeps two cars
   nose-in on a pavement apron in front of its block (`CarComponent.homeSpotFor`,
   slots assigned by `FlowGridGame._freeHomeSlot`; `GridRenderer._drawParkedCars`
-  draws the glyph for every slot with no car out). A shop has two bays reached via
+  draws the glyph for every slot with no car out). A shop has three bays reached via
   the tongue and an in-lot corridor (`CarComponent.shopRoute` / `stallFor`, all
   measured from the anchor cell in `GameConstants.shop*`). `_rebuildSmoothPath`
   appends these spurs to the smooth path, fades the lane offset to zero over them

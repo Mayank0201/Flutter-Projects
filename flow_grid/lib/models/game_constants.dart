@@ -41,9 +41,9 @@ class GameConstants {
   // every side, while lotMaxScale*renderScale (1.05*0.90=0.945*cellSize)
   // stays safely under 1.0*cellSize.
   static const double lotMinScale =
-      0.95; // freshly placed: clearly visible parking apron around the building
+      1.05; // lot card ~1.9 tiles: room for three bays plus the corridor
   static const double lotMaxScale =
-      1.05; // fully mature: 0.945*cellSize, safely inside the tile
+      1.08; // fully mature: barely larger, so the bays stay put
 
   // Endless Scaling (Part 1 & 3)
   static const double highDemandHouseTriggerDuration = 22.0;
@@ -157,8 +157,11 @@ class GameConstants {
   static const double houseBlockBackShift = 0.12; // tiles, away from the road
   static const double houseBlockScale = 0.85; // of the residential renderScale
   static const double homeParkingAlong = 0.30; // tiles from the house centre
-  static const double homeParkingLateral = 0.115; // tiles off the driveway axis
-  static const double parkingLaneFadeTiles = 1.0;
+  static const double homeParkingLateral = 0.10; // tiles off the driveway axis
+  static const double parkingLaneFadeTiles = 0.5;
+  // Inside a shop lot the lane offset is kept at this fraction so drones
+  // going in and coming out pass on opposite sides of the corridor.
+  static const double lotLaneScale = 0.6;
 
   // Ambient signal towers on empty tiles (the board's "trees"): a thin
   // mast on a small base with two crossbars and a warm beacon on top.
@@ -170,14 +173,15 @@ class GameConstants {
   // "along" is toward the road (the tongue mouth is at +0.5), "strip" runs
   // along the lot face the driveway meets. Cars come in through the tongue,
   // drive the corridor, and turn into a bay nose toward the block.
-  static const double shopCorridorAlong = 0.28;
-  static const double shopBayAlong = -0.07;
-  static const double shopBayFirst = 0.55; // strip offset of bay 0
-  static const double shopBayPitch = 0.48; // bay 1 is one pitch further
+  static const int shopBays = 3;
+  static const double shopCorridorAlong = 0.16;
+  static const double shopBayAlong = -0.22;
+  static const double shopBayFirst = 0.35; // strip offset of bay 0
+  static const double shopBayPitch = 0.40; // each further bay is one pitch on
   static const double carPivotRate = 20.0; // rad/s, max heading change
   // Drone disc radius as a fraction of the vehicle size (0.34 tile), so a
   // drone is about 0.4 tile across: clearly readable at phone zoom.
-  static const double droneRadius = 0.58;
+  static const double droneRadius = 0.44;
 
   // Mountain colors (replaces water)
   static const Color mountainColor = Color(0xFF2A4147); // Dark teal rock

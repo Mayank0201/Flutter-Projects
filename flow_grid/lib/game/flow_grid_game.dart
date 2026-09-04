@@ -1101,10 +1101,10 @@ class FlowGridGame extends FlameGame
         used.add(c.stallSlot);
       }
     }
-    for (int s = 0; s < 2; s++) {
+    for (int s = 0; s < GameConstants.shopBays; s++) {
       if (!used.contains(s)) return s;
     }
-    return used.length % 2;
+    return used.length % GameConstants.shopBays;
   }
 
   GridPosition? _findDestination(GridPosition housePos) {
