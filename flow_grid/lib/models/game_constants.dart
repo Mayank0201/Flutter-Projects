@@ -13,8 +13,11 @@ class GameConstants {
   static const double overflowRecoveryDuration = 50.0;
   static const double overflowDeliveryRecovery = 0.06;
 
-  // Maturity (shops grow with age)
-  static const int maturityThresholdWeeks = 4;
+  // Maturity (shops grow with age). The age counter starts at 0 on the week a
+  // shop is placed, so a threshold of 3 means a shop that appeared in week 1
+  // matures as week 4 begins -- which is when a player expects "four weeks
+  // old" to mean something.
+  static const int maturityThresholdWeeks = 3;
   static const int matureMaxDemand = 9;
   static const double matureRequestSpeedMultiplier = 1.25;
   static const double matureOverflowBuildupMultiplier = 1.10;
