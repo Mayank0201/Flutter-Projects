@@ -16,7 +16,7 @@ param(
 
 . "$PSScriptRoot\_env.ps1"
 
-# Each `flutter run` keeps its build scratch in %LOCALAPPDATA%\Templutter_tools.*
+# Each `flutter run` keeps its build scratch in %LOCALAPPDATA%\Temp\flutter_tools.*
 # and removes it on a clean exit. Killing the process instead -- which is what
 # happens on every stop-and-rebuild -- orphans the folder, and they are ~350 MB
 # each. Sweep the stale ones before launching. The age filter leaves anything a
