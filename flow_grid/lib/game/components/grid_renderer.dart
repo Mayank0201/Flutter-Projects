@@ -65,7 +65,7 @@ class GridRenderer extends PositionComponent
   // real visible regression. So this index buckets each lane under EVERY
   // chunk its actual bounding box overlaps (may be 1, 2, or more chunks per
   // lane), where the bounding box is computed from the same
-  // arcHeight = length * 0.15 * perpSign curve construction
+  // arcHeight = length * GameConstants.expressLaneArc * perpSign construction
   // `_drawExpressLanesForChunk` (and CarComponent._rebuildSmoothPath) use,
   // not just the straight line between the two endpoints -- see
   // `_expressLaneBounds()` for the exact box (and why it's provably
@@ -975,8 +975,14 @@ class GridRenderer extends PositionComponent
         } else {
           targetPath = roadPath;
         }
+        // Via pads mark trace ends and 4-way crossings only. A tee gets
+        // none (a network of tees read as a field of circles), and neither
+        // does a cell carrying a hub ring: the pad filled the ring's island
+        // and the junction looked like a solid gear.
         final plainTrace = identical(targetPath, roadPath);
-        if (plainTrace && (connCount == 1 || connCount > 2)) {
+        if (plainTrace &&
+            !cell.hasSmartJunction &&
+            (connCount == 1 || connCount == 4)) {
           vias.add(Offset(midX, midY));
         }
 
@@ -1094,7 +1100,7 @@ class GridRenderer extends PositionComponent
     canvas.drawPath(roadPath, _roadPaint);
     // Via pads over the trace ends and junctions: copper disc, lighter rim,
     // dark drilled centre.
-    final viaR = cellSize * 0.30;
+    final viaR = cellSize * 0.26;
     final rim = cellSize * GameConstants.roadEdge * 2;
     for (final v in vias) {
       canvas.drawCircle(v, viaR, Paint()..color = _roadOutlinePaint.color);
@@ -1222,7 +1228,7 @@ class GridRenderer extends PositionComponent
   /// Reproduces the exact same arc construction as `_drawExpressLanesForChunk`
   /// (and CarComponent._rebuildSmoothPath's long-jump bezier): a quadratic
   /// bezier from o1 to o2 with control point `cp` offset perpendicular by
-  /// `length * 0.15`. A quadratic bezier is a convex combination of its
+  /// `length * GameConstants.expressLaneArc`. A quadratic bezier is a convex combination of its
   /// three control points at every t (weights (1-t)^2, 2t(1-t), t^2, which
   /// are all >= 0 and sum to 1), so the WHOLE curve is guaranteed to lie
   /// inside the bounding box of {o1, cp, o2} -- no need to solve for the
@@ -1259,7 +1265,7 @@ class GridRenderer extends PositionComponent
     final perpSign = (perp.dy < 0 || (perp.dy == 0 && perp.dx < 0))
         ? 1.0
         : -1.0;
-    final arcHeight = length * 0.15 * perpSign;
+    final arcHeight = length * GameConstants.expressLaneArc * perpSign;
     final mid = Offset((o1.dx + o2.dx) / 2, (o1.dy + o2.dy) / 2);
     final cp = Offset(
       mid.dx + perp.dx * arcHeight,
@@ -1299,7 +1305,7 @@ class GridRenderer extends PositionComponent
     // Wide enough that the car actually fits inside the lane, with a darker
     // outer rim for a "highway shoulders" feel. The arc direction and height
     // MUST match CarComponent._rebuildSmoothPath's long-jump arc (perp =
-    // right-perp of forward, arcHeight = dist * 0.15) or the car will
+    // right-perp of forward, arcHeight = dist * GameConstants.expressLaneArc) or the car will
     // visibly drive off the painted lane.
     //
     // [ROAD WIDTH 2026-09-01] Kept at the road fill width + 0.10*cellSize —
@@ -1311,7 +1317,8 @@ class GridRenderer extends PositionComponent
     // car_component.dart for that real number, cellSize*0.2634).
     // Express lane: a violet band a bit wider than a road, pale
     // diagonal dashes along it, and a round white ramp badge at each end.
-    final laneStroke = cellSize * GameConstants.roadWidth * 1.3;
+    // Same width as a copper trace: the colour says express, not the size.
+    final laneStroke = cellSize * GameConstants.roadWidth;
     final lanePaint = Paint()
       ..color = GameConstants.expressLaneColor
       ..style = PaintingStyle.stroke
@@ -1325,16 +1332,14 @@ class GridRenderer extends PositionComponent
       ..strokeCap = StrokeCap.round;
 
     final arrowPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.45)
+      ..color = Colors.white.withValues(alpha: 0.20)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = cellSize * 0.10
-      ..strokeCap = StrokeCap.butt;
+      ..strokeWidth = cellSize * 0.05
+      ..strokeCap = StrokeCap.round;
 
-    final rampFillPaint = Paint()..color = Colors.white;
+    final rampFillPaint = Paint()..color = GameConstants.expressLaneColor;
     final rampOutlinePaint = Paint()
-      ..color = const Color(0xFF1B1F27)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+      ..color = GameConstants.expressLaneBorderColor;
 
     for (final lane in lanes) {
       if (lane.length < 2) continue;
@@ -1363,7 +1368,7 @@ class GridRenderer extends PositionComponent
       final perpSign = (perp.dy < 0 || (perp.dy == 0 && perp.dx < 0))
           ? 1.0
           : -1.0;
-      final arcHeight = length * 0.15 * perpSign;
+      final arcHeight = length * GameConstants.expressLaneArc * perpSign;
       final mid = Offset((o1.dx + o2.dx) / 2, (o1.dy + o2.dy) / 2);
       final cp = Offset(
         mid.dx + perp.dx * arcHeight,
@@ -1383,15 +1388,13 @@ class GridRenderer extends PositionComponent
         final metric = metrics.first;
         final totalLen = metric.length;
         // Pale slanted dashes across the band (the express-lane texture).
-        final half = laneStroke * 0.42;
-        for (double d = cellSize * 0.5; d < totalLen - cellSize * 0.4; d += cellSize * 0.42) {
-          final tan = metric.getTangentForOffset(d);
-          if (tan == null) continue;
-          final c = tan.position;
-          final tdir = tan.vector;
-          final tperp = Offset(-tdir.dy, tdir.dx);
-          final slant = Offset(tdir.dx, tdir.dy) * (half * 0.6);
-          canvas.drawLine(c + tperp * half - slant, c - tperp * half + slant, arrowPaint);
+        // A dashed centre line, like the tinning stripe on a plated trace.
+        final dash = cellSize * 0.26;
+        for (double d = cellSize * 0.45; d < totalLen - cellSize * 0.45; d += dash * 2) {
+          final a = metric.getTangentForOffset(d);
+          final b = metric.getTangentForOffset(d + dash);
+          if (a == null || b == null) continue;
+          canvas.drawLine(a.position, b.position, arrowPaint);
         }
       }
 
@@ -1410,10 +1413,11 @@ class GridRenderer extends PositionComponent
     Paint outline,
   ) {
     // Round white badge with a dark centre dot: the on-ramp marker.
-    final r = cellSize * 0.17;
-    canvas.drawCircle(center, r, fill);
+    // A silver pad at each end, sized like a via so the two read as kin.
+    final r = cellSize * 0.20;
     canvas.drawCircle(center, r, outline);
-    canvas.drawCircle(center, r * 0.32, Paint()..color = const Color(0xFF1B1F27));
+    canvas.drawCircle(center, r - cellSize * GameConstants.roadEdge * 2, fill);
+    canvas.drawCircle(center, cellSize * 0.07, Paint()..color = _mapBackgroundColor);
   }
 
   // Orthogonal neighbor offsets shared by the building-adjacency clip below.
@@ -1810,7 +1814,14 @@ class GridRenderer extends PositionComponent
     _drawIcChip(canvas, bRect, color, side, vertical);
 
     // Status LED near pin 1.
-    _drawLed(canvas, Offset(bRect.left + bSize * 0.20, bRect.top + bSize * 0.20), cellSize * 0.26, Colors.white);
+    // The status LED goes warm once the shop matures, so a grown shop is
+    // readable at a glance as well as by its larger pad.
+    _drawLed(
+      canvas,
+      Offset(bRect.left + bSize * 0.20, bRect.top + bSize * 0.20),
+      cellSize * 0.26,
+      maturityProgress >= 1.0 ? const Color(0xFFF2B65A) : Colors.white,
+    );
   }
 
   /// Shop glyph: an IC package. Body in the district colour with a darker
@@ -2411,13 +2422,17 @@ class GridRenderer extends PositionComponent
     final minY = math.max(2.0, cy - hh);
     final maxY = math.min(game.gridRows.toDouble() - 3.0, cy + hh);
 
-    // Calculate the active rectangle in screen pixels
+    // Calculate the active rectangle in screen pixels, then open the hole a
+    // little wider than the region itself. A shop is anchored inside the
+    // region but its 2x2 block and pad reach ~1.5 tiles past the anchor, so
+    // an un-inflated hole painted over the outer half of any building
+    // standing on the border -- it read as a building sliced in half.
     final rect = Rect.fromLTRB(
       offsetX + minX * cellSize,
       offsetY + minY * cellSize,
       offsetX + maxX * cellSize,
       offsetY + maxY * cellSize,
-    );
+    ).inflate(cellSize * 1.7);
 
     // Draw fully opaque solid overlay outside the active rectangle. [FIX]
     // Was GameConstants.backgroundColor (a generic dark navy) instead of

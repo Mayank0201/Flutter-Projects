@@ -80,6 +80,26 @@ class CarComponent extends PositionComponent
   double _congestionMultiplier = 1.0;
   double _terrainSpeed = 1.0;
 
+  // [PERF] The purely-geometric curve-speed *target* needs two
+  // PathMetric.getTangentForOffset() probes; the ease toward it is what has
+  // to run per frame. Recompute the target on the same 15 Hz bucket as the
+  // signal/congestion checks (the eased value still moves every frame, so
+  // nothing reads as stepped) and the hot path drops from three tangent
+  // lookups per frame to one.
+  bool _recomputeCurveTarget = true;
+  double _curveSpeedTarget = 1.0;
+
+  // [PERF] Scratch collections for the per-frame follow-the-leader scan.
+  // These used to be freshly allocated every frame for every car; with 40+
+  // cars on a busy board that is 120+ short-lived collections per frame.
+  final List<CarComponent> _obstacleScratch = [];
+  final List<GridPosition> _searchNodesScratch = [];
+  final Set<GridPosition> _queriedScratch = {};
+
+  /// Per-drone phase for the hover bob, so a row of parked drones doesn't
+  /// bob in lockstep. Constant for the life of the instance.
+  late final double _bobPhase = (hashCode % 97) * 0.13;
+
   // Lane offset multiplier on the perpendicular drive-on-the-right offset.
   // +1.0 = right side (default), -1.0 = left side. Smoothly interpolated
   // toward _targetLaneSign so the car visually arcs across the centerline
@@ -120,6 +140,27 @@ class CarComponent extends PositionComponent
   static const double accelerationRate = 1.1;
   static const double decelerationRate = 2.2;
   static const double startupAccelerationBonus = 1.3;
+
+  // [FIX] Restart jitter. The anti-stall floor below used to be a hard
+  // on/off switch keyed on `_lastTargetMultiplier < 0.15`: a drone pulling
+  // away from a queue crosses that threshold repeatedly (the obstacle scan
+  // re-measures the gap to its leader every frame), so the *applied* speed
+  // snapped between the ramped value — a few hundredths just after a stop —
+  // and the flat 0.08 floor, several times a second. At a 40 px tile and
+  // 130 px/s that is a 3 px/s <-> 10 px/s flicker, which reads exactly like
+  // the reported stutter. Fade the floor in across a band instead so the
+  // applied speed stays continuous in `_lastTargetMultiplier`; on an open
+  // road (`_lastTargetMultiplier == 1`) the floor is unchanged at 0.08.
+  //
+  // These live here rather than in GameConstants because another session
+  // owns that file right now; move them there when convenient.
+  static const double stallSpeedFloor = 0.08;
+  static const double stallFloorFadeLow = 0.15;
+  static const double stallFloorFadeHigh = 0.30;
+
+  /// Slack (in path pixels) below which a hard advance cap counts as
+  /// "held here": the drone is at the stop line and must not creep.
+  static const double _holdEpsilon = 0.01;
 
   CarComponent({
     required this.colorIndex,
@@ -175,6 +216,8 @@ class CarComponent extends PositionComponent
     // at full speed.
     _currentSpeedMultiplier = 0.0;
     _currentCurveSpeedMultiplier = 1.0;
+    _curveSpeedTarget = 1.0;
+    _recomputeCurveTarget = true;
     _lastTargetMultiplier = 1.0;
     _currentLaneSign = 1.0;
     _targetLaneSign = 1.0;
@@ -479,6 +522,8 @@ class CarComponent extends PositionComponent
     _waitingAtSignal = false;
     _currentSpeedMultiplier = 0.0;
     _currentCurveSpeedMultiplier = 1.0;
+    _curveSpeedTarget = 1.0;
+    _recomputeCurveTarget = true;
     _lastTargetMultiplier = 1.0;
     _currentLaneSign = 1.0;
     _targetLaneSign = 1.0;
@@ -699,6 +744,49 @@ class CarComponent extends PositionComponent
       if (other._movingInsideLot) return true;
     }
     return false;
+  }
+
+  /// How far this drone may advance along the path this frame, and whether
+  /// it is being held right on that line (so the caller can ask the normal
+  /// deceleration ramp for a speed of zero instead of hard-zeroing the
+  /// multiplier — see the restart-jitter note on [_updatePosition]).
+  ///
+  /// [dt] is the real frame delta, not the speed-scaled one.
+  (double, bool) _advanceCap(double dt, bool hasReservation, bool exitBlocked) {
+    double cap = double.infinity;
+
+    // Don't cross into the next cell without a reservation, and don't block
+    // the box.
+    if ((!hasReservation || exitBlocked) &&
+        _currentPathIndex + 1 < path.length) {
+      final cellEndProgress =
+          (_currentPathIndex + 1 < segmentStartOffsets.length)
+          ? segmentStartOffsets[_currentPathIndex + 1]
+          : _totalLength;
+      cap = max(0.0, cellEndProgress - _distanceTraveled);
+    }
+
+    // One drone moves inside a shop lot at a time. _lotBusy() is an O(cars)
+    // scan, so — as the old inline check did — only consult it once the gate
+    // is within this frame's reach.
+    if (_lotRouteLength > 0) {
+      final reach = max(cellSize * 0.25, dt * speed * game.timeScale * 3.0);
+      if (!isReturning && _endsAtShop) {
+        // Gate on the driveway tile, half a tile short of the tongue mouth.
+        final gate = _totalLength - _lotRouteLength - cellSize * 0.5;
+        final room = gate - _distanceTraveled;
+        if (_distanceTraveled < gate + 0.5 && room < reach && _lotBusy()) {
+          cap = min(cap, max(0.0, room));
+        }
+      } else if (isReturning &&
+          _startsAtShop &&
+          _distanceTraveled <= 0.5 &&
+          _lotBusy()) {
+        cap = 0.0;
+      }
+    }
+
+    return (cap, cap <= _holdEpsilon);
   }
 
   /// Appends [pts] to both paths from [from] as straight runs joined by
@@ -1058,7 +1146,9 @@ class CarComponent extends PositionComponent
         final perpSign = (perp.dy < 0 || (perp.dy == 0 && perp.dx < 0))
             ? 1.0
             : -1.0;
-        final arcHeight = dist * 0.15 * perpSign;
+        // Must match the painted trace (GridRenderer._drawExpressLanesForChunk
+        // uses the same constant) or drones fly off it.
+        final arcHeight = dist * GameConstants.expressLaneArc * perpSign;
         final cp = mid + perp * arcHeight;
 
         _smoothPath.quadraticBezierTo(cp.dx, cp.dy, c2.dx, c2.dy);
@@ -1238,7 +1328,20 @@ class CarComponent extends PositionComponent
     }
   }
 
-  void _updatePosition(double dt) {
+  /// Advances along the smooth path. [maxAdvance] is a hard cap on this
+  /// call's arc-length step, in path pixels.
+  ///
+  /// [FIX] Restart jitter: the caller used to integrate first and then, if
+  /// the drone had crossed a stop line it was not allowed to cross, rewind
+  /// `_distanceTraveled` to the boundary, zero `_currentSpeedMultiplier`
+  /// and call this method a second time with dt == 0 to re-place the
+  /// sprite. That did two harmful things every frame the drone sat at a
+  /// stop line: it re-ran the whole tangent/lane pipeline twice, and it
+  /// destroyed the acceleration ramp (`_currentSpeedMultiplier` back to 0)
+  /// while the accel block upstream kept rebuilding it — so the drone's
+  /// speed sawtoothed instead of easing away. Passing the allowed step in
+  /// means the drone never overshoots and never has to be yanked back.
+  void _updatePosition(double dt, {double maxAdvance = double.infinity}) {
     if (_totalLength <= 0) return;
 
     // Stage 6: Curve / Turn Speeds
@@ -1258,23 +1361,27 @@ class CarComponent extends PositionComponent
     // _rebuildSmoothPath) so the car starts anticipating a turn a little
     // earlier, giving the ease more room to work with before the tightest
     // part of the curve.
-    final tangent = _metric!.getTangentForOffset(_distanceTraveled);
-    double targetCurveSpeedMultiplier = 1.0;
-    if (tangent != null) {
-      final nextOffset = min(
-        _totalLength,
-        _distanceTraveled + cellSize * 0.9,
-      );
-      final nextTangent = _metric!.getTangentForOffset(nextOffset);
-      if (nextTangent != null) {
-        double turnAngleDiff = (nextTangent.angle - tangent.angle).abs();
-        if (turnAngleDiff > pi) {
-          turnAngleDiff = 2 * pi - turnAngleDiff;
+    if (_recomputeCurveTarget) {
+      _recomputeCurveTarget = false;
+      final tangent = _metric!.getTangentForOffset(_distanceTraveled);
+      double target = 1.0;
+      if (tangent != null) {
+        final nextOffset = min(
+          _totalLength,
+          _distanceTraveled + cellSize * 0.9,
+        );
+        final nextTangent = _metric!.getTangentForOffset(nextOffset);
+        if (nextTangent != null) {
+          double turnAngleDiff = (nextTangent.angle - tangent.angle).abs();
+          if (turnAngleDiff > pi) {
+            turnAngleDiff = 2 * pi - turnAngleDiff;
+          }
+          target = 1.0 - (turnAngleDiff / (pi / 2) * 0.45).clamp(0.0, 0.45);
         }
-        targetCurveSpeedMultiplier =
-            1.0 - (turnAngleDiff / (pi / 2) * 0.45).clamp(0.0, 0.45);
       }
+      _curveSpeedTarget = target;
     }
+    final targetCurveSpeedMultiplier = _curveSpeedTarget;
     if (dt > 0) {
       const curveSpeedEaseRate = 4.0; // convergence rate, per second
       final diff = targetCurveSpeedMultiplier - _currentCurveSpeedMultiplier;
@@ -1302,19 +1409,11 @@ class CarComponent extends PositionComponent
 
     double advance =
         dt * speed * game.timeScale * curveSpeedMultiplier * roundaboutSpeedMultiplier;
-    if (_lotRouteLength > 0 && advance > 0) {
-      if (!isReturning && _endsAtShop) {
-        // Gate on the driveway tile, half a tile short of the tongue mouth.
-        final gate = _totalLength - _lotRouteLength - cellSize * 0.5;
-        if (_distanceTraveled < gate + 0.5 && _distanceTraveled + advance > gate && _lotBusy()) {
-          advance = (gate - _distanceTraveled).clamp(0.0, advance);
-          _currentSpeedMultiplier = 0.0;
-        }
-      } else if (isReturning && _startsAtShop && _distanceTraveled <= 0.5 && _lotBusy()) {
-        advance = 0.0;
-        _currentSpeedMultiplier = 0.0;
-      }
-    }
+    // Hard stop lines (unreserved cell ahead, blocked box, shop-lot gate)
+    // arrive as a cap computed by the caller *before* this integration, so
+    // the drone stops exactly on the line instead of overshooting and being
+    // rewound. See _advanceCap().
+    if (advance > maxAdvance) advance = max(0.0, maxAdvance);
     _distanceTraveled += advance;
     if (_distanceTraveled >= _totalLength) {
       _distanceTraveled = _totalLength;
@@ -1535,6 +1634,8 @@ class CarComponent extends PositionComponent
     _currentLaneSign = 1.0;
     _targetLaneSign = 1.0;
     _currentCurveSpeedMultiplier = 1.0;
+    _curveSpeedTarget = 1.0;
+    _recomputeCurveTarget = true;
     _currentSpeedMultiplier = 0.0;
     _lastTargetMultiplier = 1.0;
     _roundaboutInnerLane = null;
@@ -1622,8 +1723,10 @@ class CarComponent extends PositionComponent
       path = [...prefix, ...newSubPath, path.last];
     }
 
-    // Rebuild smooth path
+    // Rebuild smooth path (the geometry under the car changed, so the
+    // cached curve-speed target is stale — take a fresh reading).
     _rebuildSmoothPath();
+    _recomputeCurveTarget = true;
 
     // [FIX] Re-derive the new arc-length distance analytically from the
     // unchanged prefix, instead of re-locating the car via a Euclidean
@@ -1897,6 +2000,9 @@ class CarComponent extends PositionComponent
     _simCheckTimer += dt;
     if (_simCheckTimer >= 1 / 15) {
       _simCheckTimer = 0;
+      // [PERF] Curve-speed target rides the same bucket; the ease toward it
+      // still runs per frame, so nothing reads as stepped.
+      _recomputeCurveTarget = true;
 
       _waitingAtSignal = false;
       if (_currentPathIndex + 1 < path.length && game.gridManager != null) {
@@ -2325,16 +2431,20 @@ class CarComponent extends PositionComponent
                 // Check priority rules if standard intersection
                 bool hasPriority = true;
                 if (isStandardIntersection) {
-                  final competitors = occupancy.waitingCars
-                      .where((c) => c != this)
-                      .toList();
-                  if (competitors.isNotEmpty) {
-                    final hasOutboundCompetitor = competitors.any(
-                      (c) => !c.isReturning,
-                    );
-                    final hasReturningCompetitor = competitors.any(
-                      (c) => c.isReturning,
-                    );
+                  // [PERF] Was a .where().toList() plus two .any() passes,
+                  // allocating a list and three closures per frame per car
+                  // waiting at an intersection. One pass, no allocations.
+                  bool hasOutboundCompetitor = false;
+                  bool hasReturningCompetitor = false;
+                  for (final c in occupancy.waitingCars) {
+                    if (c == this) continue;
+                    if (c.isReturning) {
+                      hasReturningCompetitor = true;
+                    } else {
+                      hasOutboundCompetitor = true;
+                    }
+                  }
+                  if (hasOutboundCompetitor || hasReturningCompetitor) {
                     if (!isReturning) {
                       if (occupancy.consecutiveOutbound >= 2 &&
                           hasReturningCompetitor) {
@@ -2437,9 +2547,11 @@ class CarComponent extends PositionComponent
       }
 
       // 2. Safe Follow Distance Checking (from occupancy maps)
-      final List<CarComponent> potentialObstacles = [];
+      // [PERF] Reused scratch collections — see the field declarations.
+      final List<CarComponent> potentialObstacles = _obstacleScratch..clear();
 
-      final List<GridPosition> searchNodes = [myNode];
+      final List<GridPosition> searchNodes = _searchNodesScratch..clear();
+      searchNodes.add(myNode);
       if (myIdx + 1 < path.length) {
         searchNodes.add(path[myIdx + 1]);
         // Roundabout lookahead optimization: if inside a roundabout, look ahead 2 nodes
@@ -2449,7 +2561,7 @@ class CarComponent extends PositionComponent
         }
       }
 
-      final Set<GridPosition> queried = {};
+      final Set<GridPosition> queried = _queriedScratch..clear();
       for (final node in searchNodes) {
         if (!queried.add(node)) continue;
         final curOccupancy = game.getOrCreateOccupancy(node);
@@ -2469,6 +2581,11 @@ class CarComponent extends PositionComponent
         }
       }
       final myPos = position;
+      // [PERF] Hoisted out of the obstacle loop and kept as scalars: this
+      // used to build two Vector2s (and two cos/sin pairs) per candidate
+      // obstacle per frame. Identical arithmetic.
+      final myFwdX = cos(angle);
+      final myFwdY = sin(angle);
 
       for (final other in potentialObstacles) {
         if (identical(other, this) || other.onExpressLane || other.arrived) {
@@ -2549,13 +2666,12 @@ class CarComponent extends PositionComponent
 
           if (isAhead) {
             // Restore heading dot-product check to ignore cars behind or going in opposite directions
-            final myFwd = Vector2(cos(angle), sin(angle));
-            final toOther = other.position - myPos;
-            if (toOther.dot(myFwd) <= 0) {
+            final toOtherX = other.position.x - myPos.x;
+            final toOtherY = other.position.y - myPos.y;
+            if (toOtherX * myFwdX + toOtherY * myFwdY <= 0) {
               continue;
             }
-            final otherFwd = Vector2(cos(other.angle), sin(other.angle));
-            if (myFwd.dot(otherFwd) < -0.5) {
+            if (myFwdX * cos(other.angle) + myFwdY * sin(other.angle) < -0.5) {
               continue;
             }
           }
@@ -2626,12 +2742,28 @@ class CarComponent extends PositionComponent
       _currentLaneSign += laneDiff > 0 ? laneRate : -laneRate;
     }
 
+    // --- Hard stop lines, resolved before anything is integrated ---
+    // (unreserved next cell, blocked box, shop-lot gate). `heldAtLine` means
+    // the drone is standing on the line right now.
+    final (double maxAdvance, bool heldAtLine) = _advanceCap(
+      dt,
+      hasReservation,
+      exitBlocked,
+    );
+
     // --- Acceleration/Deceleration ---
-    final baseTarget =
-        targetMultiplier *
-        _vehicleSpeedMultiplier *
-        _terrainSpeed *
-        _congestionMultiplier;
+    // [FIX] Restart jitter: while held on a stop line the speed multiplier
+    // used to be slammed to 0 after the fact (by the old rewind block and by
+    // the lot gate inside _updatePosition) on the same frames the ramp below
+    // was building it back up. Ask the ramp for zero instead, so the drone
+    // decelerates into the line once and then simply holds — and pulls away
+    // from a single, continuous baseline.
+    final baseTarget = heldAtLine
+        ? 0.0
+        : targetMultiplier *
+              _vehicleSpeedMultiplier *
+              _terrainSpeed *
+              _congestionMultiplier;
     if (_currentSpeedMultiplier < baseTarget) {
       double rate = accelerationRate;
       if (_currentSpeedMultiplier < 0.1) rate *= startupAccelerationBonus;
@@ -2651,15 +2783,17 @@ class CarComponent extends PositionComponent
 
     double finalMultiplier = _currentSpeedMultiplier;
     // Disable the anti-stall minimum floor under two conditions:
-    // 1. We are approaching a smart junction (roundabout entry).
-    // 2. We are close behind another car (to allow a clean bumper stop).
+    // 1. We are approaching a smart junction (roundabout entry) or an
+    //    intersection this drone has not reserved — a hard "may stop dead".
+    // 2. We are close behind another car (to allow a clean bumper stop) —
+    //    this one is now a fade rather than a switch, see below.
     // Otherwise, keep the 0.08 floor active to prevent random stalls on open roads.
     final currentNode = path[_currentPathIndex.clamp(0, path.length - 1)];
     final bool isApproachingJunction =
         currentNode.side == null &&
         (_currentPathIndex + 1 < path.length &&
             path[_currentPathIndex + 1].side != null);
-    bool canStop = isApproachingJunction || _lastTargetMultiplier < 0.15;
+    bool canStop = isApproachingJunction;
     if (_currentPathIndex + 1 < path.length) {
       final nextNode = path[_currentPathIndex + 1];
       final cell = game.gridManager?.getCell(nextNode.x, nextNode.y);
@@ -2677,30 +2811,24 @@ class CarComponent extends PositionComponent
         }
       }
     }
-    if (!_waitingAtSignal && !arrived && !isWaiting && !canStop) {
-      finalMultiplier = max(0.08, _currentSpeedMultiplier);
+    // [FIX] Restart jitter: the floor now fades in across
+    // [stallFloorFadeLow] .. [stallFloorFadeHigh] instead of switching on at
+    // a single threshold, and it is off entirely while the drone is held on
+    // a stop line. Previously `canStop` flipped frame to frame as the
+    // obstacle scan re-measured the gap to the leader, so the applied speed
+    // jumped between the ramped value and a flat 0.08 several times a
+    // second — the visible stutter. On an open road the floor is unchanged.
+    if (!_waitingAtSignal && !arrived && !isWaiting && !heldAtLine && !canStop) {
+      final fade =
+          ((_lastTargetMultiplier - stallFloorFadeLow) /
+                  (stallFloorFadeHigh - stallFloorFadeLow))
+              .clamp(0.0, 1.0);
+      final floor = stallSpeedFloor * fade;
+      if (floor > finalMultiplier) finalMultiplier = floor;
     }
 
     final oldPathIndex = _currentPathIndex;
-    _updatePosition(dt * finalMultiplier);
-
-    // Hard boundary constraint: do not cross into the next cell if we don't have a reservation or if exit is blocked.
-    if (_currentPathIndex + 1 < path.length) {
-      final cellEndProgress =
-          (_currentPathIndex + 1 < segmentStartOffsets.length)
-          ? segmentStartOffsets[_currentPathIndex + 1]
-          : _totalLength;
-
-      if (!hasReservation || exitBlocked) {
-        if (_distanceTraveled > cellEndProgress) {
-          _distanceTraveled = cellEndProgress;
-          _currentSpeedMultiplier = 0.0;
-          _updatePosition(
-            0,
-          ); // Update position vector and tangent angle to match the boundary
-        }
-      }
-    }
+    _updatePosition(dt * finalMultiplier, maxAdvance: maxAdvance);
 
     _currentPathIndex = _calculatePathIndex(_distanceTraveled);
 
@@ -2847,9 +2975,10 @@ class CarComponent extends PositionComponent
     }
 
     // 2. Heading check: if the cars face opposite directions (dot product is negative)
-    final myFwd = Vector2(cos(angle), sin(angle));
-    final otherFwd = Vector2(cos(other.angle), sin(other.angle));
-    if (myFwd.dot(otherFwd) < -0.5) {
+    // [PERF] Scalar dot product — this is called from `.where()` filters that
+    // run per frame at every intersection, and used to allocate two Vector2s
+    // per call. Identical arithmetic.
+    if (cos(angle) * cos(other.angle) + sin(angle) * sin(other.angle) < -0.5) {
       return true;
     }
 
@@ -2943,7 +3072,7 @@ class CarComponent extends PositionComponent
       Offset(size.x / 2, size.y / 2),
       size.x * GameConstants.droneRadius,
       baseColor,
-      game.elapsedTime + (hashCode % 97) * 0.13,
+      game.elapsedTime + _bobPhase,
     );
   }
 
@@ -2956,41 +3085,106 @@ class CarComponent extends PositionComponent
   static void drawDrone(Canvas canvas, Offset c0, double r, Color color, double t) {
     final bob = sin(t * 2.6);
     final c = Offset(c0.dx, c0.dy - r * 0.10 * bob);
-    final dark = Color.lerp(color, const Color(0xFF10181B), 0.42)!;
-    final light = Color.lerp(color, Colors.white, 0.42)!;
-    // Hover shadow on the board, further below the body than the bob lift.
+    final tones = _tonesFor(color);
+
+    // [PERF] Hover shadow. This used to be a single oval painted through a
+    // MaskFilter.blur — one real blur per drone per frame, for every moving
+    // drone AND every idle parking slot (GridRenderer._drawParkedCars draws
+    // the same glyph). On Flutter web that is the single most expensive
+    // thing in the frame at 40+ drones. Two stacked flat translucent ovals
+    // (a wide faint one under a tighter darker one) give the same soft
+    // "hovering above the board" read for the cost of two plain fills.
     final shadowScale = 1.0 - 0.12 * bob;
+    final sc = Offset(c0.dx, c0.dy + r * 1.05);
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(c0.dx, c0.dy + r * 1.05),
-        width: r * 2.1 * shadowScale,
-        height: r * 1.0 * shadowScale,
+        center: sc,
+        width: r * 2.7 * shadowScale,
+        height: r * 1.3 * shadowScale,
       ),
-      Paint()
-        ..color = Colors.black.withValues(alpha: 0.30)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.35),
+      _shadowOuterPaint,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: sc,
+        width: r * 1.9 * shadowScale,
+        height: r * 0.9 * shadowScale,
+      ),
+      _shadowInnerPaint,
     );
     // Glow.
-    canvas.drawCircle(c, r * 2.1, Paint()..color = color.withValues(alpha: 0.10));
-    canvas.drawCircle(c, r * 1.45, Paint()..color = color.withValues(alpha: 0.16));
+    canvas.drawCircle(c, r * 2.1, _glowOuterPaint..color = tones.glowOuter);
+    canvas.drawCircle(c, r * 1.45, _glowInnerPaint..color = tones.glowInner);
     // Saucer: flat disc with a darker rim and a thin light edge on top.
     final disc = Rect.fromCenter(center: c, width: r * 2.0, height: r * 1.3);
-    canvas.drawOval(disc, Paint()..color = dark);
-    canvas.drawOval(disc.deflate(r * 0.15), Paint()..color = color);
+    canvas.drawOval(disc, _rimPaint..color = tones.dark);
+    final body = disc.deflate(r * 0.15);
+    canvas.drawOval(body, _bodyPaint..color = color);
     canvas.drawArc(
-      disc.deflate(r * 0.15),
+      body,
       pi,
       pi,
       false,
-      Paint()
-        ..color = light.withValues(alpha: 0.7)
-        ..style = PaintingStyle.stroke
+      _edgePaint
+        ..color = tones.edge
         ..strokeWidth = r * 0.10,
     );
     // Dome on top with a highlight.
     final dome = Rect.fromCenter(center: Offset(c.dx, c.dy - r * 0.25), width: r * 1.05, height: r * 0.9);
-    canvas.drawOval(dome, Paint()..color = light);
-    canvas.drawCircle(Offset(c.dx - r * 0.18, c.dy - r * 0.42), r * 0.17, Paint()..color = Colors.white.withValues(alpha: 0.85));
+    canvas.drawOval(dome, _domePaint..color = tones.light);
+    canvas.drawCircle(Offset(c.dx - r * 0.18, c.dy - r * 0.42), r * 0.17, _highlightPaint);
   }
 
+  // [PERF] Reused paints for the drone glyph. Every call used to allocate
+  // eight Paint objects (and several Colors); at 40+ drones times 60 fps
+  // that is thousands of short-lived objects a second. Canvas draw calls
+  // snapshot the paint immediately, so mutating and reusing them is safe.
+  static final Paint _shadowOuterPaint = Paint()
+    ..color = const Color(0x1F000000);
+  static final Paint _shadowInnerPaint = Paint()
+    ..color = const Color(0x38000000);
+  static final Paint _glowOuterPaint = Paint();
+  static final Paint _glowInnerPaint = Paint();
+  static final Paint _rimPaint = Paint();
+  static final Paint _bodyPaint = Paint();
+  static final Paint _edgePaint = Paint()..style = PaintingStyle.stroke;
+  static final Paint _domePaint = Paint();
+  static final Paint _highlightPaint = Paint()
+    ..color = const Color(0xD9FFFFFF);
+
+  /// Derived tints for one drone colour. There are only a handful of house
+  /// colours, so the Color.lerp/withValues work is done once each.
+  static final Map<Color, _DroneTones> _droneTones = {};
+
+  static _DroneTones _tonesFor(Color color) {
+    final cached = _droneTones[color];
+    if (cached != null) return cached;
+    final dark = Color.lerp(color, const Color(0xFF10181B), 0.42)!;
+    final light = Color.lerp(color, Colors.white, 0.42)!;
+    final tones = _DroneTones(
+      dark: dark,
+      light: light,
+      edge: light.withValues(alpha: 0.7),
+      glowOuter: color.withValues(alpha: 0.10),
+      glowInner: color.withValues(alpha: 0.16),
+    );
+    _droneTones[color] = tones;
+    return tones;
+  }
+}
+
+class _DroneTones {
+  const _DroneTones({
+    required this.dark,
+    required this.light,
+    required this.edge,
+    required this.glowOuter,
+    required this.glowInner,
+  });
+
+  final Color dark;
+  final Color light;
+  final Color edge;
+  final Color glowOuter;
+  final Color glowInner;
 }

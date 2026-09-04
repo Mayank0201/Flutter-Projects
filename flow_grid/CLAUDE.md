@@ -91,12 +91,23 @@ Two things about it are easy to miss:
   and the weekly reward popup commits any in-progress drag before pausing.
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
   `GameConstants` presentation flags and are off for the calm look.
+- **Shop maturity has to be legible.** At `maturityThresholdWeeks` a shop's demand
+  ceiling goes `maxDemand` -> `matureMaxDemand`; on screen its pad grows from
+  `lotMinScale` to `lotMaxScale` (keep that gap wide enough to see), the chip grows with
+  the pad, and the status LED turns amber. A shop showing no demand LEDs is not broken,
+  it is being served faster than its demand timer ticks.
+- **The city-reveal vignette paints opaque ground outside the active region**
+  (`_drawCityVignette`). Its hole is inflated past the region because a building is
+  anchored inside but its block and pad reach ~1.5 tiles beyond the anchor; without the
+  inflation a building on the border is painted in half.
 - **Visual language is a calm circuit board.** Deep board-ink ground with soft darker
   patches and small signal towers on empty tiles (`_drawTrees`, hash-placed, chunk
   layer). Player-facing text calls roads "paths" and the smart junction a "hub";
   code keeps the road/junction names. Roads are copper traces: muted copper fill, lighter copper edge, straight
   runs with 45-degree chamfered corners, and via pads (copper disc, rim, dark drilled
-  centre) at every dead end and junction (`vias` in the road pass). Houses are small
+  centre) at dead ends and 4-way crossings only (`vias` in the road pass) -- never on a
+  tee (a field of circles) and never on a hub cell (the pad filled the ring's island and
+  the hub read as a solid gear). Houses are small
   diamond chips (`_drawDiamondChip`); shops are IC packages with copper pin legs on a
   pavement pad (`_drawIcChip` inside `_drawDestination`), with a white status LED.
   Demand is a row of LEDs (`_drawLed`), overflow a gauge bar above them. Vehicles are
@@ -122,7 +133,10 @@ Two things about it are easy to miss:
 - Utility glyphs: roundabout = one-road-width ring on the
   `junctionRingRadius` pathing circle with a ground-colour island, signals = red/green lamps per
   approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
-  portal, express lanes = tinned silver band with pale dashes and round white ramp badges.
+  portal, express lanes = tinned silver trace, one road wide, with a dashed centre line
+  and a silver pad at each end. Its bow off the straight line is
+  `GameConstants.expressLaneArc`, shared by the painter, the placement preview and
+  `CarComponent`'s long-jump path -- change it in one place or drones leave the trace.
 - **Never name other games in code, comments, docs, the store listing or commit
   messages.** See `changes_required.md` for why. Describe what the game does instead.
   Keep the look its own: no long single-light cast shadows, no ring timers, no map

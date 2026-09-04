@@ -41,9 +41,9 @@ class GameConstants {
   // every side, while lotMaxScale*renderScale (1.05*0.90=0.945*cellSize)
   // stays safely under 1.0*cellSize.
   static const double lotMinScale =
-      1.05; // lot card ~1.9 tiles: room for three bays plus the corridor
+      1.02; // lot card ~1.8 tiles: room for three bays plus the corridor
   static const double lotMaxScale =
-      1.08; // fully mature: barely larger, so the bays stay put
+      1.20; // fully mature: visibly larger pad, and the chip grows with it
 
   // Endless Scaling (Part 1 & 3)
   static const double highDemandHouseTriggerDuration = 22.0;
@@ -194,6 +194,10 @@ class GameConstants {
   static const Color waterColor = Color(0xFF1F4B57); // deep teal pool
   static const Color waterEdgeColor = Color(0xFF6FB3BE);
   static const Color bridgeColor = roadColor; // the road just continues over water
+  // How far an express trace bows off the straight line between its two
+  // ends, as a fraction of its length. CarComponent's long-jump branch uses
+  // the same number, or drones would fly off the painted trace.
+  static const double expressLaneArc = 0.06;
   static const Color expressLaneColor = Color(0xFFB9C4CC); // tinned (silver) trace
   static const Color expressLaneBorderColor = Color(0xFF6E7B84);
 
