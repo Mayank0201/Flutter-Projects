@@ -137,8 +137,14 @@ Two things about it are easy to miss:
   appends these spurs to the smooth path and scales the lane offset over them
   (`_laneFade`: 60% inside the lot so drones in and out pass on opposite sides, 0 over
   the last half tile). One drone moves inside a lot at a time (`_lotBusy`): entering
-  drones hold on the driveway tile, leaving drones stay in their bay. Parked drones are
-  skipped by the follow-the-leader scan. Never teleport a drone to a parking spot.
+  drones hold on the driveway tile, leaving drones stay in their bay. Only drones parked
+  off the trace are skipped by the follow-the-leader scan (`_isParkedOffTrace`), never
+  one merely holding on it. **A drone's facing comes from the path tangent
+  (`_refreshHeading`), never from `angle`**: `angle` is pinned to 0 so the sprite stays
+  upright, and heading maths that read it saw every drone facing east, which made them
+  drive through each other. No more drones are dispatched to a shop than it has bays
+  (`FlowGridGame._findDestination`), or two would be parked in one. Never teleport a
+  drone to a parking spot.
 - Utility glyphs: roundabout = one-road-width ring on the
   `junctionRingRadius` pathing circle with a ground-colour island, signals = red/green lamps per
   approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
