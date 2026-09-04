@@ -26,10 +26,13 @@ Get-ChildItem "$env:LOCALAPPDATA\Temp" -Directory -Filter 'flutter_tools.*' -Err
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-15) } |
     ForEach-Object { try { Remove-Item $_.FullName -Recurse -Force -ErrorAction Stop } catch { } }
 
-# `flutter run -d chrome` otherwise launches Chrome with a throwaway profile
-# inside the very temp folder swept above, so the game's saved cities (which
-# live in browser storage) are wiped on every restart. Pin the profile to a
-# stable folder next to the repo instead, and keep it out of git.
+# `flutter run -d chrome` launches Chrome with a throwaway profile, so the
+# game's saved cities (which live in browser storage) do not survive a
+# restart. Pinning the profile here moves it out of the swept temp folder,
+# but does NOT make it persist: flutter_tools deletes the user-data dir on
+# exit wherever it points (Chrome._createUserDataDirectory and the
+# process.exitCode handler below it). For saves that really survive, serve
+# with `-d web-server` and open your own Chrome at the port instead.
 $chromeProfile = Join-Path $ProjectDir '.dev-chrome-profile'
 if (-not (Test-Path $chromeProfile)) { New-Item -ItemType Directory -Path $chromeProfile | Out-Null }
 
@@ -41,10 +44,8 @@ try {
     if ($Device -in @('chrome', 'edge', 'web-server')) {
         $runArgs += @('--web-port', "$Port")
     }
-    # flutter_tools uses a --user-data-dir passed through --web-browser-flag if
-    # there is one, and otherwise makes a throwaway profile in the system temp
-    # folder (see Chrome._createUserDataDirectory). Point it at the pinned
-    # profile so saved cities survive a restart.
+    # Keep the profile out of the temp folder swept above. It is still
+    # deleted on exit by flutter_tools; see the note at the top.
     if ($Device -in @('chrome', 'edge')) {
         $runArgs += "--web-browser-flag=--user-data-dir=$chromeProfile"
     }
