@@ -147,7 +147,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         mapIcon = Icons.water;
         break;
       case MapType.arctic:
-        mapDesc = 'ICE ROADS & BLIZZARDS';
+        mapDesc = 'ICE PATHS & BLIZZARDS';
         themeColor = Colors.cyanAccent;
         mapIcon = Icons.ac_unit;
         break;
@@ -276,7 +276,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                 _toolButton(
                   tool: BuildTool.road,
                   icon: Icons.add_road,
-                  label: 'ROAD',
+                  label: 'PATH',
                   notifier: g.roadInventoryNotifier,
                 ),
               if (_shouldShowTool(BuildTool.tunnel))
@@ -304,7 +304,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                 _toolButton(
                   tool: BuildTool.smartJunction,
                   icon: Icons.sync,
-                  label: 'SMART',
+                  label: 'HUB',
                   notifier: g.smartJunctionInventoryNotifier,
                 ),
               if (_shouldShowTool(BuildTool.expressLane))
@@ -926,7 +926,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                               children: [
                                 _resourceChip(
                                   Icons.add_road,
-                                  'ROADS: ${g.gridManager!.roads}',
+                                  'PATHS: ${g.gridManager!.roads}',
                                 ),
                                 _resourceChip(
                                   Icons.terrain,
@@ -961,7 +961,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                             ),
                             _helpItem(
                               'OWNERSHIP',
-                              'Player roads give refunds. System roads (driveways) are free but fixed.',
+                              'Player paths give refunds. System paths (driveways) are free but fixed.',
                             ),
                             const SizedBox(height: 24),
                           ],
@@ -1134,7 +1134,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
       case MapType.arctic:
         items = [
           _helpItem(
-            'SLIPPERY ICE ROADS',
+            'SLIPPERY ICE PATHS',
             'Build directly over ice lakes without bridges. Note: Drones slide and move 40% slower over ice.',
           ),
           _helpItem(
@@ -1150,12 +1150,12 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
       case MapType.savanna:
         items = [
           _helpItem(
-            'DIRT ROADS',
-            'All built roads are unpaved dirt tracks, making drones travel 20% slower.',
+            'DIRT PATHS',
+            'All built paths are unpaved dirt tracks, making drones travel 20% slower.',
           ),
           _helpItem(
             'GAZELLE CROSSINGS',
-            'Wild gazelle herds periodically cross and block road traffic.',
+            'Wild gazelle herds periodically cross and block path traffic.',
           ),
           _helpItem(
             'DUST STORMS',
@@ -1171,11 +1171,11 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         items = [
           _helpItem(
             'FLASH FLOODS',
-            'Periodic wetlands flooding submerges low-elevation roads, temporarily closing them.',
+            'Periodic wetlands flooding submerges low-elevation paths, temporarily closing them.',
           ),
           _helpItem(
             'DRAWBRIDGES',
-            'Massive river structures that periodically open to let ships pass, blocking road lanes.',
+            'Massive river structures that periodically open to let ships pass, blocking path lanes.',
           ),
           _helpItem(
             'WETLANDS IVY',

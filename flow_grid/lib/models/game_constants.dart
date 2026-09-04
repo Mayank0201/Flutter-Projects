@@ -160,14 +160,11 @@ class GameConstants {
   static const double homeParkingLateral = 0.115; // tiles off the driveway axis
   static const double parkingLaneFadeTiles = 1.0;
 
-  // Ambient board components (small resistor-like pills with two leads)
-  // scattered on empty tiles where trees used to be.
-  static const List<Color> componentColors = [
-    Color(0xFF4F6B70),
-    Color(0xFF5E6A5A),
-    Color(0xFF6B5F6E),
-  ];
-  static const Color componentLeadColor = Color(0xFF9C7A4C);
+  // Ambient signal towers on empty tiles (the board's "trees"): a thin
+  // mast on a small base with two crossbars and a warm beacon on top.
+  static const Color towerMastColor = Color(0xFF6E8087);
+  static const Color towerBaseColor = Color(0xFF2E3F44);
+  static const Color towerBeaconColor = Color(0xFFE0736A);
   static const double parkingCornerRadius = 0.20; // tiles, in-lot corners
   // Shop lot, measured from the anchor cell centre in tiles: positive
   // "along" is toward the road (the tongue mouth is at +0.5), "strip" runs

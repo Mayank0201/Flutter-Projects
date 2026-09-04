@@ -88,16 +88,17 @@ Two things about it are easy to miss:
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
   `GameConstants` presentation flags and are off for the calm look.
 - **Visual language is a calm circuit board.** Deep board-ink ground with soft darker
-  patches and small resistor-like components on empty tiles (`_drawTrees`, hash-placed,
-  chunk layer). Roads are copper traces: muted copper fill, lighter copper edge, straight
+  patches and small signal towers on empty tiles (`_drawTrees`, hash-placed, chunk
+  layer). Player-facing text calls roads "paths" and the smart junction a "hub";
+  code keeps the road/junction names. Roads are copper traces: muted copper fill, lighter copper edge, straight
   runs with 45-degree chamfered corners, and via pads (copper disc, rim, dark drilled
   centre) at every dead end and junction (`vias` in the road pass). Houses are small
   diamond chips (`_drawDiamondChip`); shops are IC packages with copper pin legs on a
   pavement pad (`_drawIcChip` inside `_drawDestination`), with a white status LED.
   Demand is a row of LEDs (`_drawLed`), overflow a gauge bar above them. Vehicles are
   hover drones: a domed disc in the house colour with a hover shadow and faint glow, drawn
-  procedurally (`CarComponent.drawDrone`, also used for parked drones); no nose, so
-  heading never shows. Player-facing text says "drones"; code keeps the `car` names. The
+  procedurally (`CarComponent.drawDrone`, also used for parked drones); the component's
+  `angle` is always 0 so the sprite stays upright through turns. Player-facing text says "drones"; code keeps the `car` names. The
   sprite atlas is loaded but no longer drawn. Buildings cast a short soft drop shadow
   (`_drawLongShadow`). New buildings pop in with an ease-out-back scale under a
   ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane

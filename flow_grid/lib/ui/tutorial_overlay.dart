@@ -22,18 +22,18 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       icon: Icons.map_outlined,
     ),
     TutorialStep(
-      title: "BUILDING ROADS",
-      description: "Select the ROAD tool from the HUD. Click and drag to lay pavement. Roads consume your limited inventory.",
+      title: "BUILDING PATHS",
+      description: "Select the PATH tool from the HUD. Click and drag to lay a path. Paths consume your limited inventory.",
       icon: Icons.add_road,
     ),
     TutorialStep(
-      title: "ROAD HIERARCHY",
-      description: "Roads automatically upgrade as they carry more traffic. Local roads become Avenues, and heavily used routes upgrade to Arteries with higher speeds and capacity.",
+      title: "PATH HIERARCHY",
+      description: "Paths automatically upgrade as they carry more traffic. Local paths become Avenues, and heavily used routes upgrade to Arteries with higher speeds and capacity.",
       icon: Icons.route,
     ),
     TutorialStep(
       title: "TUNNELS & BRIDGES",
-      description: "Mountains block roads. Water stops traffic. Use the TUNNEL or BRIDGE tool to cross them. Extensions in a single drag are free!",
+      description: "Mountains block paths. Water stops traffic. Use the TUNNEL or BRIDGE tool to cross them. Extensions in a single drag are free!",
       icon: Icons.terrain,
     ),
     TutorialStep(
@@ -43,12 +43,12 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     ),
     TutorialStep(
       title: "SMART JUNCTIONS",
-      description: "Need higher throughput? Place a Smart Junction (Roundabout). Drones flow continuously in a clockwise direction, greatly reducing wait times.",
+      description: "Need higher throughput? Place a Hub (a ring junction). Drones flow continuously in a clockwise direction, greatly reducing wait times.",
       icon: Icons.sync,
     ),
     TutorialStep(
       title: "EXPRESS LANES",
-      description: "The ultimate tool. Drag an Express Lane between any two road tiles to create a high-speed, direct overpass that bypasses all traffic.",
+      description: "The ultimate tool. Drag an Express Lane between any two path tiles to create a high-speed, direct overpass that bypasses all traffic.",
       icon: Icons.flight_takeoff,
     ),
     TutorialStep(
@@ -63,7 +63,7 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     ),
     TutorialStep(
       title: "TRANSPORT LAYERS",
-      description: "Efficiency is key. Surface roads (Grey) handle local 'last-mile' trips. Highways (Green) and Metros (Purple) are high-speed, high-capacity layers that bypass local intersections. They only connect to the surface at specific interchanges to maintain high velocity.",
+      description: "Efficiency is key. Surface paths (Grey) handle local 'last-mile' trips. Highways (Green) and Metros (Purple) are high-speed, high-capacity layers that bypass local intersections. They only connect to the surface at specific interchanges to maintain high velocity.",
       icon: Icons.account_tree_outlined,
     ),
     TutorialStep(
@@ -73,12 +73,12 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     ),
     TutorialStep(
       title: "INFRASTRUCTURE OWNERSHIP",
-      description: "Not all roads are equal. Player roads cost resources and can be refunded. System driveways and auto-generated stubs are free but do not provide refunds when deleted.",
+      description: "Not all paths are equal. Player paths cost resources and can be refunded. System driveways and auto-generated stubs are free but do not provide refunds when deleted.",
       icon: Icons.assignment_ind_outlined,
     ),
     TutorialStep(
       title: "WEEKLY UPGRADES",
-      description: "Every Sunday, you'll receive new resources. Choose wisely between more roads, tunnels, or advanced junctions to keep up with the city's growing demand.",
+      description: "Every Sunday, you'll receive new resources. Choose wisely between more paths, tunnels, or advanced junctions to keep up with the city's growing demand.",
       icon: Icons.auto_awesome,
     ),
   ];

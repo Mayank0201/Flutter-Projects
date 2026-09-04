@@ -116,11 +116,11 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
   String _resultDesc() {
     final b = widget.game.weeklyBaseRoads;
     switch (_gambleResult) {
-      case 'jackpot':  return '+50 ROADS  ·  +1 TUNNEL  ·  +1 EXPRESS LANE';
-      case 'bigwin':   return '+${b + 15} ROADS  ·  +1 SMART JUNCTION';
-      case 'win':      return '+$b ROADS  ·  +1 TRAFFIC LIGHT';
-      case 'bust':     return '+5 ROADS ONLY';
-      case 'disaster': return '-10 ROADS  ·  +1 EXPRESS LANE (consolation)';
+      case 'jackpot':  return '+50 PATHS  ·  +1 TUNNEL  ·  +1 EXPRESS LANE';
+      case 'bigwin':   return '+${b + 15} PATHS  ·  +1 HUB';
+      case 'win':      return '+$b PATHS  ·  +1 TRAFFIC LIGHT';
+      case 'bust':     return '+5 PATHS ONLY';
+      case 'disaster': return '-10 PATHS  ·  +1 EXPRESS LANE (consolation)';
       default:         return '';
     }
   }
@@ -166,7 +166,7 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'roads scale with week  ·  $base base roads this week',
+                    'paths scale with week  ·  $base base paths this week',
                     style: GoogleFonts.outfit(
                       color: Colors.white24,
                       fontSize: 10,
@@ -197,32 +197,32 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
 
     switch (opt) {
       case 'tunnels':
-        title = '+$base ROADS  +  1 TUNNEL';
+        title = '+$base PATHS  +  1 TUNNEL';
         sub   = 'cross mountains without a gap';
         icon  = Icons.terrain;
         color = const Color(0xFF78909C);
       case 'bridges':
-        title = '+$base ROADS  +  1 BRIDGE';
+        title = '+$base PATHS  +  1 BRIDGE';
         sub   = 'span rivers in a single move';
         icon  = Icons.waves;
         color = const Color(0xFF4DD0E1);
       case 'trafficLights':
-        title = '+$base ROADS  +  1 TRAFFIC LIGHT';
+        title = '+$base PATHS  +  1 TRAFFIC LIGHT';
         sub   = 'regulate high-load intersections';
         icon  = Icons.traffic;
         color = const Color(0xFF66BB6A);
       case 'smartJunction':
-        title = '+$base ROADS  +  1 SMART JUNCTION';
+        title = '+$base PATHS  +  1 HUB';
         sub   = 'auto-balances multi-way crossings';
         icon  = Icons.hub;
         color = const Color(0xFFAB47BC);
       case 'expressLane':
-        title = '+${(base * 0.6).round()} ROADS  +  1 EXPRESS LANE';
-        sub   = 'double-speed corridor, fewer roads';
+        title = '+${(base * 0.6).round()} PATHS  +  1 EXPRESS LANE';
+        sub   = 'double-speed corridor, fewer paths';
         icon  = Icons.bolt;
         color = const Color(0xFFFFCA28);
       default: // doubleRoads
-        title = '+${base + 10} ROADS';
+        title = '+${base + 10} PATHS';
         sub   = 'pure pavement, no tools';
         icon  = Icons.add_road;
         color = const Color(0xFF42A5F5);

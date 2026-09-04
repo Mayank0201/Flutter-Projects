@@ -70,7 +70,7 @@ class AnalyticsPanel extends StatelessWidget {
           _performanceBar('Traffic Load', _calculateGlobalLoad(game)),
           const SizedBox(height: 12),
           Text(
-            'Strategy Tip: Upgrading highly congested roads to Avenues increases capacity by 3x.',
+            'Strategy Tip: Upgrading highly congested paths to Avenues increases capacity by 3x.',
             style: GoogleFonts.outfit(color: Colors.white38, fontSize: 10, fontStyle: FontStyle.italic),
           ),
         ],

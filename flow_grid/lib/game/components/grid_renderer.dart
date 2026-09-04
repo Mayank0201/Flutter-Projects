@@ -711,16 +711,24 @@ class GridRenderer extends PositionComponent
   // not a full scan-and-filter over every mountain cluster in the whole
   // map on every chunk build -- see that index's field comment for the
   // Andes-map lag this fixed.
-  /// Ambient board components: small resistor-like pills with two short
-  /// leads, scattered on empty tiles. Placement is a hash of the cell, so it
-  /// is stable, and a component simply disappears when something is built
-  /// on its tile because the chunk is repainted from the grid.
+  /// Ambient signal towers on empty tiles: a thin mast on a small base
+  /// with two crossbars and a warm beacon on top. Placement is a hash of
+  /// the cell, so it is stable, and a tower simply disappears when
+  /// something is built on its tile because the chunk is repainted.
   void _drawTrees(Canvas canvas, int minX, int minY, int maxX, int maxY) {
     final seed = game.selectedMapType.index * 1000003 + 17;
-    final lead = Paint()
-      ..color = GameConstants.componentLeadColor
-      ..strokeWidth = cellSize * 0.04
+    final mast = Paint()
+      ..color = GameConstants.towerMastColor
+      ..strokeWidth = cellSize * 0.045
       ..strokeCap = StrokeCap.round;
+    final bar = Paint()
+      ..color = GameConstants.towerMastColor
+      ..strokeWidth = cellSize * 0.035
+      ..strokeCap = StrokeCap.round;
+    final base = Paint()..color = GameConstants.towerBaseColor;
+    final beacon = Paint()..color = GameConstants.towerBeaconColor;
+    final beaconGlow = Paint()
+      ..color = GameConstants.towerBeaconColor.withValues(alpha: 0.22);
     final shadow = Paint()
       ..color = GameConstants.buildingShadowColor
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.04);
@@ -736,31 +744,31 @@ class GridRenderer extends PositionComponent
         if (u > 0.045) continue;
         final v = ((h >> 16) & 0xFFFF) / 65535.0;
         final cx = offsetX + x * cellSize + cellSize * (0.35 + v * 0.3);
-        final cy = offsetY + y * cellSize + cellSize * (0.35 + u * 6.0);
-        final vertical = ((h >> 8) & 1) == 1;
-        final color = GameConstants
-            .componentColors[(h >> 4) % GameConstants.componentColors.length];
-        final len = cellSize * 0.26;
-        final wid = cellSize * 0.12;
-        final body = vertical
-            ? Rect.fromCenter(center: Offset(cx, cy), width: wid, height: len)
-            : Rect.fromCenter(center: Offset(cx, cy), width: len, height: wid);
-        final rr = RRect.fromRectAndRadius(body, Radius.circular(wid * 0.5));
-        final ext = cellSize * 0.10;
-        if (vertical) {
-          canvas.drawLine(Offset(cx, body.top - ext), Offset(cx, body.bottom + ext), lead);
-        } else {
-          canvas.drawLine(Offset(body.left - ext, cy), Offset(body.right + ext, cy), lead);
-        }
-        canvas.drawRRect(rr.shift(Offset(0, cellSize * 0.03)), shadow);
-        canvas.drawRRect(rr, Paint()..color = color);
-        // A single band across the body, like a resistor stripe.
-        final band = Paint()..color = GameConstants.roadEdgeColor.withValues(alpha: 0.7);
-        if (vertical) {
-          canvas.drawRect(Rect.fromLTWH(body.left, cy - wid * 0.18, wid, wid * 0.36), band);
-        } else {
-          canvas.drawRect(Rect.fromLTWH(cx - wid * 0.18, body.top, wid * 0.36, wid), band);
-        }
+        final cy = offsetY + y * cellSize + cellSize * (0.55 + u * 4.0);
+        final hgt = cellSize * (0.34 + v * 0.10);
+        final top = Offset(cx, cy - hgt);
+        // Base pad and its shadow.
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: Offset(cx + cellSize * 0.02, cy + cellSize * 0.03),
+            width: cellSize * 0.20,
+            height: cellSize * 0.10,
+          ),
+          shadow,
+        );
+        canvas.drawOval(
+          Rect.fromCenter(center: Offset(cx, cy), width: cellSize * 0.18, height: cellSize * 0.09),
+          base,
+        );
+        // Mast and two crossbars.
+        canvas.drawLine(Offset(cx, cy), top, mast);
+        final w1 = cellSize * 0.10;
+        final w2 = cellSize * 0.065;
+        canvas.drawLine(Offset(cx - w1, cy - hgt * 0.55), Offset(cx + w1, cy - hgt * 0.55), bar);
+        canvas.drawLine(Offset(cx - w2, cy - hgt * 0.80), Offset(cx + w2, cy - hgt * 0.80), bar);
+        // Beacon.
+        canvas.drawCircle(top, cellSize * 0.07, beaconGlow);
+        canvas.drawCircle(top, cellSize * 0.03, beacon);
       }
     }
   }

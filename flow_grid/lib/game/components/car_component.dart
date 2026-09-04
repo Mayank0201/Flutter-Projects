@@ -235,11 +235,8 @@ class CarComponent extends PositionComponent
           tangent.position.dx - fwd.dy * lane,
           tangent.position.dy + fwd.dx * lane,
         );
-        // A car setting off from its parking spot starts facing the
-        // building (how it parked) and pivots toward the road in update.
-        angle = _fadeLaneAtStart && _distanceTraveled == 0
-            ? _parkedHeading(0)
-            : -tangent.angle;
+        // Drones stay upright: the component never rotates with the path.
+        angle = 0;
       }
     } else if (path.isNotEmpty) {
       final startPos = path[0];
@@ -507,11 +504,8 @@ class CarComponent extends PositionComponent
           tangent.position.dx - fwd.dy * lane,
           tangent.position.dy + fwd.dx * lane,
         );
-        // A car setting off from its parking spot starts facing the
-        // building (how it parked) and pivots toward the road in update.
-        angle = _fadeLaneAtStart && _distanceTraveled == 0
-            ? _parkedHeading(0)
-            : -tangent.angle;
+        // Drones stay upright: the component never rotates with the path.
+        angle = 0;
       }
     } else if (path.isNotEmpty) {
       final startPos = path[0];
@@ -531,7 +525,7 @@ class CarComponent extends PositionComponent
     if (!_parksAt(i)) return;
     final spot = _parkingSpotFor(i);
     position = Vector2(spot.dx, spot.dy);
-    angle = _parkedHeading(i);
+    angle = 0;
   }
 
   bool get _usesParking =>
@@ -557,14 +551,6 @@ class CarComponent extends PositionComponent
       return Offset(spot.$1.x, spot.$1.y);
     }
     return stallFor(p.x, p.y, p.side!, cellSize, offsetX, offsetY, stallSlot);
-  }
-
-  /// Heading of a car parked at node [i]: nose toward the building.
-  double _parkedHeading(int i) {
-    final side = path[i].side;
-    if (side == null) return angle;
-    final e = _unit(side);
-    return atan2(-e.y, -e.x);
   }
 
   /// Lane offset multiplier: 1 on the road, easing to 0 over the last
@@ -1283,7 +1269,7 @@ class CarComponent extends PositionComponent
         finalTangent.position.dx - fwd.dy * lane,
         finalTangent.position.dy + fwd.dx * lane,
       );
-      angle = -finalTangent.angle;
+      angle = 0; // drones stay upright
     }
   }
 
