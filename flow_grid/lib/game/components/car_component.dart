@@ -734,6 +734,28 @@ class CarComponent extends PositionComponent
     return false;
   }
 
+  /// Spacing between drones queued for the same shop lot.
+  double get _lotFollowGap => cellSize * 0.75;
+
+  /// How many other outbound drones bound for the same shop are nearer to it
+  /// than this one, so a queue can space itself out along the trace.
+  int _lotQueueAhead() {
+    final myRemaining = _totalLength - _distanceTraveled;
+    int n = 0;
+    for (final other in game.cars) {
+      if (identical(other, this) || other.arrived || other.isReturning) {
+        continue;
+      }
+      if (other._lotRouteLength <= 0) continue;
+      if (other.targetDest.x != targetDest.x ||
+          other.targetDest.y != targetDest.y) {
+        continue;
+      }
+      if (other._totalLength - other._distanceTraveled < myRemaining) n++;
+    }
+    return n;
+  }
+
   /// One drone moves inside a lot at a time: the corridor is too narrow to
   /// pass in. Others hold at the driveway (entering) or stay in their bay
   /// (leaving) until it is clear.
@@ -840,7 +862,14 @@ class CarComponent extends PositionComponent
           (_currentPathIndex + 1 < segmentStartOffsets.length)
           ? segmentStartOffsets[_currentPathIndex + 1]
           : _totalLength;
-      cap = max(0.0, cellEndProgress - _distanceTraveled);
+      // Only a boundary genuinely ahead of us can hold us. _currentPathIndex
+      // is recomputed AFTER the move, so it can lag a frame and name a
+      // boundary already behind us; capping on that pinned the drone at zero
+      // speed with nothing in front of it, and since it could not move, the
+      // index never caught up and it stayed stuck.
+      if (cellEndProgress > _distanceTraveled) {
+        cap = cellEndProgress - _distanceTraveled;
+      }
     }
 
     // One drone moves inside a shop lot at a time. _lotBusy() is an O(cars)
@@ -850,10 +879,18 @@ class CarComponent extends PositionComponent
       final reach = max(cellSize * 0.25, dt * speed * game.timeScale * 3.0);
       if (!isReturning && _endsAtShop) {
         // Gate on the driveway tile, half a tile short of the tongue mouth.
-        final gate = _totalLength - _lotRouteLength - cellSize * 0.5;
-        final room = gate - _distanceTraveled;
-        if (_distanceTraveled < gate + 0.5 && room < reach && _lotBusy()) {
-          cap = min(cap, max(0.0, room));
+        // Every drone bound for this shop shares the same path end, so they
+        // all used to hold on the SAME spot and render on top of each other.
+        // Each one now stops a follow-distance further back than the drones
+        // already ahead of it, forming a line along the trace.
+        final base = _totalLength - _lotRouteLength - cellSize * 0.5;
+        // Look far enough ahead to catch the back of that queue, not just
+        // this frame's travel.
+        if (_distanceTraveled > base - reach - _lotFollowGap * 4 &&
+            _lotBusy()) {
+          final gate = base - _lotQueueAhead() * _lotFollowGap;
+          final room = gate - _distanceTraveled;
+          if (room < reach) cap = min(cap, max(0.0, room));
         }
       } else if (isReturning &&
           _startsAtShop &&

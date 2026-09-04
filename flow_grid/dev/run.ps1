@@ -26,6 +26,14 @@ Get-ChildItem "$env:LOCALAPPDATA\Temp" -Directory -Filter 'flutter_tools.*' -Err
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-15) } |
     ForEach-Object { try { Remove-Item $_.FullName -Recurse -Force -ErrorAction Stop } catch { } }
 
+# `flutter run -d chrome` otherwise launches Chrome with a throwaway profile
+# inside the very temp folder swept above, so the game's saved cities (which
+# live in browser storage) are wiped on every restart. Pin the profile to a
+# stable folder next to the repo instead, and keep it out of git.
+$chromeProfile = Join-Path $ProjectDir '.dev-chrome-profile'
+if (-not (Test-Path $chromeProfile)) { New-Item -ItemType Directory -Path $chromeProfile | Out-Null }
+$env:CHROME_USER_DATA_DIR = $chromeProfile
+
 $flutter = Resolve-SdkTool -Name 'flutter'
 
 Push-Location $ProjectDir

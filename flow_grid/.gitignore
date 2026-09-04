@@ -53,3 +53,6 @@ app.*.map.json
 /analyze_out.txt
 /final_check.txt
 /log_tail.txt
+
+# Pinned Chrome profile for dev/run.ps1 so in-game saves survive restarts
+.dev-chrome-profile/
