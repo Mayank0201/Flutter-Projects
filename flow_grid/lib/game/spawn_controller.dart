@@ -140,6 +140,43 @@ class SpawnConfig {
   static const double orphanDistrictCheckInterval = 3.0;
 
   // ============================================================
+  // Staged-House Recovery
+  // ============================================================
+  // House 2 of a district lands 5 s after house 1. If its tile has been built
+  // over by then the house used to be silently dropped while the staged plan
+  // was cleared anyway, so the district kept one house instead of two for the
+  // rest of the run. It is now re-sited near the plan's residential centre,
+  // and retried when nothing is free yet.
+  /// Seconds between placement retries of a staged house with no free spot.
+  static const double stagedHouseRetryInterval = 3.0;
+  /// Retries before a staged house is written off as impossible. A staged
+  /// slot blocks the next district of the same kind, so this cannot be
+  /// unbounded; the house-quota safety net below picks the colour up after.
+  static const int stagedHouseMaxRetries = 8;
+  /// Manhattan half-width of the box around the residential centre scanned
+  /// when a staged house has to be re-sited.
+  static const int houseResiteRadius = 8;
+
+  // ============================================================
+  // House-Quota Safety Net
+  // ============================================================
+  // Two houses per shop is the shape every district is planned with, so a
+  // colour below that has lost a house somewhere (built over during staging,
+  // erased, restored from a partial save). _repairUnderhousedColors tops it
+  // back up near the colour's existing cluster, through the same validated
+  // placement path the staged pipeline uses.
+  /// How often the house-quota check runs.
+  static const double houseQuotaCheckInterval = 6.0;
+  /// Minimum seconds between two quota top-ups for the same colour, so the
+  /// net trickles houses in instead of dumping a district's worth at once.
+  static const double houseQuotaRepairCooldown = 25.0;
+  /// Houses per shop the quota check aims for — the district package shape.
+  static const int housesPerShopQuota = 2;
+  /// Absolute ceiling the quota check will never push a colour past, however
+  /// many shops it owns.
+  static const int houseQuotaHardCap = 8;
+
+  // ============================================================
   // Demand-Surge Relief
   // ============================================================
   // A shop sitting near its ceiling is about to end the run and the player
@@ -382,6 +419,12 @@ class SpawnController {
       _repairOrphanedColors();
     }
 
+    _houseQuotaTimer += dt;
+    if (_houseQuotaTimer >= SpawnConfig.houseQuotaCheckInterval) {
+      _houseQuotaTimer = 0;
+      _repairUnderhousedColors();
+    }
+
     _maybeEnqueueDemandDrivenHouse();
     _processQueue();
   }
@@ -391,6 +434,10 @@ class SpawnController {
     _elapsedTime = 0;
     _pressureTimer = 0;
     _orphanCheckTimer = 0;
+    _houseQuotaTimer = 0;
+    _lastHouseQuotaRepair.clear();
+    _stagedHouse2Retries = 0;
+    _stagedExpansionHouse2Retries = 0;
     _lastSpawnTime = -SpawnConfig.spawnCooldown;
     _queue.clear();
     clusterCenters.clear();
@@ -418,6 +465,10 @@ class SpawnController {
     _lastSpawnTime = elapsedTime; // Prevent immediate spawns on load
     _pressureTimer = 0;
     _orphanCheckTimer = 0;
+    _houseQuotaTimer = 0;
+    _lastHouseQuotaRepair.clear();
+    _stagedHouse2Retries = 0;
+    _stagedExpansionHouse2Retries = 0;
 
     // Clear all staged actions
     _stagedInitialPlan = null;
@@ -509,6 +560,18 @@ class SpawnController {
   /// Timer for the houses-without-a-shop safety net (see _repairOrphanedColors).
   double _orphanCheckTimer = 0;
 
+  /// Timer for the houses-below-quota safety net (see _repairUnderhousedColors).
+  double _houseQuotaTimer = 0;
+
+  /// Elapsed time of the last quota top-up per colour, the per-colour cooldown
+  /// that keeps that net from dropping a whole district in one go.
+  final Map<int, double> _lastHouseQuotaRepair = {};
+
+  /// Retries burned so far by the staged second house of each pipeline. Both
+  /// are cleared when the staged slot is released.
+  int _stagedHouse2Retries = 0;
+  int _stagedExpansionHouse2Retries = 0;
+
   void _processStagedInitialDistrict() {
     var plan = _stagedInitialPlan;
     final ci = _stagedInitialColor;
@@ -535,8 +598,7 @@ class SpawnController {
       // the house-2 branch below will never fire — clear staging now so
       // the next initial-district request can start fresh.
       if (_stagedHouse2SpawnAt == null) {
-        _stagedInitialPlan = null;
-        _stagedInitialColor = null;
+        _clearStagedInitial();
         return;
       }
       // A shop that landed late should not pop in on the same tick as house 2.
@@ -549,16 +611,44 @@ class SpawnController {
     if (_stagedDestSpawnAt != null) return;
 
     if (_stagedHouse2SpawnAt != null && _elapsedTime >= _stagedHouse2SpawnAt!) {
-      _stagedHouse2SpawnAt = null;
       if (plan.houses.length >= 2) {
-        gridManager.commitPlacement(() => _placeStagedSecondHouse(ci, plan!));
-        onSpawnComplete?.call();
+        if (!_placeOrResiteStagedHouse(ci, plan, tag: 'STAGED HOUSE 2')) {
+          // Nothing free right now. Keep the plan and retry rather than
+          // leaving the district with a single house forever — but only for a
+          // bounded number of attempts, because the staged slot blocks the
+          // next colour's district.
+          _stagedHouse2Retries++;
+          if (_stagedHouse2Retries <= SpawnConfig.stagedHouseMaxRetries) {
+            _stagedHouse2SpawnAt = _elapsedTime + SpawnConfig.stagedHouseRetryInterval;
+            return;
+          }
+          _log('STAGED HOUSE 2: giving up for Color $ci after '
+              '${SpawnConfig.stagedHouseMaxRetries} retries; the house-quota '
+              'safety net will top the colour up later');
+        } else {
+          onSpawnComplete?.call();
+        }
       }
-      // Clear the slot — staging is complete regardless of whether house 2
-      // was in the plan, so the next initial-district request can start fresh.
-      _stagedInitialPlan = null;
-      _stagedInitialColor = null;
+      // Clear the slot — staging is complete (or genuinely impossible), so the
+      // next initial-district request can start fresh.
+      _stagedHouse2SpawnAt = null;
+      _clearStagedInitial();
     }
+  }
+
+  /// Release the staged initial-district slot and its retry counters.
+  void _clearStagedInitial() {
+    _stagedInitialPlan = null;
+    _stagedInitialColor = null;
+    _stagedHouse2Retries = 0;
+  }
+
+  /// Release the staged expansion-district slot and its retry counters.
+  void _clearStagedExpansion() {
+    _stagedExpansionPlan = null;
+    _stagedExpansionColor = null;
+    _stagedExpansionZone = null;
+    _stagedExpansionHouse2Retries = 0;
   }
 
   /// True when the shop of [plan] can still go where it was planned: the
@@ -743,12 +833,13 @@ class SpawnController {
     return true;
   }
 
-  void _placeStagedSecondHouse(int colorIndex, DistrictPlan plan) {
-    final hPlan = plan.houses[1];
-    if (!gridManager.isValid(hPlan.pos.x, hPlan.pos.y)) return;
+  /// Places one staged house with its driveway stub. Returns false (and places
+  /// nothing) when the tile is no longer usable.
+  bool _placeStagedHouse(int colorIndex, HousePlan hPlan, {required String tag}) {
+    if (!gridManager.isValid(hPlan.pos.x, hPlan.pos.y)) return false;
     if (!gridManager.grid[hPlan.pos.y][hPlan.pos.x].isEmpty) {
-      _log('STAGED HOUSE 2: spot ${hPlan.pos} no longer empty; skipping');
-      return;
+      _log('$tag: spot ${hPlan.pos} no longer empty; not placed');
+      return false;
     }
     gridManager.placeHouse(hPlan.pos.x, hPlan.pos.y, colorIndex, hPlan.entry);
     onBuildingSpawned?.call(hPlan.pos);
@@ -757,7 +848,162 @@ class SpawnController {
     gridManager.placeRoad(hDP.x, hDP.y, owner: InfrastructureOwner.systemGenerated);
     gridManager.connectBuilding(hPlan.pos.x, hPlan.pos.y, hDP.x, hDP.y);
     districtPlanner.claimSector(colorIndex, hPlan.pos, isCommercial: false);
-    _log('STAGED HOUSE 2 PLACED: Color $colorIndex at ${hPlan.pos}');
+    _lastSpawnTimeForColor[colorIndex] = _elapsedTime;
+    _log('$tag PLACED: Color $colorIndex at ${hPlan.pos}');
+    return true;
+  }
+
+  /// Puts the staged second house of [plan] on the board. If its planned tile
+  /// has been built over since planning, the house is re-sited to the nearest
+  /// valid spot around the plan's residential centre — the same recovery the
+  /// staged shop gets. Returns false only when nothing is free right now, so
+  /// the caller keeps the plan and retries instead of dropping the house.
+  bool _placeOrResiteStagedHouse(int colorIndex, DistrictPlan plan, {required String tag}) {
+    final planned = plan.houses[1];
+    HousePlan target = planned;
+    final tileFree = gridManager.isValid(planned.pos.x, planned.pos.y) &&
+        gridManager.grid[planned.pos.y][planned.pos.x].isEmpty;
+    if (!tileFree) {
+      final resited = _findReplacementHouseSpot(colorIndex, near: plan.resCenter);
+      if (resited == null) {
+        _log('$tag: spot ${planned.pos} no longer empty and nothing valid near '
+            '${plan.resCenter}; retrying in ${SpawnConfig.stagedHouseRetryInterval}s');
+        return false;
+      }
+      _log('$tag: spot ${planned.pos} no longer empty; re-sited to '
+          '${resited.pos} (entry ${resited.entry.name})');
+      target = resited;
+    }
+
+    bool placed = false;
+    gridManager.commitPlacement(() {
+      placed = _placeStagedHouse(colorIndex, target, tag: tag);
+    });
+    return placed;
+  }
+
+  /// Entry side for a house anchored at [pos] if the tile passes the normal
+  /// house validation at [stage] (as an expansion, so the district radius cap
+  /// does not apply — the search box below keeps it local instead) and its
+  /// driveway tile is usable.
+  Direction? _houseEntryIfValid(GridPosition pos, int colorIndex, PlanningStage stage) {
+    if (!gridManager.isValid(pos.x, pos.y)) return null;
+    if (!gridManager.grid[pos.y][pos.x].isEmpty) return null;
+    if (!_validateSpawnTile(pos, colorIndex, stage: stage, nodeType: SpawnNodeType.house, isExpansion: true)) {
+      return null;
+    }
+    final entry = findValidEntrySide(pos, profile: BuildingProfile.residential, stage: stage);
+    if (entry == null) return null;
+    final driveway = pos.getNeighbor(entry);
+    if (!gridManager.isValid(driveway.x, driveway.y)) return null;
+    final cell = gridManager.grid[driveway.y][driveway.x];
+    if (!cell.isEmpty && !cell.isRoad) return null;
+    return entry;
+  }
+
+  /// Nearest valid house spot around [near] (a residential centre), using the
+  /// relaxed planning stages so a crowded district can still get its house.
+  /// Mirrors [_findReplacementDestinationSpot]; among the nearest candidates
+  /// the best-scoring one wins.
+  HousePlan? _findReplacementHouseSpot(int colorIndex, {required GridPosition near}) {
+    const stages = [PlanningStage.stage4StrongRelax, PlanningStage.stage5ExtremeRelax];
+    for (final stage in stages) {
+      final r = SpawnConfig.houseResiteRadius;
+      final candidates = <HousePlan>[];
+      for (int y = max(minSpawnY, near.y - r); y <= min(maxSpawnY, near.y + r); y++) {
+        for (int x = max(minSpawnX, near.x - r); x <= min(maxSpawnX, near.x + r); x++) {
+          final pos = GridPosition(x, y);
+          if (pos.manhattanDistance(near) > r) continue;
+          final entry = _houseEntryIfValid(pos, colorIndex, stage);
+          if (entry == null) continue;
+          candidates.add(HousePlan(pos: pos, entry: entry));
+        }
+      }
+      if (candidates.isEmpty) continue;
+
+      // Nearest band first, best-scoring spot inside it.
+      candidates.sort((a, b) => a.pos.manhattanDistance(near).compareTo(b.pos.manhattanDistance(near)));
+      final nearest = candidates.first.pos.manhattanDistance(near);
+      final band = candidates.where((c) => c.pos.manhattanDistance(near) <= nearest + 2).toList();
+      band.sort((a, b) {
+        final sA = scoringService.scoreHouse(a.pos, colorIndex, near, stage);
+        final sB = scoringService.scoreHouse(b.pos, colorIndex, near, stage);
+        return sB.compareTo(sA);
+      });
+      return band.first;
+    }
+    return null;
+  }
+
+  /// Safety net: every district is planned as one shop plus two houses, so a
+  /// colour holding fewer houses than [SpawnConfig.housesPerShopQuota] per
+  /// shop has lost one (built over during staging, erased, restored from a
+  /// partial save) and its shops will overflow with no way for the player to
+  /// fix it. Top the colour back up near its existing cluster, one house per
+  /// pass, using the same validated placement path as the staged pipeline.
+  ///
+  /// Gated three ways so it cannot spam: the caller only runs it every
+  /// [SpawnConfig.houseQuotaCheckInterval] seconds, a colour that was just
+  /// topped up waits [SpawnConfig.houseQuotaRepairCooldown], and no colour is
+  /// ever pushed past [SpawnConfig.houseQuotaHardCap] houses. Colours whose
+  /// district is still staging are left to the staging retry.
+  void _repairUnderhousedColors() {
+    for (int c = 0; c < activeColorCount; c++) {
+      if (_stagedInitialPlan != null && _stagedInitialColor == c) continue;
+      if (_stagedExpansionPlan != null && _stagedExpansionColor == c) continue;
+
+      final dests = gridManager.getDestinationsForColor(c);
+      if (dests.isEmpty) continue; // _repairOrphanedColors owns this case.
+
+      final houses = gridManager.getHousesForColor(c);
+      final quota = min(
+        SpawnConfig.houseQuotaHardCap,
+        dests.length * SpawnConfig.housesPerShopQuota,
+      );
+      if (houses.length >= quota) continue;
+
+      final last = _lastHouseQuotaRepair[c];
+      if (last != null && _elapsedTime - last < SpawnConfig.houseQuotaRepairCooldown) {
+        continue;
+      }
+      // A house is already on its way through the normal queue.
+      if (_queue.any((r) => r.colorIndex == c && r.nodeType == SpawnNodeType.house)) {
+        continue;
+      }
+
+      GridPosition near;
+      if (houses.isNotEmpty) {
+        int sumX = 0;
+        int sumY = 0;
+        for (final h in houses) {
+          sumX += h.x;
+          sumY += h.y;
+        }
+        near = GridPosition((sumX / houses.length).round(), (sumY / houses.length).round());
+      } else {
+        near = residentialCenters[c] ?? dests.first;
+      }
+
+      final spot = _findReplacementHouseSpot(c, near: near);
+      if (spot == null) {
+        _log('HOUSE QUOTA: Color $c has ${houses.length} house(s) for '
+            '${dests.length} shop(s); nothing free near $near yet');
+        continue;
+      }
+
+      bool placed = false;
+      gridManager.commitPlacement(() {
+        placed = _placeStagedHouse(c, spot, tag: 'HOUSE QUOTA REPAIR');
+      });
+      if (!placed) continue;
+
+      _lastHouseQuotaRepair[c] = _elapsedTime;
+      residentialCenters.putIfAbsent(c, () => near);
+      _log('HOUSE QUOTA: Color $c had ${houses.length} house(s) for '
+          '${dests.length} shop(s) (quota $quota); added one at ${spot.pos}');
+      onSpawnComplete?.call();
+      return; // One top-up per pass.
+    }
   }
 
   /// ATOMIC TRANSACTION: Spawn a new district (1 Destination + 2 Houses)
@@ -1220,9 +1466,7 @@ class SpawnController {
       onSpawnComplete?.call();
 
       if (_stagedExpansionHouse2At == null) {
-        _stagedExpansionPlan = null;
-        _stagedExpansionColor = null;
-        _stagedExpansionZone = null;
+        _clearStagedExpansion();
         return;
       }
       // A shop that landed late should not pop in on the same tick as house 2.
@@ -1235,31 +1479,25 @@ class SpawnController {
     if (_stagedExpansionDestAt != null) return;
 
     if (_stagedExpansionHouse2At != null && _elapsedTime >= _stagedExpansionHouse2At!) {
-      _stagedExpansionHouse2At = null;
       if (plan.houses.length >= 2) {
-        final h2 = plan.houses[1];
-        gridManager.commitPlacement(() {
-          if (!gridManager.isValid(h2.pos.x, h2.pos.y)) return;
-          if (!gridManager.grid[h2.pos.y][h2.pos.x].isEmpty) {
-            _log('EXPANSION HOUSE2: spot ${h2.pos} no longer empty; skipping');
+        if (!_placeOrResiteStagedHouse(ci, plan, tag: 'EXPANSION HOUSE2')) {
+          // Same recovery as the initial district: keep the plan and retry a
+          // bounded number of times rather than leaving the expansion with a
+          // single house.
+          _stagedExpansionHouse2Retries++;
+          if (_stagedExpansionHouse2Retries <= SpawnConfig.stagedHouseMaxRetries) {
+            _stagedExpansionHouse2At = _elapsedTime + SpawnConfig.stagedHouseRetryInterval;
             return;
           }
-          gridManager.placeHouse(h2.pos.x, h2.pos.y, ci, h2.entry);
-          onBuildingSpawned?.call(h2.pos);
-          assert(gridManager.grid[h2.pos.y][h2.pos.x].isHouse,
-              'CRITICAL: Expansion house2 ${h2.pos} must be a HOUSE');
-          scoringService.reserveEntranceCorridor(h2.pos, h2.entry, isDestination: false);
-          final h2DP = h2.pos.getNeighbor(h2.entry);
-          gridManager.placeRoad(h2DP.x, h2DP.y, owner: InfrastructureOwner.systemGenerated);
-          gridManager.connectBuilding(h2.pos.x, h2.pos.y, h2DP.x, h2DP.y);
-          districtPlanner.claimSector(ci, h2.pos, isCommercial: false);
-          _log('EXPANSION HOUSE2 PLACED: Color $ci at ${h2.pos}');
-        });
-        onSpawnComplete?.call();
+          _log('EXPANSION HOUSE2: giving up for Color $ci after '
+              '${SpawnConfig.stagedHouseMaxRetries} retries; the house-quota '
+              'safety net will top the colour up later');
+        } else {
+          onSpawnComplete?.call();
+        }
       }
-      _stagedExpansionPlan = null;
-      _stagedExpansionColor = null;
-      _stagedExpansionZone = null;
+      _stagedExpansionHouse2At = null;
+      _clearStagedExpansion();
     }
   }
 
