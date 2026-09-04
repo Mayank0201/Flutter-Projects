@@ -1825,7 +1825,14 @@ class GridRenderer extends PositionComponent
     }
 
     final vertical = entry == Direction.north || entry == Direction.south;
-    _drawIcChip(canvas, bRect, color, side, vertical);
+    _drawIcChip(
+      canvas,
+      bRect,
+      color,
+      side,
+      vertical,
+      mature: maturityProgress >= 1.0,
+    );
 
     // Status LED near pin 1.
     // The status LED goes warm once the shop matures, so a grown shop is
@@ -1841,13 +1848,23 @@ class GridRenderer extends PositionComponent
   /// Shop glyph: an IC package. Body in the district colour with a darker
   /// inset line, a dark pin-1 dot, and short copper legs along the two sides
   /// parallel to the driveway.
-  void _drawIcChip(Canvas canvas, Rect body, Color color, Color inset, bool vertical) {
+  void _drawIcChip(
+    Canvas canvas,
+    Rect body,
+    Color color,
+    Color inset,
+    bool vertical, {
+    bool mature = false,
+  }) {
     final r = Radius.circular(body.width * 0.10);
     final rr = RRect.fromRectAndRadius(body, r);
     final legW = body.width * 0.07;
     final legL = body.width * 0.13;
     final leg = Paint()..color = GameConstants.roadEdgeColor;
-    const pins = 4;
+    // A matured shop is a denser package: six legs a side instead of four.
+    // It is the same silhouette, just visibly busier, which reads at a glance
+    // without another colour or badge on the board.
+    final pins = mature ? 6 : 4;
     for (int i = 0; i < pins; i++) {
       final t = (i + 0.5) / pins;
       if (vertical) {
