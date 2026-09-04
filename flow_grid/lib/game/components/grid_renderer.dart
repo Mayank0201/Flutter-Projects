@@ -1654,6 +1654,24 @@ class GridRenderer extends PositionComponent
         apron(halfW, a0, a1 + cellSize * 0.03),
         Paint()..color = GameConstants.roadColor,
       );
+      // Mark the two home slots the same way a shop's bays are marked: a
+      // divider between them, an outer line each side, and a head line at
+      // the back where a drone noses in (CarComponent.homeSpotFor).
+      final bay = Paint()
+        ..color = GameConstants.roadEdgeColor.withValues(alpha: 0.55)
+        ..strokeWidth = cellSize * 0.03
+        ..strokeCap = StrokeCap.round;
+      final lat = cellSize * GameConstants.homeParkingLateral;
+      final along0 = cellSize * (GameConstants.homeParkingAlong - 0.16);
+      final along1 = cellSize * (GameConstants.homeParkingAlong + 0.16);
+      Offset pad(double al, double lt) => Offset(
+            cx + e.dx * al - e.dy * lt,
+            cy + e.dy * al + e.dx * lt,
+          );
+      for (final lt in [-2.0 * lat, 0.0, 2.0 * lat]) {
+        canvas.drawLine(pad(along0, lt), pad(along1, lt), bay);
+      }
+      canvas.drawLine(pad(along0, -2.0 * lat), pad(along0, 2.0 * lat), bay);
     }
     final idx = GameConstants.buildingColors.indexOf(color);
     final side = idx >= 0
@@ -1811,18 +1829,23 @@ class GridRenderer extends PositionComponent
       ..color = GameConstants.roadEdgeColor.withValues(alpha: 0.6)
       ..strokeWidth = cellSize * 0.04
       ..strokeCap = StrokeCap.round;
-    // Bay lines: three strokes along the entry axis dividing the strip
-    // into the two bays cars pull into (CarComponent.stallFor).
+    // Bay markings: one stroke along the entry axis between each pair of
+    // bays (CarComponent.stallFor), plus a head line across their deep ends
+    // that the drones nose up to, so the strip reads as a marked-out lot
+    // rather than a few loose ticks.
     final len = cellSize * 0.42;
     final half = GameConstants.shopBayPitch / 2;
+    final deep = GameConstants.shopBayAlong - 0.5 * len / cellSize;
+    final shallow = GameConstants.shopBayAlong + 0.5 * len / cellSize;
+    Offset lotPt(double along, double strip) => CarComponent.shopPoint(
+        gridX, gridY, entry, cellSize, offsetX, offsetY, along, strip);
     for (int k = 0; k <= GameConstants.shopBays; k++) {
       final strip = CarComponent.bayStrip(0) - half + k * GameConstants.shopBayPitch;
-      final a = CarComponent.shopPoint(gridX, gridY, entry, cellSize, offsetX, offsetY,
-          GameConstants.shopBayAlong - 0.5 * len / cellSize, strip);
-      final b = CarComponent.shopPoint(gridX, gridY, entry, cellSize, offsetX, offsetY,
-          GameConstants.shopBayAlong + 0.5 * len / cellSize, strip);
-      canvas.drawLine(a, b, stallPaint);
+      canvas.drawLine(lotPt(deep, strip), lotPt(shallow, strip), stallPaint);
     }
+    final headFrom = CarComponent.bayStrip(0) - half;
+    final headTo = headFrom + GameConstants.shopBays * GameConstants.shopBayPitch;
+    canvas.drawLine(lotPt(deep, headFrom), lotPt(deep, headTo), stallPaint);
 
     final vertical = entry == Direction.north || entry == Direction.south;
     _drawIcChip(
