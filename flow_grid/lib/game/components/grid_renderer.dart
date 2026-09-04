@@ -1790,8 +1790,10 @@ class GridRenderer extends PositionComponent
     // in front of it stays open, like a real forecourt.
     final ext = GridManager.destinationExtent(entry);
     // Block pushed to the far corner, leaving a strip on the entry side
-    // wide enough for two bays plus the corridor cars use to reach them.
-    final bSize = lotSize * 0.45;
+    // wide enough for the bays plus the corridor drones use to reach them.
+    // The chip itself also fattens with age, on top of the pad growing, so
+    // a mature shop is obvious next to a new one.
+    final bSize = lotSize * (0.45 + 0.05 * maturityProgress);
     final shift = lotSize * 0.17;
     final bRect = Rect.fromCenter(
       center: Offset(cx + ext.x * shift, cy + ext.y * shift),

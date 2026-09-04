@@ -16,7 +16,7 @@ class GameConstants {
   // Maturity (shops grow with age)
   static const int maturityThresholdWeeks = 4;
   static const int matureMaxDemand = 9;
-  static const double matureRequestSpeedMultiplier = 1.15;
+  static const double matureRequestSpeedMultiplier = 1.25;
   static const double matureOverflowBuildupMultiplier = 1.10;
 
   // Maturity — parking lot growth (visual only, driven by the same
@@ -47,8 +47,25 @@ class GameConstants {
 
   // Endless Scaling (Part 1 & 3)
   static const double highDemandHouseTriggerDuration = 22.0;
-  static const double demandAgeScalingRate = 0.08;
-  static const double minDemandInterval = 5.0;
+  // How much faster a shop asks for a delivery per week of age. The demand
+  // interval is demandTickInterval / (1 + age * demandAgeScalingRate), then
+  // multiplied by matureRequestSpeedMultiplier once the shop is mature, and
+  // floored at minDemandInterval.
+  //
+  // [FIX] Was 0.08 with matureRequestSpeedMultiplier 1.15 and a 5.0 floor.
+  // That gave 13.0s at age 0, 11.2s at age 2, 8.6s at age 4, 7.6s at 6 and
+  // 6.9s at 8 -- steps of well under a second per week early on, so a player
+  // watching a shop turn four saw no change in cadence. Worse, the maturity
+  // beat *relaxed* the shop: the ceiling jumps maxDemand 6 -> matureMaxDemand
+  // 9 at the same moment, so three extra LEDs of headroom arrived while the
+  // tick only sped up by 15%. Retuned so age reads on screen: 13.0s at age 0
+  // (a new shop is still comfortable), 10.0s at 2, 6.5s at 4 -- a visible
+  // step at the maturity beat that pairs with the pad growth and the amber
+  // LED -- 5.5s at 6, 4.7s at 8, hitting the floor around age 11.
+  static const double demandAgeScalingRate = 0.15;
+  // Fastest a shop can ever ask, however old it gets. Lowered 5.0 -> 4.0 so
+  // ages 6..11 still separate instead of all clamping to the same value.
+  static const double minDemandInterval = 4.0;
 
   // Starting Inventories
   static const int startingRoadBudget = 25;

@@ -94,9 +94,13 @@ Two things about it are easy to miss:
 - Decorative layers (week tint, car trails, parking pulse, maturity aura) are behind
   `GameConstants` presentation flags and are off for the calm look.
 - **Shop maturity has to be legible.** At `maturityThresholdWeeks` a shop's demand
-  ceiling goes `maxDemand` -> `matureMaxDemand`; on screen its pad grows from
-  `lotMinScale` to `lotMaxScale` (keep that gap wide enough to see), the chip grows with
-  the pad, and the status LED turns amber. A shop showing no demand LEDs is not broken,
+  ceiling goes `maxDemand` -> `matureMaxDemand` and its demand ticks get faster
+  (`demandAgeScalingRate`, `matureRequestSpeedMultiplier`) -- keep those in step, or
+  maturity makes a shop *easier*, which is what happened. On screen its pad grows from
+  `lotMinScale` to `lotMaxScale`, the chip fattens on top of that, and the status LED
+  turns amber. `placeDestination`/`placeHouse` must clear `destinationAges` and
+  `overflowLevels` for the key: a re-sited shop used to inherit the age of whatever
+  stood there before. A shop showing no demand LEDs is not broken,
   it is being served faster than its demand timer ticks.
 - **The city-reveal vignette paints opaque ground outside the active region**
   (`_drawCityVignette`). Its hole is inflated past the region because a building is

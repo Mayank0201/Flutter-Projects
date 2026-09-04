@@ -2174,8 +2174,13 @@ class GridManager {
     // If we are placing a house, it MUST NOT be in the destinations list or have demand
     destinations.removeWhere((p) => p.x == x && p.y == y);
     demand.remove(key);
+    claimedDemand.remove(key);
     demandTimers.remove(key);
     overflowLevels.remove(key);
+    // A house has no age. Leaving the old shop's age behind would hand it
+    // straight back to whatever shop lands on this key next.
+    destinationAges.remove(key);
+    districtNames.remove(key);
 
     grid[y][x] = GridCell(
       type: CellType.house,
@@ -2230,7 +2235,16 @@ class GridManager {
     const double initialDemandGrace = 4.0;
     final preloadedTimer = GameConstants.demandTickInterval - initialDemandGrace;
     demand[key] = 0;
+    claimedDemand[key] = 0;
     demandTimers[key] = preloadedTimer.clamp(0.0, GameConstants.demandTickInterval);
+    // A shop placed here is new, whatever used to stand on this tile. Without
+    // these two resets a re-sited shop (SpawnController._resiteStagedDestination
+    // / _repairOrphanedColors) that happens to land on a key an older shop
+    // once owned inherits that shop's age -- and so its faster demand tick,
+    // its raised ceiling and its mature look -- plus any overflow the old
+    // shop had banked, which can end the run seconds after it appears.
+    destinationAges[key] = 0;
+    overflowLevels.remove(key);
     if (name != null) districtNames[key] = name;
   }
 

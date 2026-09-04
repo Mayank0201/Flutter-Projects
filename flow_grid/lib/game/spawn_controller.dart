@@ -138,6 +138,38 @@ class SpawnConfig {
   /// How often the controller looks for colours that have houses but no shop
   /// and gives them one near their houses.
   static const double orphanDistrictCheckInterval = 3.0;
+
+  // ============================================================
+  // Demand-Surge Relief
+  // ============================================================
+  // A shop sitting near its ceiling is about to end the run and the player
+  // cannot conjure delivery capacity out of nothing, so the colour gets one
+  // more house. This rides the existing demand-pressure plumbing: the surge
+  // only marks the colour and slams its pressure to the maximum, the house
+  // itself still goes through requestSpawn -> _processHouseSpawn, so all the
+  // usual tile validation, active-region bounds and density rules apply.
+  /// Demand at which a shop is treated as surging. Only a mature shop can
+  /// reach it -- GameConstants.maxDemand is 6 before maturity and
+  /// matureMaxDemand is 9 after -- so this is inherently a rule about
+  /// long-lived shops, and the age gates in _processHouseSpawn are satisfied
+  /// for free.
+  static const int surgeDemandThreshold = 8;
+  /// A surging shop is only allowed to ask again once its demand has fallen
+  /// back to this. Without the re-arm a shop parked at its ceiling would
+  /// request a house on every pressure sample.
+  static const int surgeRearmDemand = 4;
+  /// Houses per destination a surge may push a colour to. One above the
+  /// normal soft cap (housesPerDestination), so surge relief adds capacity
+  /// without turning one hot shop into a whole extra district.
+  static const int surgeHousesPerDestination = 4;
+  /// Absolute ceiling on a colour's house count for surge relief, however
+  /// many shops it owns. Past this the colour already has plenty and the
+  /// bottleneck is roads, not houses.
+  static const int surgeHouseHardCap = 8;
+  /// Minimum seconds between two houses of the same colour when the second
+  /// was triggered by a surge. Shorter than sameColorSpawnCooldown because
+  /// the shop is close to overflowing, but still a real cooldown.
+  static const double surgeSameColorCooldown = 20.0;
 }
 
 /// A shop anchor plus the entry side its 2x2 block hangs off.
@@ -283,6 +315,17 @@ class SpawnController {
 
   // Per-color tracking
   final Map<int, int> _demandPressure = {}; // sustained unmet demand counter (seconds)
+
+  /// Shop anchor keys ("x,y") whose demand has crossed
+  /// [SpawnConfig.surgeDemandThreshold] and are still waiting for a relief
+  /// house. Filled by [_updateDemandPressure], drained by [_takeSurgeRelief].
+  final Set<String> _surgePending = {};
+
+  /// Shop anchor keys that have already been given a relief house and are
+  /// waiting for their demand to fall back to [SpawnConfig.surgeRearmDemand]
+  /// before they may ask again. This is the "must not fire repeatedly for the
+  /// same shop" latch: demand has to drop and rise again.
+  final Set<String> _surgeServed = {};
   final Map<int, double> _lastSpawnTimeForColor = {}; // track pacing per color
   
   // Per-color variety tracking
@@ -353,6 +396,8 @@ class SpawnController {
     clusterCenters.clear();
     residentialCenters.clear();
     _demandPressure.clear();
+    _surgePending.clear();
+    _surgeServed.clear();
     _lastSpawnTimeForColor.clear();
     activeColorCount = 1;
     _stagedInitialPlan = null;
@@ -385,6 +430,9 @@ class SpawnController {
     _stagedExpansionDestAt = null;
     _stagedExpansionHouse2At = null;
     _queue.clear();
+
+    _surgePending.clear();
+    _surgeServed.clear();
 
     clusterCenters.clear();
     residentialCenters.clear();
@@ -2339,6 +2387,7 @@ class SpawnController {
           final demand = gridManager.getDemand(dest);
           final claimed = gridManager.getClaimedDemand(dest);
           totalUnmet += max(0, demand - claimed);
+          _updateSurgeLatch('${dest.x},${dest.y}', demand);
         }
       }
 
@@ -2356,12 +2405,87 @@ class SpawnController {
         _demandPressure[c] = max(0, (_demandPressure[c] ?? 0) - 2);
       }
     }
+
+    // Drop latches for shops that no longer exist (erased, or re-sited to a
+    // different anchor) so the sets cannot grow without bound.
+    if (_surgePending.isNotEmpty || _surgeServed.isNotEmpty) {
+      final live = <String>{
+        for (final d in gridManager.destinations) '${d.x},${d.y}',
+      };
+      _surgePending.removeWhere((k) => !live.contains(k));
+      _surgeServed.removeWhere((k) => !live.contains(k));
+    }
+  }
+
+  /// Arm / re-arm the demand-surge latch for one shop.
+  ///
+  /// A shop at [SpawnConfig.surgeDemandThreshold] or above becomes pending
+  /// unless it has already been served; it stays served (and silent) until its
+  /// demand falls back to [SpawnConfig.surgeRearmDemand], which is what stops
+  /// one hot shop asking for a house on every sample.
+  void _updateSurgeLatch(String key, int demand) {
+    if (demand >= SpawnConfig.surgeDemandThreshold) {
+      if (!_surgeServed.contains(key)) _surgePending.add(key);
+    } else if (demand <= SpawnConfig.surgeRearmDemand) {
+      _surgeServed.remove(key);
+      _surgePending.remove(key);
+    }
+  }
+
+  /// The colour of the first pending surge that is actually allowed a relief
+  /// house right now, or null. Marks that shop served so it cannot ask again
+  /// until its demand drops and rises. A shop blocked by the house cap or the
+  /// same-colour cooldown stays pending and is reconsidered next call.
+  int? _takeSurgeRelief() {
+    if (_surgePending.isEmpty) return null;
+    for (int c = 0; c < activeColorCount; c++) {
+      final dests = gridManager.getDestinationsForColor(c);
+      if (dests.isEmpty) continue;
+
+      final houseCount = getHouseCount(c);
+      final cap = min(
+        SpawnConfig.surgeHouseHardCap,
+        dests.length * SpawnConfig.surgeHousesPerDestination,
+      );
+      final onCooldown = _elapsedTime - (_lastSpawnTimeForColor[c] ?? -SpawnConfig.surgeSameColorCooldown) <
+          SpawnConfig.surgeSameColorCooldown;
+
+      for (final dest in dests) {
+        final key = '${dest.x},${dest.y}';
+        if (!_surgePending.contains(key)) continue;
+        // The colour already has plenty of delivery capacity, or just got a
+        // house. Leave the latch pending rather than burning it.
+        if (houseCount >= cap || onCooldown) break;
+        _surgePending.remove(key);
+        _surgeServed.add(key);
+        return c;
+      }
+    }
+    return null;
   }
 
   /// Check if any color needs an additional house due to sustained demand, or if a new color should unlock
   void _maybeEnqueueDemandDrivenHouse() {
     // Only check once per cooldown cycle to avoid spam
     if (_queue.isNotEmpty) return;
+
+    // A shop at or above SpawnConfig.surgeDemandThreshold gets its colour one
+    // extra house. Pressure is slammed to the maximum so the normal
+    // _processHouseSpawn demand gate passes; everything else about the spawn
+    // (tile search, active-region bounds, entry side, density cap) is the
+    // ordinary house path.
+    final surgeColor = _takeSurgeRelief();
+    if (surgeColor != null) {
+      _demandPressure[surgeColor] = SpawnConfig.maxPressure;
+      requestSpawn(
+        surgeColor,
+        SpawnNodeType.house,
+        'demand surge relief (a shop reached ${SpawnConfig.surgeDemandThreshold} demand, '
+            'houses=${getHouseCount(surgeColor)})',
+        priority: 4,
+      );
+      return;
+    }
 
     // Track state of existing colors
     int bestColor = -1;
