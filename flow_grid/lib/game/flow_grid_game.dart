@@ -1092,6 +1092,16 @@ class FlowGridGame extends FlameGame
     return used.length % GameConstants.homeParkingSlots;
   }
 
+  /// Outbound drones currently heading to [dest] (not yet parked there).
+  int _outboundTo(GridPosition dest) {
+    int n = 0;
+    for (final c in _cars) {
+      if (c.arrived || c.isReturning) continue;
+      if (c.targetDest.x == dest.x && c.targetDest.y == dest.y) n++;
+    }
+    return n;
+  }
+
   /// Lowest shop stall no outbound car heading to [dest] has claimed.
   int _freeStallSlot(GridPosition dest) {
     final used = <int>{};
@@ -1116,7 +1126,11 @@ class FlowGridGame extends FlameGame
       final key = "${d.x},${d.y}";
       final demandVal = gridManager!.demand[key] ?? 0;
       final claimedVal = gridManager!.claimedDemand[key] ?? 0;
-      return demandVal > claimedVal;
+      if (demandVal <= claimedVal) return false;
+      // Never send more drones than the lot has bays: the extra one would
+      // be handed a bay another drone is already parked in and the two
+      // would sit on top of each other.
+      return _outboundTo(d) < GameConstants.shopBays;
     }).toList();
 
     if (targets.isEmpty) return null;

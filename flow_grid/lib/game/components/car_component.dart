@@ -746,6 +746,83 @@ class CarComponent extends PositionComponent
     return false;
   }
 
+  /// True while this drone is standing on a parking spot — a shop bay or a
+  /// home pad — which sits off the trace, so it must not block traffic.
+  ///
+  /// [FIX] Queueing: the obstacle scan used to skip every `isWaiting` drone
+  /// on the assumption that waiting == parked. That is not true for a bus
+  /// dwelling at a stop, which sits squarely ON the trace: followers drove
+  /// straight through it. `_fadeLaneAtEnd` is set by _rebuildSmoothPath
+  /// exactly when this trip's path ends on a parking spot (a bus/emergency
+  /// trip never does — see _parksAt/_usesParking), so pairing it with
+  /// "reached the end of the path" is precisely the off-trace case.
+  bool get _isParkedOffTrace =>
+      isWaiting && _fadeLaneAtEnd && _distanceTraveled >= _totalLength - 0.5;
+
+  // --- Heading -------------------------------------------------------------
+  // Drones are saucers with no nose, so `angle` is pinned to 0 for every one
+  // of them (see _updatePosition). Anything that needs to know which way a
+  // drone is *travelling* must therefore ask the path, not the component.
+  //
+  // [FIX] Queueing: the follow-the-leader scan derived facing from
+  // `cos(angle)`/`sin(angle)`, which after the no-rotation change means every
+  // drone is treated as pointing due east. Its "is the obstacle in front of
+  // me" dot product then rejected every leader that was not to the east, so
+  // drones travelling west/north/south never saw the drone ahead at all and
+  // drove into it; and its "is the obstacle oncoming" dot product was a
+  // constant 1.0, so nothing was ever classified as oncoming. Both now read
+  // the path tangent instead.
+  double _headingX = 1.0;
+  double _headingY = 0.0;
+  double _headingAt = double.nan;
+
+  /// Unit forward vector along the path at this drone's current progress.
+  /// Cached against `_distanceTraveled`, so a scan that probes several
+  /// neighbours costs at most one tangent lookup per drone per frame.
+  void _refreshHeading() {
+    if (_headingAt == _distanceTraveled) return;
+    _headingAt = _distanceTraveled;
+    final metric = _metric;
+    if (metric == null || _totalLength <= 0) {
+      _setHeadingFromNodes();
+      return;
+    }
+    final tangent = metric.getTangentForOffset(
+      _distanceTraveled.clamp(0.0, _totalLength),
+    );
+    if (tangent == null) {
+      _setHeadingFromNodes();
+      return;
+    }
+    _setHeading(tangent.vector.dx, tangent.vector.dy);
+  }
+
+  void _setHeading(double dx, double dy) {
+    final len = sqrt(dx * dx + dy * dy);
+    if (len > 1e-6) {
+      _headingX = dx / len;
+      _headingY = dy / len;
+      return;
+    }
+    _setHeadingFromNodes();
+  }
+
+  /// Fallback for a degenerate/absent tangent: the direction of the grid
+  /// edge the drone is currently on.
+  void _setHeadingFromNodes() {
+    if (path.length < 2) return;
+    final i = _currentPathIndex.clamp(0, path.length - 1);
+    final int a = i + 1 < path.length ? i : i - 1;
+    if (a < 0 || a + 1 >= path.length) return;
+    final dx = (path[a + 1].x - path[a].x).toDouble();
+    final dy = (path[a + 1].y - path[a].y).toDouble();
+    final len = sqrt(dx * dx + dy * dy);
+    if (len > 1e-6) {
+      _headingX = dx / len;
+      _headingY = dy / len;
+    }
+  }
+
   /// How far this drone may advance along the path this frame, and whether
   /// it is being held right on that line (so the caller can ask the normal
   /// deceleration ramp for a speed of zero instead of hard-zeroing the
@@ -894,6 +971,9 @@ class CarComponent extends PositionComponent
 
   void _rebuildSmoothPath() {
     _smoothPath = ui.Path();
+    // The curve under the drone just changed, so any cached heading taken at
+    // the current arc length is stale even if that arc length is unchanged.
+    _headingAt = double.nan;
 
     // Strip consecutive duplicate non-roundabout nodes (same x,y, same side)
     // These arise when recalculatePath splices a new subpath at a shared
@@ -1427,6 +1507,10 @@ class CarComponent extends PositionComponent
       // _currentLaneSign flips the offset (+1 right, -1 left) so a car can
       // pull alongside a parked one in the other lane.
       final fwd = finalTangent.vector;
+      // The scan asks for this every frame; it is free here because the
+      // tangent is already in hand.
+      _headingAt = _distanceTraveled;
+      _setHeading(fwd.dx, fwd.dy);
       final lane = _safeLaneOffset() * _laneFade(_distanceTraveled);
 
       position = Vector2(
@@ -2584,15 +2668,20 @@ class CarComponent extends PositionComponent
       // [PERF] Hoisted out of the obstacle loop and kept as scalars: this
       // used to build two Vector2s (and two cos/sin pairs) per candidate
       // obstacle per frame. Identical arithmetic.
-      final myFwdX = cos(angle);
-      final myFwdY = sin(angle);
+      // [FIX] Queueing: from the path tangent, not from `angle` — drones
+      // never rotate, so cos/sin of `angle` made every drone "face east".
+      _refreshHeading();
+      final myFwdX = _headingX;
+      final myFwdY = _headingY;
 
       for (final other in potentialObstacles) {
         if (identical(other, this) || other.onExpressLane || other.arrived) {
           continue;
         }
-        // Parked drones sit in a bay or on a pad, off the trace.
-        if (other.isWaiting) continue;
+        // Parked drones sit in a bay or on a pad, off the trace. A drone
+        // that is merely held (lot gate) or dwelling at a bus stop is still
+        // standing on the trace and must still block.
+        if (other._isParkedOffTrace) continue;
         if (_ignoredObstacles.contains(other)) continue;
 
         // Oncoming check: if the other car is moving in the opposite direction along our path, ignore it
@@ -2647,34 +2736,44 @@ class CarComponent extends PositionComponent
           }
         }
 
-        bool isAhead = false;
-        if (bothInRoundabout) {
-          if (otherNode.x == myNode.x &&
-              otherNode.y == myNode.y &&
-              otherNode.side == myNode.side) {
-            isAhead = other._distanceTraveled > _distanceTraveled;
-          } else {
-            isAhead = _isCellAhead(otherNode);
-          }
-        } else {
-          // Normal road cell check (only x, y coords matter)
-          if (otherNode.x == myNode.x && otherNode.y == myNode.y) {
-            isAhead = other._distanceTraveled > _distanceTraveled;
-          } else {
-            isAhead = _isCellAhead(otherNode);
-          }
+        // Where the other drone sits relative to the way *I* am travelling.
+        final toOtherX = other.position.x - myPos.x;
+        final toOtherY = other.position.y - myPos.y;
+        final ahead = toOtherX * myFwdX + toOtherY * myFwdY;
 
-          if (isAhead) {
-            // Restore heading dot-product check to ignore cars behind or going in opposite directions
-            final toOtherX = other.position.x - myPos.x;
-            final toOtherY = other.position.y - myPos.y;
-            if (toOtherX * myFwdX + toOtherY * myFwdY <= 0) {
-              continue;
-            }
-            if (myFwdX * cos(other.angle) + myFwdY * sin(other.angle) < -0.5) {
-              continue;
-            }
-          }
+        // Head-on traffic is separated by the lane offset, never by braking.
+        other._refreshHeading();
+        if (myFwdX * other._headingX + myFwdY * other._headingY < -0.5) {
+          continue;
+        }
+
+        final bool sameCell = bothInRoundabout
+            ? (otherNode.x == myNode.x &&
+                  otherNode.y == myNode.y &&
+                  otherNode.side == myNode.side)
+            : (otherNode.x == myNode.x && otherNode.y == myNode.y);
+
+        bool isAhead;
+        if (sameCell) {
+          // [FIX] Queueing: this used to compare `_distanceTraveled`, which
+          // is arc length along each drone's OWN path. Two drones that
+          // started at different houses have unrelated arc lengths, so on a
+          // shared tile — exactly what happens where routes converge on a
+          // shop driveway — the comparison was meaningless and the real
+          // leader was regularly classified as "behind", skipped, and driven
+          // through. Project onto my heading instead, which is comparable
+          // between any two drones. The epsilon band plus the deterministic
+          // hashCode tie-break guarantees that if two drones do end up
+          // coincident, exactly one of them yields instead of both
+          // considering the other behind and neither braking.
+          final eps = cellSize * 0.02;
+          isAhead = ahead > eps || (ahead > -eps && other.hashCode > hashCode);
+        } else {
+          // A leader that is on a cell ahead of me but geometrically a touch
+          // to the side or behind (mid-corner, or offset into the other
+          // lane) still has to be braked for, so allow a small negative
+          // projection here rather than the old hard `<= 0` rejection.
+          isAhead = _isCellAhead(otherNode) && ahead > -cellSize * 0.35;
         }
 
         if (!isAhead) continue;
@@ -2974,11 +3073,17 @@ class CarComponent extends PositionComponent
       }
     }
 
-    // 2. Heading check: if the cars face opposite directions (dot product is negative)
+    // 2. Heading check: if the drones travel in opposite directions (dot
+    // product is negative).
     // [PERF] Scalar dot product — this is called from `.where()` filters that
     // run per frame at every intersection, and used to allocate two Vector2s
-    // per call. Identical arithmetic.
-    if (cos(angle) * cos(other.angle) + sin(angle) * sin(other.angle) < -0.5) {
+    // per call.
+    // [FIX] Queueing: was cos/sin of `angle`, which is pinned to 0 for every
+    // drone, so this dot product was a constant 1.0 and no drone was ever
+    // classified as oncoming. Facing comes from the path tangent now.
+    _refreshHeading();
+    other._refreshHeading();
+    if (_headingX * other._headingX + _headingY * other._headingY < -0.5) {
       return true;
     }
 
