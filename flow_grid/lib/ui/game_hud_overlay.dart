@@ -1135,11 +1135,11 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         items = [
           _helpItem(
             'SLIPPERY ICE ROADS',
-            'Build directly over ice lakes without bridges. Note: Vehicles slide and move 40% slower on ice.',
+            'Build directly over ice lakes without bridges. Note: Drones slide and move 40% slower over ice.',
           ),
           _helpItem(
             'BLIZZARD HAZARD',
-            'Periodic snowy storms reduce all vehicle speeds to 60%.',
+            'Periodic snowy storms reduce all drone speeds to 60%.',
           ),
           _helpItem(
             'SNOWY ROOFS',
@@ -1151,7 +1151,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         items = [
           _helpItem(
             'DIRT ROADS',
-            'All built roads are unpaved dirt tracks, making vehicles travel 20% slower.',
+            'All built roads are unpaved dirt tracks, making drones travel 20% slower.',
           ),
           _helpItem(
             'GAZELLE CROSSINGS',

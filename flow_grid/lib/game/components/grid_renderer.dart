@@ -432,7 +432,7 @@ class GridRenderer extends PositionComponent
         if (spot == null) continue;
         final p = Offset(spot.$1.x, spot.$1.y);
         if (!viewport.contains(p)) continue;
-        CarComponent.drawDot(canvas, p, r, color);
+        CarComponent.drawDrone(canvas, p, r * 1.05, color);
       }
     }
   }

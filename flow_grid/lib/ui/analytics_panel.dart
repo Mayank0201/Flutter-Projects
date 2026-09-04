@@ -62,7 +62,7 @@ class AnalyticsPanel extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           _statRow('Busiest District', busiestDistrict, Colors.orangeAccent),
-          _statRow('Active Vehicles', '$totalCars', Colors.blueAccent),
+          _statRow('Active Drones', '$totalCars', Colors.blueAccent),
           _statRow('Infrastructure Units', '$totalInfra', Colors.greenAccent),
           _statRow('Total Deliveries', '${game.totalDeliveries}', Colors.amberAccent),
           _statRow('City Efficiency', '${(game.difficulty * 100).toInt()}%', Colors.purpleAccent),

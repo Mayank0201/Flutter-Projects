@@ -2910,21 +2910,35 @@ class CarComponent extends PositionComponent
       }
     }
 
-    // Cars are glowing dots gliding along the traces. The render canvas
-    // origin is the component's top-left, so the dot sits at size/2.
-    drawDot(canvas, Offset(size.x / 2, size.y / 2), size.x * 0.40, baseColor);
+    // Vehicles are hover drones gliding above the traces. The render canvas
+    // origin is the component's top-left, so the drone sits at size/2.
+    drawDrone(canvas, Offset(size.x / 2, size.y / 2), size.x * 0.42, baseColor);
   }
 
-  /// The car glyph: a soft halo, a solid core and a small highlight.
-  /// Shared with GridRenderer's parked-car pass so both match.
-  static void drawDot(Canvas canvas, Offset c, double r, Color color) {
-    canvas.drawCircle(c, r * 1.9, Paint()..color = color.withValues(alpha: 0.18));
-    canvas.drawCircle(c, r, Paint()..color = color);
-    canvas.drawCircle(
-      Offset(c.dx - r * 0.3, c.dy - r * 0.3),
-      r * 0.28,
-      Paint()..color = Colors.white.withValues(alpha: 0.55),
+  /// The drone glyph: a small disc with a domed top in the house colour,
+  /// hovering a little above the board (soft shadow offset below it) with a
+  /// faint glow. No nose, so heading never matters. Shared with
+  /// GridRenderer's parked pass so both match. [r] is the disc radius.
+  static void drawDrone(Canvas canvas, Offset c, double r, Color color) {
+    final dark = Color.lerp(color, const Color(0xFF10181B), 0.45)!;
+    final light = Color.lerp(color, Colors.white, 0.45)!;
+    // Hover shadow on the board.
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(c.dx, c.dy + r * 0.9), width: r * 2.0, height: r * 1.0),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.28)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.35),
     );
+    // Glow.
+    canvas.drawCircle(c, r * 1.8, Paint()..color = color.withValues(alpha: 0.14));
+    // Saucer: flat disc with a darker rim.
+    final disc = Rect.fromCenter(center: c, width: r * 2.0, height: r * 1.3);
+    canvas.drawOval(disc, Paint()..color = dark);
+    canvas.drawOval(disc.deflate(r * 0.16), Paint()..color = color);
+    // Dome on top.
+    final dome = Rect.fromCenter(center: Offset(c.dx, c.dy - r * 0.25), width: r * 1.0, height: r * 0.85);
+    canvas.drawOval(dome, Paint()..color = light);
+    canvas.drawCircle(Offset(c.dx - r * 0.15, c.dy - r * 0.4), r * 0.16, Paint()..color = Colors.white.withValues(alpha: 0.8));
   }
 
 }

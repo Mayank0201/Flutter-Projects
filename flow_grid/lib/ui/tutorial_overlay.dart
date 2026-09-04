@@ -43,7 +43,7 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     ),
     TutorialStep(
       title: "SMART JUNCTIONS",
-      description: "Need higher throughput? Place a Smart Junction (Roundabout). Cars flow continuously in a clockwise direction, greatly reducing wait times.",
+      description: "Need higher throughput? Place a Smart Junction (Roundabout). Drones flow continuously in a clockwise direction, greatly reducing wait times.",
       icon: Icons.sync,
     ),
     TutorialStep(
@@ -68,7 +68,7 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     ),
     TutorialStep(
       title: "MULTI-LAYER NETWORKS",
-      description: "Manage a complex ecosystem. Use Highways for long-distance car travel and Metros for massive passenger throughput. Since these layers can overlap, you can build dense networks without creating surface-level gridlock.",
+      description: "Manage a complex ecosystem. Use Highways for long-distance drone travel and Metros for massive passenger throughput. Since these layers can overlap, you can build dense networks without creating surface-level gridlock.",
       icon: Icons.layers,
     ),
     TutorialStep(

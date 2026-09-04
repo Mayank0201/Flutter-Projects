@@ -94,9 +94,11 @@ Two things about it are easy to miss:
   centre) at every dead end and junction (`vias` in the road pass). Houses are small
   diamond chips (`_drawDiamondChip`); shops are IC packages with copper pin legs on a
   pavement pad (`_drawIcChip` inside `_drawDestination`), with a white status LED.
-  Demand is a row of LEDs (`_drawLed`), overflow a gauge bar above them. Cars are glowing
-  dots drawn procedurally (`CarComponent.drawDot`, also used for parked cars); the sprite
-  atlas is loaded but no longer drawn. Buildings cast a short soft drop shadow
+  Demand is a row of LEDs (`_drawLed`), overflow a gauge bar above them. Vehicles are
+  hover drones: a domed disc in the house colour with a hover shadow and faint glow, drawn
+  procedurally (`CarComponent.drawDrone`, also used for parked drones); no nose, so
+  heading never shows. Player-facing text says "drones"; code keeps the `car` names. The
+  sprite atlas is loaded but no longer drawn. Buildings cast a short soft drop shadow
   (`_drawLongShadow`). New buildings pop in with an ease-out-back scale under a
   ground-coloured veil (`_drawSpawnAnimations`). Keep the road width and the car lane
   offset in step (`CarComponent._maxSafeLaneOffsetMagnitude` reads
@@ -119,8 +121,8 @@ Two things about it are easy to miss:
   messages.** See `changes_required.md` for why. Describe what the game does instead.
   Keep the look its own: no long single-light cast shadows, no ring timers, no map
   pins, no rounded-square blocks, no free-curving rounded-stroke roads. The circuit
-  metaphor (traces, vias, chips, LEDs) is the identity; cars stay colour-coded because
-  that is how a player reads them.
+  metaphor (traces, vias, chips, LEDs, drones) is the identity; drones stay colour-coded
+  because that is how a player reads them.
 - Houses spawn at most `GameConstants.homeParkingSlots` cars at a time
   (`FlowGridGame._carsOutFrom`); the timer holds at the threshold until one is home.
 
