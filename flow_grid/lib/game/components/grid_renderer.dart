@@ -414,7 +414,8 @@ class GridRenderer extends PositionComponent
           )
           .add(car.homeSlot);
     }
-    final r = cellSize * 0.34 * 0.40;
+    final r = cellSize * 0.34 * GameConstants.droneRadius;
+    final now = game.elapsedTime;
     for (final house in gridManager.houses) {
       final taken = out['${house.x},${house.y}'] ?? const <int>{};
       final cell = gridManager.grid[house.y][house.x];
@@ -432,7 +433,13 @@ class GridRenderer extends PositionComponent
         if (spot == null) continue;
         final p = Offset(spot.$1.x, spot.$1.y);
         if (!viewport.contains(p)) continue;
-        CarComponent.drawDrone(canvas, p, r * 1.05, color);
+        CarComponent.drawDrone(
+          canvas,
+          p,
+          r,
+          color,
+          now + (house.x * 7 + house.y * 13 + slot * 5) * 0.37,
+        );
       }
     }
   }

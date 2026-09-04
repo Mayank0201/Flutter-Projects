@@ -1359,6 +1359,21 @@ class GridManager {
 
     final cell = grid[y][x];
     final validSurface = (type == CellType.tunnel) ? CellType.mountain : CellType.water;
+
+    // A corridor can only start from something drivable. A drag that passes
+    // over a house or open ground on its way to the water used to anchor
+    // here, spend the token, and leave a corridor nothing connects to.
+    if (isValid(from.x, from.y)) {
+      final origin = grid[from.y][from.x];
+      if (origin.isEmpty ||
+          origin.isHouse ||
+          origin.isDestination ||
+          origin.isDestinationPart ||
+          origin.type == CellType.water ||
+          origin.type == CellType.mountain) {
+        return false;
+      }
+    }
     
     // [FIX] Tunnel Exit / Land Extension (Issue 3)
     // If we are extending a tunnel/bridge onto land, it becomes a ROAD.
@@ -1433,7 +1448,7 @@ class GridManager {
         cx += d2[0];
         cy += d2[1];
       }
-      if (len > 4) {
+      if (len > GameConstants.maxCorridorTiles) {
         return false;
       }
     }

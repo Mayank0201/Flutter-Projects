@@ -47,9 +47,6 @@ class CarComponent extends PositionComponent
   int stallSlot;
   bool _fadeLaneAtStart = false;
   bool _fadeLaneAtEnd = false;
-  // Real frame dt: _updatePosition gets dt pre-scaled by the speed ramp,
-  // which must not slow the in-place pivot.
-  double _frameDt = 0.0;
   double _waitTimer = 0.0;
   bool onExpressLane = false;
   double travelTime = 0.0;
@@ -581,24 +578,6 @@ class CarComponent extends PositionComponent
     if (_fadeLaneAtStart) f = min(f, (d / w).clamp(0.0, 1.0));
     if (_fadeLaneAtEnd) f = min(f, ((_totalLength - d) / w).clamp(0.0, 1.0));
     return f * f * (3 - 2 * f);
-  }
-
-  /// Rate-limited heading change. On the road the tangent turns far slower
-  /// than the cap, so this is a no-op; leaving a parking bay it turns the
-  /// instant 180-degree flip into a quick pivot.
-  double _approachAngle(double from, double to) {
-    final diff = _angleDelta(from, to);
-    final maxStep = GameConstants.carPivotRate * _frameDt;
-    if (maxStep <= 0) return from;
-    if (diff.abs() <= maxStep) return to;
-    return from + maxStep * diff.sign;
-  }
-
-  /// Signed shortest rotation from [from] to [to], in (-pi, pi].
-  static double _angleDelta(double from, double to) {
-    double diff = (to - from) % (2 * pi);
-    if (diff > pi) diff -= 2 * pi;
-    return diff;
   }
 
   static Vector2 _unit(Direction d) {
@@ -1263,13 +1242,8 @@ class CarComponent extends PositionComponent
 
     // Leaving a parking spot the car faces the building; swing round on the
     // spot first, then drive. Without the hold it slid sideways while turning.
-    bool holdForPivot = false;
-    if (_fadeLaneAtStart && tangent != null && _distanceTraveled < cellSize * 0.5) {
-      if (_angleDelta(angle, -tangent.angle).abs() > 0.25) {
-        holdForPivot = true;
-        _currentSpeedMultiplier = 0.0;
-      }
-    }
+    // Drones have no nose, so there is nothing to swing round: never hold.
+    const holdForPivot = false;
 
     // Rule 7: Curve Speed Reduction inside roundabout (~80% speed)
     // [FIX] Was a bare `side != null` check, which is also true on a plain
@@ -1309,7 +1283,7 @@ class CarComponent extends PositionComponent
         finalTangent.position.dx - fwd.dy * lane,
         finalTangent.position.dy + fwd.dx * lane,
       );
-      angle = _approachAngle(angle, -finalTangent.angle);
+      angle = -finalTangent.angle;
     }
   }
 
@@ -1770,7 +1744,6 @@ class CarComponent extends PositionComponent
   @override
   void update(double dt) {
     super.update(dt);
-    _frameDt = dt;
     if (game.paused || game.timeScale == 0.0) return;
 
     final isStopped =
@@ -2912,33 +2885,59 @@ class CarComponent extends PositionComponent
 
     // Vehicles are hover drones gliding above the traces. The render canvas
     // origin is the component's top-left, so the drone sits at size/2.
-    drawDrone(canvas, Offset(size.x / 2, size.y / 2), size.x * 0.42, baseColor);
+    drawDrone(
+      canvas,
+      Offset(size.x / 2, size.y / 2),
+      size.x * GameConstants.droneRadius,
+      baseColor,
+      game.elapsedTime + (hashCode % 97) * 0.13,
+    );
   }
 
-  /// The drone glyph: a small disc with a domed top in the house colour,
-  /// hovering a little above the board (soft shadow offset below it) with a
-  /// faint glow. No nose, so heading never matters. Shared with
-  /// GridRenderer's parked pass so both match. [r] is the disc radius.
-  static void drawDrone(Canvas canvas, Offset c, double r, Color color) {
-    final dark = Color.lerp(color, const Color(0xFF10181B), 0.45)!;
-    final light = Color.lerp(color, Colors.white, 0.45)!;
-    // Hover shadow on the board.
+  /// The drone glyph: a domed disc in the house colour hovering above the
+  /// board. It bobs gently with [t] (seconds plus a per-drone phase): the
+  /// body rises and falls while the shadow beneath it shrinks and grows, so
+  /// even a parked drone feels alive. No nose, so heading never matters.
+  /// Shared with GridRenderer's parked pass so both match. [r] is the disc
+  /// radius.
+  static void drawDrone(Canvas canvas, Offset c0, double r, Color color, double t) {
+    final bob = sin(t * 2.6);
+    final c = Offset(c0.dx, c0.dy - r * 0.10 * bob);
+    final dark = Color.lerp(color, const Color(0xFF10181B), 0.42)!;
+    final light = Color.lerp(color, Colors.white, 0.42)!;
+    // Hover shadow on the board, further below the body than the bob lift.
+    final shadowScale = 1.0 - 0.12 * bob;
     canvas.drawOval(
-      Rect.fromCenter(center: Offset(c.dx, c.dy + r * 0.9), width: r * 2.0, height: r * 1.0),
+      Rect.fromCenter(
+        center: Offset(c0.dx, c0.dy + r * 1.05),
+        width: r * 2.1 * shadowScale,
+        height: r * 1.0 * shadowScale,
+      ),
       Paint()
-        ..color = Colors.black.withValues(alpha: 0.28)
+        ..color = Colors.black.withValues(alpha: 0.30)
         ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.35),
     );
     // Glow.
-    canvas.drawCircle(c, r * 1.8, Paint()..color = color.withValues(alpha: 0.14));
-    // Saucer: flat disc with a darker rim.
+    canvas.drawCircle(c, r * 2.1, Paint()..color = color.withValues(alpha: 0.10));
+    canvas.drawCircle(c, r * 1.45, Paint()..color = color.withValues(alpha: 0.16));
+    // Saucer: flat disc with a darker rim and a thin light edge on top.
     final disc = Rect.fromCenter(center: c, width: r * 2.0, height: r * 1.3);
     canvas.drawOval(disc, Paint()..color = dark);
-    canvas.drawOval(disc.deflate(r * 0.16), Paint()..color = color);
-    // Dome on top.
-    final dome = Rect.fromCenter(center: Offset(c.dx, c.dy - r * 0.25), width: r * 1.0, height: r * 0.85);
+    canvas.drawOval(disc.deflate(r * 0.15), Paint()..color = color);
+    canvas.drawArc(
+      disc.deflate(r * 0.15),
+      pi,
+      pi,
+      false,
+      Paint()
+        ..color = light.withValues(alpha: 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = r * 0.10,
+    );
+    // Dome on top with a highlight.
+    final dome = Rect.fromCenter(center: Offset(c.dx, c.dy - r * 0.25), width: r * 1.05, height: r * 0.9);
     canvas.drawOval(dome, Paint()..color = light);
-    canvas.drawCircle(Offset(c.dx - r * 0.15, c.dy - r * 0.4), r * 0.16, Paint()..color = Colors.white.withValues(alpha: 0.8));
+    canvas.drawCircle(Offset(c.dx - r * 0.18, c.dy - r * 0.42), r * 0.17, Paint()..color = Colors.white.withValues(alpha: 0.85));
   }
 
 }

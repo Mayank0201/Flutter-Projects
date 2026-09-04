@@ -54,6 +54,9 @@ class GameConstants {
   static const int startingRoadBudget = 25;
   static const int startingTunnels = 1; // was: startingBridges
   static const int startingBridges = 1;
+  // Longest tunnel or bridge one token buys, in tiles. Rivers are up to
+  // five tiles wide, so a single token always spans one.
+  static const int maxCorridorTiles = 8;
   static const int startingTrafficLights = 0;
   static const int startingSmartJunctions = 0; // was: startingRoundabouts
   static const int startingExpressLanes = 0; // was 1 (removed for cleanup)
@@ -175,6 +178,9 @@ class GameConstants {
   static const double shopBayFirst = 0.55; // strip offset of bay 0
   static const double shopBayPitch = 0.48; // bay 1 is one pitch further
   static const double carPivotRate = 20.0; // rad/s, max heading change
+  // Drone disc radius as a fraction of the vehicle size (0.34 tile), so a
+  // drone is about 0.4 tile across: clearly readable at phone zoom.
+  static const double droneRadius = 0.58;
 
   // Mountain colors (replaces water)
   static const Color mountainColor = Color(0xFF2A4147); // Dark teal rock

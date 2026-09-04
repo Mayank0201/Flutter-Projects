@@ -134,7 +134,13 @@ collision/overlap checks; game over should destroy the save (permadeath). Car ji
 was traced to the door node's non-null `side` triggering the smart-junction exit
 bezier on the first path segment (`CarComponent._rebuildSmoothPath`), plus
 nearest-neighbour sprite sampling; both are fixed.
-Seen on 2026-09-03 and not yet fixed: on Nile a road drag that ended on a house
-standing on the shore consumed the bridge token without building a visible bridge;
-`test/widget_test.dart` is empty, so `flutter test` fails to compile; there is no
-in-game menu button, so switching maps needs a game over (or a new browser tab).
+Seen on 2026-09-03 and not yet fixed: `test/widget_test.dart` is empty, so
+`flutter test` fails to compile; there is no in-game menu button, so switching maps
+needs a game over (or a new browser tab); Andes mountains are small blobs rather than
+ranges, so tunnels are rarely forced the way bridges now are on Nile.
+Fixed the same day: bridges/tunnels. One token buys a corridor up to
+`GameConstants.maxCorridorTiles`; a corridor can only start from a drivable tile (a
+drag passing over a house used to anchor there and burn the token); a refused tile
+never becomes the drag anchor; orphan cleanup refunds once per corridor; the
+auto-extension that finishes a crossing rolls itself back if it never reaches land.
+Nile rivers run edge to edge so there is no land gap to walk around.

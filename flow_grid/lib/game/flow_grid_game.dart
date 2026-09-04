@@ -1815,6 +1815,9 @@ class FlowGridGame extends FlameGame
       // A corridor tile with fewer than 2 edges is orphaned — remove it.
       if (edgeCount < 2) {
         final isTunnel = cell.isTunnel;
+        // One token buys a whole corridor; extension tiles were free, so
+        // only the corridor's first tile refunds.
+        final refund = !cell.isTunnelExtension;
         gm.grid[pos.y][pos.x] = GridCell(); // erase
         gm.activeEdges.removeWhere((e) {
           final parts = e.split('|');
@@ -1823,11 +1826,12 @@ class FlowGridGame extends FlameGame
               parts[1] == '${pos.x},${pos.y}';
         });
         gm.infrastructure.remove(pos);
-        // Refund the inventory cost for this tile
-        if (isTunnel) {
-          gm.tunnels += 1;
-        } else {
-          gm.bridges += 1;
+        if (refund) {
+          if (isTunnel) {
+            gm.tunnels += 1;
+          } else {
+            gm.bridges += 1;
+          }
         }
         gm.rebuildRoadGraph();
         gridRenderer?.markDirty(pos.x, pos.y);
@@ -1860,7 +1864,9 @@ class FlowGridGame extends FlameGame
 
     GridPosition from = last;
     final extendingTunnel = lastCell.isTunnel;
-    for (int i = 0; i < 12; i++) {
+    final extended = <GridPosition>[];
+    bool reachedLand = false;
+    for (int i = 0; i < GameConstants.maxCorridorTiles; i++) {
       final next = GridPosition(from.x + dx, from.y + dy);
       if (!gridManager!.isValid(next.x, next.y)) break;
       final nextCell = gridManager!.getCell(next.x, next.y);
@@ -1883,18 +1889,42 @@ class FlowGridGame extends FlameGame
           consumeRoad: true,
         );
       } else if (nextCell.isEmpty) {
-        gridManager!.placeRoad(next.x, next.y, from: from);
+        reachedLand = gridManager!.placeRoad(next.x, next.y, from: from);
         break;
       } else {
+        // Road or building on the far shore: the corridor already joins it.
+        reachedLand = nextCell.isRoad || nextCell.isTunnel || nextCell.isBridge;
         break;
       }
 
       if (!ok) break;
+      extended.add(next);
       from = next;
+    }
+
+    // The extension exists to come out the other side. If it never found
+    // land (water to the board edge, or too wide for one token) it would
+    // just be a pier to nowhere: take the extension tiles back. They were
+    // free, so nothing to refund.
+    if (!reachedLand && extended.isNotEmpty) {
+      final gm = gridManager!;
+      for (final pos in extended) {
+        gm.grid[pos.y][pos.x] = GridCell();
+        gm.activeEdges.removeWhere((e) {
+          final parts = e.split('|');
+          if (parts.length != 2) return false;
+          return parts[0] == '${pos.x},${pos.y}' ||
+              parts[1] == '${pos.x},${pos.y}';
+        });
+        gm.infrastructure.remove(pos);
+        gridRenderer?.markDirty(pos.x, pos.y);
+      }
+      gm.rebuildRoadGraph();
     }
   }
 
-  void _placeTunnelOrExit(GridPosition pos) {
+  /// Returns true when something was placed at [pos].
+  bool _placeTunnelOrExit(GridPosition pos) {
     final cell = gridManager!.getCell(pos.x, pos.y);
     // Tunnel core: only legal on a mountain tile or an existing tunnel tile.
     if (cell.type == CellType.mountain || cell.isTunnel) {
@@ -1909,14 +1939,13 @@ class FlowGridGame extends FlameGame
         final fromCell = gridManager!.getCell(lp.x, lp.y);
         if (fromCell.isTunnel || fromCell.isBridge) isExtension = true;
       }
-      gridManager!.placeTunnel(
+      return gridManager!.placeTunnel(
         pos.x,
         pos.y,
         from: _lastPlacedPos,
         isExtension: isExtension,
         consumeRoad: isExtension,
       );
-      return;
     }
     // Otherwise, if we're continuing from a tunnel/bridge cell, this is the exit:
     // lay a normal road so the tunnel actually connects to the road network.
@@ -1928,11 +1957,14 @@ class FlowGridGame extends FlameGame
       );
       if (fromCell.isTunnel || fromCell.isBridge) {
         gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+        return true;
       }
     }
+    return false;
   }
 
-  void _placeBridgeOrExit(GridPosition pos) {
+  /// Returns true when something was placed at [pos].
+  bool _placeBridgeOrExit(GridPosition pos) {
     final cell = gridManager!.getCell(pos.x, pos.y);
     if (cell.type == CellType.water || cell.isBridge) {
       bool isExtension = false;
@@ -1941,14 +1973,13 @@ class FlowGridGame extends FlameGame
         final fromCell = gridManager!.getCell(lp.x, lp.y);
         if (fromCell.isTunnel || fromCell.isBridge) isExtension = true;
       }
-      gridManager!.placeBridge(
+      return gridManager!.placeBridge(
         pos.x,
         pos.y,
         from: _lastPlacedPos,
         isExtension: isExtension,
         consumeRoad: isExtension,
       );
-      return;
     }
     if (_lastPlacedPos != null &&
         gridManager!.isValid(_lastPlacedPos!.x, _lastPlacedPos!.y)) {
@@ -1958,8 +1989,10 @@ class FlowGridGame extends FlameGame
       );
       if (fromCell.isTunnel || fromCell.isBridge) {
         gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+        return true;
       }
     }
+    return false;
   }
 
   void _handleBuild(GridPosition pos) {
@@ -1987,23 +2020,23 @@ class FlowGridGame extends FlameGame
         // A road drag auto-digs tunnels through
         // mountains and auto-spans bridges over water without the player
         // having to switch tools mid-gesture.
+        // A refused corridor tile (over the length cap, no token) must not
+        // become the anchor for the next tile, or the drag starts a second,
+        // disconnected corridor mid-river and burns another token.
         if (cell.type == CellType.mountain || cell.isTunnel) {
-          _placeTunnelOrExit(pos);
+          if (_placeTunnelOrExit(pos)) _lastPlacedPos = pos;
         } else if ((cell.type == CellType.water || cell.isBridge) &&
             selectedMapType != MapType.arctic) {
-          _placeBridgeOrExit(pos);
-        } else {
-          gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos);
+          if (_placeBridgeOrExit(pos)) _lastPlacedPos = pos;
+        } else if (gridManager!.placeRoad(pos.x, pos.y, from: _lastPlacedPos)) {
+          _lastPlacedPos = pos;
         }
-        _lastPlacedPos = pos;
         break;
       case BuildTool.tunnel:
-        _placeTunnelOrExit(pos);
-        _lastPlacedPos = pos;
+        if (_placeTunnelOrExit(pos)) _lastPlacedPos = pos;
         break;
       case BuildTool.bridge:
-        _placeBridgeOrExit(pos);
-        _lastPlacedPos = pos;
+        if (_placeBridgeOrExit(pos)) _lastPlacedPos = pos;
         break;
       case BuildTool.erase:
         gridManager!.eraseCell(pos.x, pos.y);

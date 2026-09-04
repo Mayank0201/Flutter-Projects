@@ -71,7 +71,9 @@ class NileMapGenerator extends MapGenerator {
       // Winding vertical river within bounds
       final baseCenterX = xMin + ((xMax - xMin) ~/ 2);
       final centerX = (baseCenterX + startOffset - 7).clamp(xMin, xMax);
-      for (int y = (minY ?? 0); y <= (maxY ?? grid.rows - 1); y++) {
+      // Full height, whatever the region bounds: a river that stops short
+      // leaves a land gap and the bridge token is never needed.
+      for (int y = 0; y < grid.rows; y++) {
         final wx = centerX + (sin(y * frequency + phase) * amplitude).round();
         final width = 1 + _random.nextInt(2);
         for (int dx = -width; dx <= width; dx++) {
@@ -85,7 +87,7 @@ class NileMapGenerator extends MapGenerator {
       // Winding horizontal river within bounds
       final baseCenterY = yMin + ((yMax - yMin) ~/ 2);
       final centerY = (baseCenterY + startOffset - 7).clamp(yMin, yMax);
-      for (int x = (minX ?? 0); x <= (maxX ?? grid.cols - 1); x++) {
+      for (int x = 0; x < grid.cols; x++) {
         final wy = centerY + (sin(x * frequency + phase) * amplitude).round();
         final width = 1 + _random.nextInt(2);
         for (int dy = -width; dy <= width; dy++) {
