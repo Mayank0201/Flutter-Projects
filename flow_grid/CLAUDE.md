@@ -16,6 +16,9 @@ Flutter must be on PATH (or set `$env:FLUTTER_ROOT` to the SDK root).
 flutter test                   # only the default widget smoke test exists today
 ```
 
+`dev/run.ps1` also sweeps orphaned `flutter_tools.*` build-scratch folders (older than
+15 minutes) out of `%LOCALAPPDATA%\Temp` before launching: killing the dev server
+leaves one behind every time and they fill the system drive.
 `dev/_env.ps1` resolves the repo root and the SDK for both wrappers — never hardcode a
 user path in `dev/`. `dev/remove_prints.ps1` and `dev/rename_enums.ps1` are spent one-off
 migrations kept for reference; they rewrite files in place, so read the diff if you run them.

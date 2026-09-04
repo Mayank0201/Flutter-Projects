@@ -16,6 +16,16 @@ param(
 
 . "$PSScriptRoot\_env.ps1"
 
+# Each `flutter run` keeps its build scratch in %LOCALAPPDATA%\Templutter_tools.*
+# and removes it on a clean exit. Killing the process instead -- which is what
+# happens on every stop-and-rebuild -- orphans the folder, and they are ~350 MB
+# each. Sweep the stale ones before launching. The age filter leaves anything a
+# running build is still using alone, and a locked folder is skipped rather than
+# failing the launch.
+Get-ChildItem "$env:LOCALAPPDATA\Temp" -Directory -Filter 'flutter_tools.*' -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-15) } |
+    ForEach-Object { try { Remove-Item $_.FullName -Recurse -Force -ErrorAction Stop } catch { } }
+
 $flutter = Resolve-SdkTool -Name 'flutter'
 
 Push-Location $ProjectDir
