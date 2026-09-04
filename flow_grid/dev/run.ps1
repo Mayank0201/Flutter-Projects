@@ -32,7 +32,6 @@ Get-ChildItem "$env:LOCALAPPDATA\Temp" -Directory -Filter 'flutter_tools.*' -Err
 # stable folder next to the repo instead, and keep it out of git.
 $chromeProfile = Join-Path $ProjectDir '.dev-chrome-profile'
 if (-not (Test-Path $chromeProfile)) { New-Item -ItemType Directory -Path $chromeProfile | Out-Null }
-$env:CHROME_USER_DATA_DIR = $chromeProfile
 
 $flutter = Resolve-SdkTool -Name 'flutter'
 
@@ -41,6 +40,13 @@ try {
     $runArgs = @('run', '-d', $Device)
     if ($Device -in @('chrome', 'edge', 'web-server')) {
         $runArgs += @('--web-port', "$Port")
+    }
+    # flutter_tools uses a --user-data-dir passed through --web-browser-flag if
+    # there is one, and otherwise makes a throwaway profile in the system temp
+    # folder (see Chrome._createUserDataDirectory). Point it at the pinned
+    # profile so saved cities survive a restart.
+    if ($Device -in @('chrome', 'edge')) {
+        $runArgs += "--web-browser-flag=--user-data-dir=$chromeProfile"
     }
     if ($Extra) { $runArgs += $Extra }
 
