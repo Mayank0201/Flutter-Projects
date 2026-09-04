@@ -1308,9 +1308,11 @@ class GridManager {
     return true;
   }
 
-  /// Join a plain road tile to every plain road / signal tile next to it.
-  /// Tunnels, bridges, smart junctions, express lanes and one-way roads keep
-  /// their own stricter connection rules and are left alone.
+  /// Join a plain road tile to any adjacent plain road / signal tile that is
+  /// still a loose end (fewer than two connections of its own) -- a driveway
+  /// stub or the end of another trace. Traces running side by side are left
+  /// separate. Tunnels, bridges, smart junctions, express lanes and one-way
+  /// roads keep their own stricter connection rules and are left alone.
   void _autoConnectNeighbours(int x, int y) {
     const offsets = [
       [0, -1],
@@ -1330,6 +1332,13 @@ class GridManager {
       if (!plainRoad || n.isPendingDeletion) continue;
       if (n.isExpressLane || n.isOneWay) continue;
       if (hasEdge(x, y, nx, ny)) continue;
+      // Only adopt a neighbour that would otherwise be stranded: a driveway
+      // stub, or the loose end of another trace. Joining every adjacent
+      // road merged two traces running side by side into a single blob,
+      // handed both tiles a junction the player never drew, and re-routed
+      // drones through connections they never made. To tee into a trace
+      // that is already carrying traffic, drag onto it.
+      if (_countExternalConnections(nx, ny) > 1) continue;
       addEdge(x, y, nx, ny);
       updateNodeConnections(nx, ny);
     }

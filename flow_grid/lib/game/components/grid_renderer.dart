@@ -1459,8 +1459,11 @@ class GridRenderer extends PositionComponent
       ..strokeWidth = cellSize * GameConstants.roadEdge * 2;
     final island = Paint()..color = _mapBackgroundColor;
 
-    for (int x = minX; x < maxX; x++) {
-      for (int y = minY; y < maxY; y++) {
+    // A hub ring is 0.75 of a tile in radius, so one placed on a chunk
+    // edge overhangs into the neighbour: sweep one cell past every edge
+    // or the ring is drawn with a flat side.
+    for (int x = minX - 1; x < maxX + 1; x++) {
+      for (int y = minY - 1; y < maxY + 1; y++) {
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
         if (!cell.hasSmartJunction) continue;
@@ -1533,14 +1536,23 @@ class GridRenderer extends PositionComponent
   }
 
   void _drawBuildings(Canvas canvas, int minX, int minY, int maxX, int maxY) {
-    // Start one cell early: a 2x2 destination anchored just outside this
-    // chunk still has part cells inside it (the chunk clip trims the rest).
-    for (int x = minX - 1; x < maxX; x++) {
-      for (int y = minY - 1; y < maxY; y++) {
+    // Shops are drawn from two cells outside this chunk in EVERY direction,
+    // not just before it: the 2x2 block hangs off the anchor and the pad
+    // reaches ~1.5 tiles past it, so a shop anchored just past any edge
+    // still paints into this chunk. Only looking backwards left the far side
+    // of such a shop unpainted, and the chunk clip cut it off mid-chip.
+    // The clip trims whatever really falls outside, so the extra work is
+    // only paid on a chunk rebuild. Houses stay inside the chunk: a house
+    // and its apron never reach past their own tile.
+    for (int x = minX - 2; x < maxX + 2; x++) {
+      for (int y = minY - 2; y < maxY + 2; y++) {
         if (!gridManager.isValid(x, y)) continue;
         final cell = gridManager.grid[y][x];
         if (!cell.isHouse && !cell.isDestinationAnchor) continue;
-        if (cell.isHouse && (x < minX || y < minY)) continue;
+        if (cell.isHouse &&
+            (x < minX || y < minY || x >= maxX || y >= maxY)) {
+          continue;
+        }
 
         final cx = offsetX + x * cellSize + cellSize / 2;
         final cy = offsetY + y * cellSize + cellSize / 2;

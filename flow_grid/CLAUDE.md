@@ -76,9 +76,11 @@ Two things about it are easy to miss:
   where noisy by `GameConstants.debugInfrastructure`.
 - Anything touching the road topology should invalidate the path cache via
   `GridManager.onTopologyChanged`.
-- **Adjacent road tiles always join** (`GridManager._autoConnectNeighbours`, called
-  from `placeRoad`). Edges are no longer limited to cells drawn in the same drag, so a
-  road dragged up to a driveway stub connects. Tunnels, bridges, smart junctions,
+- **A new road tile adopts only adjacent loose ends** (`GridManager._autoConnectNeighbours`,
+  called from `placeRoad`): a neighbour with fewer than two connections of its own, such
+  as a driveway stub or the end of another trace. It used to join every adjacent road,
+  which silently merged two traces running side by side. To tee into a trace already
+  carrying traffic, drag onto it. Tunnels, bridges, smart junctions,
   express lanes and one-way roads keep their own rules and are skipped.
 - **Destinations are 2x2.** Only the anchor cell (the one the driveway touches) is in
   `GridManager.destinations` and owns demand/age/name/driveway state, keyed by its
