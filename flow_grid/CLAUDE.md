@@ -66,9 +66,10 @@ Two things about it are easy to miss:
   getter is what all the `Map<String, ...>` state in `GridManager` is indexed by.
 - Gameplay code must not spawn buildings directly — go through
   `SpawnController.requestSpawn`, and let `ProgressionDirector` decide timing. A staged
-  shop whose planned spot got built over is re-sited nearby
-  (`_findAlternativeDestination`) or retried, never skipped: houses without a shop of
-  their colour are a dead district.
+  shop reserves its whole 2x2 footprint plus its driveway; if the spot is built over
+  anyway it is re-sited nearby (`_findReplacementDestinationSpot`) or retried, never
+  skipped, and `_repairOrphanedColors` re-sites a shop for any colour left with houses
+  and no shop. Those tunables live in `SpawnConfig`.
 - Tunables (timings, capacities, speeds, colours, tick rates) belong in
   `models/game_constants.dart`, not inline in the systems.
 - Logging is `debugPrint` with a bracketed tag (`[BOOT]`, `[SPAWN]`, `[SYNC]`), gated
@@ -113,10 +114,11 @@ Two things about it are easy to miss:
   draws the glyph for every slot with no car out). A shop has three bays reached via
   the tongue and an in-lot corridor (`CarComponent.shopRoute` / `stallFor`, all
   measured from the anchor cell in `GameConstants.shop*`). `_rebuildSmoothPath`
-  appends these spurs to the smooth path, fades the lane offset to zero over them
-  (`_laneFade`), and a departing car pivots in place before it moves
-  (`_approachAngle`, timed from the real frame dt because `_updatePosition` gets a
-  speed-scaled dt). Never teleport a car to a parking spot.
+  appends these spurs to the smooth path and scales the lane offset over them
+  (`_laneFade`: 60% inside the lot so drones in and out pass on opposite sides, 0 over
+  the last half tile). One drone moves inside a lot at a time (`_lotBusy`): entering
+  drones hold on the driveway tile, leaving drones stay in their bay. Parked drones are
+  skipped by the follow-the-leader scan. Never teleport a drone to a parking spot.
 - Utility glyphs: roundabout = one-road-width ring on the
   `junctionRingRadius` pathing circle with a ground-colour island, signals = red/green lamps per
   approach, bridges = dark tick marks at each shore, tunnels = dashed edges and no
