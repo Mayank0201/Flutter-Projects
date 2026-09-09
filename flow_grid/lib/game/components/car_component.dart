@@ -41,12 +41,14 @@ class CarComponent extends PositionComponent
   bool arrived = false;
   bool isReturning = false;
   bool isWaiting = false;
+
   /// Parking slot at home (0 or 1) held for the whole round trip, and the
   /// shop stall this trip pulls into. Assigned by the spawner.
   int homeSlot;
   int stallSlot;
   bool _fadeLaneAtStart = false;
   bool _fadeLaneAtEnd = false;
+
   /// Arc length of the in-lot part of the path (tongue mouth to bay) when
   /// the trip starts or ends at a shop; 0 otherwise. Drives the lot lock and
   /// the reduced lane offset inside the lot.
@@ -120,6 +122,8 @@ class CarComponent extends PositionComponent
   CarComponent? _closestObstacle;
   final Set<CarComponent> _ignoredObstacles = {};
   double _deadlockTimer = 0.0;
+  double _lotWaitTimer = 0.0;
+  double _lotGateOverride = 0.0;
 
   // [FIX] Guards against double-unregistering (or, worse, a stale trip's
   // cleanup never running at all). `removeFromParent()` defers `onRemove()`
@@ -224,6 +228,8 @@ class CarComponent extends PositionComponent
     _closestObstacle = null;
     _ignoredObstacles.clear();
     _deadlockTimer = 0.0;
+    _lotWaitTimer = 0.0;
+    _lotGateOverride = 0.0;
 
     // [FIX] Moved ahead of _rebuildSmoothPath/_updatePosition below so
     // `size` is already set to this trip's vehicleType before
@@ -532,6 +538,8 @@ class CarComponent extends PositionComponent
     _closestObstacle = null;
     _ignoredObstacles.clear();
     _deadlockTimer = 0.0;
+    _lotWaitTimer = 0.0;
+    _lotGateOverride = 0.0;
 
     priority = 10;
     _rebuildSmoothPath();
@@ -596,7 +604,15 @@ class CarComponent extends PositionComponent
   Offset _parkingSpotFor(int i) {
     final p = path[i];
     if (p.x == spawnHousePos.x && p.y == spawnHousePos.y) {
-      final spot = homeSpotFor(p.x, p.y, p.side!, cellSize, offsetX, offsetY, homeSlot);
+      final spot = homeSpotFor(
+        p.x,
+        p.y,
+        p.side!,
+        cellSize,
+        offsetX,
+        offsetY,
+        homeSlot,
+      );
       return Offset(spot.$1.x, spot.$1.y);
     }
     return stallFor(p.x, p.y, p.side!, cellSize, offsetX, offsetY, stallSlot);
@@ -626,9 +642,11 @@ class CarComponent extends PositionComponent
   }
 
   bool get _startsAtShop =>
-      path.isNotEmpty && !(path.first.x == spawnHousePos.x && path.first.y == spawnHousePos.y);
+      path.isNotEmpty &&
+      !(path.first.x == spawnHousePos.x && path.first.y == spawnHousePos.y);
   bool get _endsAtShop =>
-      path.isNotEmpty && !(path.last.x == spawnHousePos.x && path.last.y == spawnHousePos.y);
+      path.isNotEmpty &&
+      !(path.last.x == spawnHousePos.x && path.last.y == spawnHousePos.y);
 
   static Vector2 _unit(Direction d) {
     switch (d) {
@@ -690,8 +708,16 @@ class CarComponent extends PositionComponent
     double offsetX,
     double offsetY,
     int index,
-  ) => shopPoint(x, y, entry, cellSize, offsetX, offsetY,
-      GameConstants.shopBayAlong, bayStrip(index));
+  ) => shopPoint(
+    x,
+    y,
+    entry,
+    cellSize,
+    offsetX,
+    offsetY,
+    GameConstants.shopBayAlong,
+    bayStrip(index),
+  );
 
   /// The in-lot route between the tongue mouth and bay [index], listed from
   /// the tongue inward: corridor entry on the axis, corridor beside the
@@ -709,7 +735,12 @@ class CarComponent extends PositionComponent
     final strip = bayStrip(index);
     Offset pt(double a, double t) =>
         shopPoint(x, y, entry, cellSize, offsetX, offsetY, a, t);
-    return [pt(0.5, 0), pt(corr, 0), pt(corr, strip), pt(GameConstants.shopBayAlong, strip)];
+    return [
+      pt(0.5, 0),
+      pt(corr, 0),
+      pt(corr, strip),
+      pt(GameConstants.shopBayAlong, strip),
+    ];
   }
 
   static double _polylineLength(List<Offset> pts) {
@@ -735,7 +766,7 @@ class CarComponent extends PositionComponent
   }
 
   /// Spacing between drones queued for the same shop lot.
-  double get _lotFollowGap => cellSize * 0.75;
+  double get _lotFollowGap => cellSize * 0.3;
 
   /// How many other outbound drones bound for the same shop are nearer to it
   /// than this one, so a queue can space itself out along the trace.
@@ -756,14 +787,28 @@ class CarComponent extends PositionComponent
     return n;
   }
 
-  /// One drone moves inside a lot at a time: the corridor is too narrow to
-  /// pass in. Others hold at the driveway (entering) or stay in their bay
-  /// (leaving) until it is clear.
-  bool _lotBusy() {
+  /// Returns the other car currently moving inside the destination shop's lot, if any.
+  CarComponent? _blockingLotCar() {
     for (final other in game.cars) {
       if (identical(other, this) || other.arrived) continue;
-      if (other.targetDest.x != targetDest.x || other.targetDest.y != targetDest.y) continue;
-      if (other._movingInsideLot) return true;
+      if (_ignoredObstacles.contains(other)) continue;
+      if (other.targetDest.x != targetDest.x ||
+          other.targetDest.y != targetDest.y)
+        continue;
+      if (other._movingInsideLot) return other;
+    }
+    return null;
+  }
+
+  /// True while this drone is physically located within the destination shop's lot
+  /// (parked, dwelling, or still traversing the lot corridor).
+  bool get isInsideShopLot {
+    if (arrived || _lotRouteLength <= 0) return false;
+    if (!isReturning && _endsAtShop) {
+      return _totalLength - _distanceTraveled <= _lotRouteLength;
+    }
+    if (isReturning && _startsAtShop) {
+      return _distanceTraveled < _lotRouteLength;
     }
     return false;
   }
@@ -872,7 +917,7 @@ class CarComponent extends PositionComponent
       }
     }
 
-    // One drone moves inside a shop lot at a time. _lotBusy() is an O(cars)
+    // One drone moves inside a shop lot at a time. _blockingLotCar() is an O(cars)
     // scan, so — as the old inline check did — only consult it once the gate
     // is within this frame's reach.
     if (_lotRouteLength > 0) {
@@ -886,17 +931,55 @@ class CarComponent extends PositionComponent
         final base = _totalLength - _lotRouteLength - cellSize * 0.5;
         // Look far enough ahead to catch the back of that queue, not just
         // this frame's travel.
-        if (_distanceTraveled > base - reach - _lotFollowGap * 4 &&
-            _lotBusy()) {
-          final gate = base - _lotQueueAhead() * _lotFollowGap;
-          final room = gate - _distanceTraveled;
-          if (room < reach) cap = min(cap, max(0.0, room));
+        if (_distanceTraveled > base - reach - _lotFollowGap * 4) {
+          final blocker = _blockingLotCar();
+          if (blocker != null) {
+            _closestObstacle ??= blocker;
+            if (_lotGateOverride > 0) {
+              _lotGateOverride -= dt;
+              // Sustained override window: allow drone to push through the gate
+            } else if (_lotWaitTimer > 2.0) {
+              // Deadlock timeout! Grant sustained override to push through gate
+              _lotGateOverride = 1.2;
+              _lotWaitTimer = 0.0;
+              _ignoredObstacles.add(blocker);
+              _debugLog(
+                "[LOT_DEADLOCK_BREAK] Car $this broke lot gate hold for dest (${targetDest.x}, ${targetDest.y})",
+              );
+            } else {
+              _lotWaitTimer += dt;
+              final gate = base - _lotQueueAhead() * _lotFollowGap;
+              final room = gate - _distanceTraveled;
+              if (room < reach) cap = min(cap, max(0.0, room));
+            }
+          } else {
+            _lotWaitTimer = 0.0;
+            _lotGateOverride = 0.0;
+          }
         }
-      } else if (isReturning &&
-          _startsAtShop &&
-          _distanceTraveled <= 0.5 &&
-          _lotBusy()) {
-        cap = 0.0;
+      } else if (isReturning && _startsAtShop && _distanceTraveled <= 0.5) {
+        final blocker = _blockingLotCar();
+        if (blocker != null) {
+          _closestObstacle ??= blocker;
+          if (_lotGateOverride > 0) {
+            _lotGateOverride -= dt;
+            // Sustained override window: allow drone to pull out of bay
+          } else if (_lotWaitTimer > 2.0) {
+            // Deadlock timeout! Grant sustained override to pull out of bay
+            _lotGateOverride = 1.2;
+            _lotWaitTimer = 0.0;
+            _ignoredObstacles.add(blocker);
+            _debugLog(
+              "[LOT_DEADLOCK_BREAK] Returning Car $this broke lot exit hold for dest (${targetDest.x}, ${targetDest.y})",
+            );
+          } else {
+            _lotWaitTimer += dt;
+            cap = 0.0;
+          }
+        } else {
+          _lotWaitTimer = 0.0;
+          _lotGateOverride = 0.0;
+        }
       }
     }
 
@@ -943,7 +1026,13 @@ class CarComponent extends PositionComponent
   }
 
   /// Cubic S-bend from [from] to [to] with both tangents along [dir].
-  static void _appendSBend(ui.Path a, ui.Path b, Offset from, Offset to, Offset dir) {
+  static void _appendSBend(
+    ui.Path a,
+    ui.Path b,
+    Offset from,
+    Offset to,
+    Offset dir,
+  ) {
     final len = (to - from).distance;
     final cp1 = from + dir * (len * 0.45);
     final cp2 = to - dir * (len * 0.45);
@@ -988,7 +1077,15 @@ class CarComponent extends PositionComponent
     if (!gm.isValid(house.x, house.y)) return null;
     final entry = gm.getCell(house.x, house.y).entrySide;
     if (entry == null) return null;
-    return homeSpotFor(house.x, house.y, entry, cellSize, offsetX, offsetY, slot);
+    return homeSpotFor(
+      house.x,
+      house.y,
+      entry,
+      cellSize,
+      offsetX,
+      offsetY,
+      slot,
+    );
   }
 
   double get _vehicleSpeedMultiplier {
@@ -1146,8 +1243,9 @@ class CarComponent extends PositionComponent
     // curve between the spot and the driveway tile instead of teleporting
     // between the spot and the tile centre.
     final Offset? startSpot = _parksAt(0) ? _parkingSpotFor(0) : null;
-    final Offset? endSpot =
-        _parksAt(path.length - 1) ? _parkingSpotFor(path.length - 1) : null;
+    final Offset? endSpot = _parksAt(path.length - 1)
+        ? _parkingSpotFor(path.length - 1)
+        : null;
     _fadeLaneAtStart = startSpot != null;
     _fadeLaneAtEnd = endSpot != null;
     _lotRouteLength = 0.0;
@@ -1184,7 +1282,13 @@ class CarComponent extends PositionComponent
           _appendSBend(_smoothPath, segPath, currentPenPos, axis, eO);
         } else {
           final full = shopRoute(
-            p1.x, p1.y, p1.side!, cellSize, offsetX, offsetY, stallSlot,
+            p1.x,
+            p1.y,
+            p1.side!,
+            cellSize,
+            offsetX,
+            offsetY,
+            stallSlot,
           );
           _lotRouteLength = _polylineLength(full);
           final route = full.reversed.skip(1).toList();
@@ -1215,19 +1319,33 @@ class CarComponent extends PositionComponent
         final isHome = bNode.x == spawnHousePos.x && bNode.y == spawnHousePos.y;
         final r = cellSize * GameConstants.parkingCornerRadius;
         if (isHome) {
-          final axis = Offset(bcx + e.x * cellSize * 0.7, bcy + e.y * cellSize * 0.7);
+          final axis = Offset(
+            bcx + e.x * cellSize * 0.7,
+            bcy + e.y * cellSize * 0.7,
+          );
           final pen = _appendRoundedPolyline(
-            _smoothPath, segPath, currentPenPos, [c2, axis], cellSize * 0.3,
+            _smoothPath,
+            segPath,
+            currentPenPos,
+            [c2, axis],
+            cellSize * 0.3,
           );
           _appendSBend(_smoothPath, segPath, pen, endSpot, inDir);
         } else {
           final route = shopRoute(
-            bNode.x, bNode.y, bNode.side!, cellSize, offsetX, offsetY, stallSlot,
+            bNode.x,
+            bNode.y,
+            bNode.side!,
+            cellSize,
+            offsetX,
+            offsetY,
+            stallSlot,
           );
           _lotRouteLength = _polylineLength(route);
-          _appendRoundedPolyline(
-            _smoothPath, segPath, currentPenPos, [c2, ...route], r,
-          );
+          _appendRoundedPolyline(_smoothPath, segPath, currentPenPos, [
+            c2,
+            ...route,
+          ], r);
         }
         currentPenPos = endSpot;
       }
@@ -1242,11 +1360,20 @@ class CarComponent extends PositionComponent
             _appendSBend(_smoothPath, segPath, currentPenPos, endSpot, inDir);
           } else {
             final route = shopRoute(
-              p2.x, p2.y, p2.side!, cellSize, offsetX, offsetY, stallSlot,
+              p2.x,
+              p2.y,
+              p2.side!,
+              cellSize,
+              offsetX,
+              offsetY,
+              stallSlot,
             );
             _lotRouteLength = _polylineLength(route);
             _appendRoundedPolyline(
-              _smoothPath, segPath, currentPenPos, route,
+              _smoothPath,
+              segPath,
+              currentPenPos,
+              route,
               cellSize * GameConstants.parkingCornerRadius,
             );
           }
@@ -1313,9 +1440,7 @@ class CarComponent extends PositionComponent
       // those fall through to the plain line/corner logic below instead,
       // which uses getPos() (and its terminal-node tile-center fix above)
       // correctly.
-      else if (p1.side == null &&
-          p2.side != null &&
-          isJunctionNodeAt(i + 1)) {
+      else if (p1.side == null && p2.side != null && isJunctionNodeAt(i + 1)) {
         final cx = offsetX + p2.x * cellSize + cellSize / 2;
         final cy = offsetY + p2.y * cellSize + cellSize / 2;
         final r = cellSize * GameConstants.junctionRingRadius;
@@ -1519,13 +1644,16 @@ class CarComponent extends PositionComponent
     // every building, not just while actually on a roundabout ring. Use the
     // same structural junction check as _updateLaneTarget.
     double roundaboutSpeedMultiplier = 1.0;
-    if (_currentPathIndex < path.length &&
-        _isJunctionNode(_currentPathIndex)) {
+    if (_currentPathIndex < path.length && _isJunctionNode(_currentPathIndex)) {
       roundaboutSpeedMultiplier = 0.80;
     }
 
     double advance =
-        dt * speed * game.timeScale * curveSpeedMultiplier * roundaboutSpeedMultiplier;
+        dt *
+        speed *
+        game.timeScale *
+        curveSpeedMultiplier *
+        roundaboutSpeedMultiplier;
     // Hard stop lines (unreserved cell ahead, blocked box, shop-lot gate)
     // arrive as a cap computed by the caller *before* this integration, so
     // the drone stops exactly on the line instead of overshooting and being
@@ -1730,6 +1858,7 @@ class CarComponent extends PositionComponent
     _closestObstacle = null;
     _ignoredObstacles.clear();
     _deadlockTimer = 0.0;
+    _lotWaitTimer = 0.0;
 
     // [FIX] Return-trip cornering looked visibly wrong compared to the
     // outbound leg. Both _init() and reuseState() reset the per-car lane-
@@ -2651,6 +2780,9 @@ class CarComponent extends PositionComponent
                         // Let this car through despite the downstream cell
                         // being nominally "full" — cleared once it advances.
                         _boxDeadlockOverride = true;
+                        if (_closestObstacle != null) {
+                          _ignoredObstacles.add(_closestObstacle!);
+                        }
                       }
                       _intersectionWaitingTimer = 0.0;
                       _debugLog(
@@ -2836,8 +2968,14 @@ class CarComponent extends PositionComponent
         if (dist < slowdownStartDist) {
           final mult = ((dist - safeDist) / (slowdownStartDist - safeDist))
               .clamp(0.0, 1.0);
-          if (mult < targetMultiplier) {
-            targetMultiplier = mult;
+          // If the leader is actively moving, smoothly pace behind them rather than
+          // slamming to a dead stop in place, preventing open-road stop-and-go stutter.
+          final smoothedMult =
+              (other._currentSpeedMultiplier > 0.15 && dist > safeDist * 0.6)
+              ? max(mult, other._currentSpeedMultiplier * 0.6)
+              : mult;
+          if (smoothedMult < targetMultiplier) {
+            targetMultiplier = smoothedMult;
             _closestObstacle = other;
           }
         }
@@ -2954,7 +3092,11 @@ class CarComponent extends PositionComponent
     // obstacle scan re-measured the gap to the leader, so the applied speed
     // jumped between the ramped value and a flat 0.08 several times a
     // second — the visible stutter. On an open road the floor is unchanged.
-    if (!_waitingAtSignal && !arrived && !isWaiting && !heldAtLine && !canStop) {
+    if (!_waitingAtSignal &&
+        !arrived &&
+        !isWaiting &&
+        !heldAtLine &&
+        !canStop) {
       final fade =
           ((_lastTargetMultiplier - stallFloorFadeLow) /
                   (stallFloorFadeHigh - stallFloorFadeLow))
@@ -2973,7 +3115,18 @@ class CarComponent extends PositionComponent
       // The car has moved past the node the override applied to; the next
       // "don't block the box" check is against a different downstream cell
       // and should be evaluated fresh rather than staying force-overridden.
-      _boxDeadlockOverride = false;
+      final currentCell = game.gridManager?.getCell(
+        path[_currentPathIndex].x,
+        path[_currentPathIndex].y,
+      );
+      final stillInJunction =
+          currentCell != null &&
+          (currentCell.connectionType == ConnectionNodeType.intersection ||
+              currentCell.type == CellType.trafficLight ||
+              currentCell.type == CellType.smartJunction);
+      if (!stillInJunction) {
+        _boxDeadlockOverride = false;
+      }
       if (path.isNotEmpty &&
           oldPathIndex < path.length &&
           _currentPathIndex < path.length) {
@@ -3062,7 +3215,19 @@ class CarComponent extends PositionComponent
       fast = fast._closestObstacle?._closestObstacle;
     }
 
-    return fast != null;
+    if (fast == null) return false;
+
+    // fast is a node inside the cycle.
+    // Verify that `this` car is an actual element of the circular deadlock,
+    // and not just a linear queue/tail leading into it.
+    if (fast == this) return true;
+    CarComponent? curr = fast._closestObstacle;
+    while (curr != null && curr != fast) {
+      if (curr == this) return true;
+      curr = curr._closestObstacle;
+    }
+
+    return false;
   }
 
   GridPosition _getCurrentGridPos() {
@@ -3224,7 +3389,13 @@ class CarComponent extends PositionComponent
   /// even a parked drone feels alive. No nose, so heading never matters.
   /// Shared with GridRenderer's parked pass so both match. [r] is the disc
   /// radius.
-  static void drawDrone(Canvas canvas, Offset c0, double r, Color color, double t) {
+  static void drawDrone(
+    Canvas canvas,
+    Offset c0,
+    double r,
+    Color color,
+    double t,
+  ) {
     final bob = sin(t * 2.6);
     final c = Offset(c0.dx, c0.dy - r * 0.10 * bob);
     final tones = _tonesFor(color);
@@ -3272,9 +3443,17 @@ class CarComponent extends PositionComponent
         ..strokeWidth = r * 0.10,
     );
     // Dome on top with a highlight.
-    final dome = Rect.fromCenter(center: Offset(c.dx, c.dy - r * 0.25), width: r * 1.05, height: r * 0.9);
+    final dome = Rect.fromCenter(
+      center: Offset(c.dx, c.dy - r * 0.25),
+      width: r * 1.05,
+      height: r * 0.9,
+    );
     canvas.drawOval(dome, _domePaint..color = tones.light);
-    canvas.drawCircle(Offset(c.dx - r * 0.18, c.dy - r * 0.42), r * 0.17, _highlightPaint);
+    canvas.drawCircle(
+      Offset(c.dx - r * 0.18, c.dy - r * 0.42),
+      r * 0.17,
+      _highlightPaint,
+    );
   }
 
   // [PERF] Reused paints for the drone glyph. Every call used to allocate
@@ -3291,8 +3470,7 @@ class CarComponent extends PositionComponent
   static final Paint _bodyPaint = Paint();
   static final Paint _edgePaint = Paint()..style = PaintingStyle.stroke;
   static final Paint _domePaint = Paint();
-  static final Paint _highlightPaint = Paint()
-    ..color = const Color(0xD9FFFFFF);
+  static final Paint _highlightPaint = Paint()..color = const Color(0xD9FFFFFF);
 
   /// Derived tints for one drone colour. There are only a handful of house
   /// colours, so the Color.lerp/withValues work is done once each.

@@ -44,52 +44,37 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
               child: Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A1A),
-                  borderRadius: BorderRadius.circular(24),
+                  color: const Color(0xFF10191C),
+                  borderRadius: BorderRadius.circular(6),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    width: 2,
+                    color: const Color(0xFFBF945C).withValues(alpha: 0.4),
+                    width: 1.5,
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      blurRadius: 40,
-                      spreadRadius: 10,
-                    ),
-                  ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text(
-                      'SELECT MISSION',
+                      'CHOOSE A MAP',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 28,
+                        fontSize: 24,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 4,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text(
-                      'Choose your terrain and start the flow.',
+                      'Pick a region and start building.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.5),
-                        fontSize: 14,
+                        fontSize: 13,
                       ),
                     ),
-                    const SizedBox(height: 32),
-                    // LOWKEY MVP: only 3 maps now (Zen/Andes/Nile) — they fit
-                    // comfortably in a plain wrapping row, so the horizontal
-                    // scroll carousel (drag/wheel handling, custom scroll
-                    // behavior, scrollbar) that maps 4-6 needed is no longer
-                    // necessary. Arctic/Savanna/Delta's enum values,
-                    // generators, and rendering code are left intact (just
-                    // unreachable from here) so they can come back later
-                    // without rebuilding anything — see MapType in
-                    // map_generator.dart.
+                    const SizedBox(height: 28),
+                    // LOWKEY MVP: only 3 maps now (Zen/Andes/Nile)
                     Wrap(
                       alignment: WrapAlignment.center,
                       spacing: 16,
@@ -98,27 +83,27 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                         _MapCard(
                           title: 'ZEN',
                           description:
-                              'Balanced baseline terrain. Ideal for training. Standard mechanics and layouts.',
-                          icon: Icons.unfold_more,
-                          color: Colors.blueAccent,
+                              'Flat open land. Good for learning the basics.',
+                          icon: Icons.grain_rounded,
+                          color: const Color(0xFF5AC878),
                           highScore: _highScores[MapType.zen] ?? 0,
                           onTap: () => _startGame(context, MapType.zen),
                         ),
                         _MapCard(
                           title: 'ANDES',
                           description:
-                              'Terracotta canyons and mountain pockets. Restricts expansions, requiring strategic valley connections.',
-                          icon: Icons.landscape,
-                          color: Colors.orangeAccent,
+                              'Narrow valleys and cliffsides. Space is tight — plan your routes carefully.',
+                          icon: Icons.filter_hdr_rounded,
+                          color: const Color(0xFFE8853C),
                           highScore: _highScores[MapType.andes] ?? 0,
                           onTap: () => _startGame(context, MapType.andes),
                         ),
                         _MapCard(
                           title: 'NILE',
                           description:
-                              'Wide central river dividing fertile banks. Heavy reliance on water crossings and bridge management.',
-                          icon: Icons.waves,
-                          color: Colors.cyanAccent,
+                              'A big river splits the map in half. You\'ll need plenty of bridges.',
+                          icon: Icons.water_rounded,
+                          color: const Color(0xFF6FB3BE),
                           highScore: _highScores[MapType.nile] ?? 0,
                           onTap: () => _startGame(context, MapType.nile),
                         ),
@@ -131,7 +116,7 @@ class _MapSelectionOverlayState extends State<MapSelectionOverlay> {
                         widget.game.overlays.add('mainMenu');
                       },
                       child: Text(
-                        'BACK TO HEADQUARTERS',
+                        'BACK',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.3),
                           fontSize: 11,
@@ -196,32 +181,39 @@ class _MapCardState extends State<_MapCard> {
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: _isHovered
-                ? widget.color.withValues(alpha: 0.1)
-                : Colors.white.withValues(alpha: 0.03),
-            borderRadius: BorderRadius.circular(20),
+                ? const Color(0xFF182428)
+                : const Color(0xFF141D20),
+            borderRadius: BorderRadius.circular(5),
             border: Border.all(
               color: _isHovered
                   ? widget.color
-                  : Colors.white.withValues(alpha: 0.1),
-              width: 2,
+                  : const Color(0xFF1F2F33),
+              width: 1.5,
             ),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                widget.icon,
-                size: 60,
-                color: _isHovered
-                    ? widget.color
-                    : Colors.white.withValues(alpha: 0.2),
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: widget.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: widget.color.withValues(alpha: 0.35)),
+                ),
+                child: Icon(
+                  widget.icon,
+                  size: 24,
+                  color: widget.color,
+                ),
               ),
               const SizedBox(height: 18),
               Text(
                 widget.title,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 2,
                 ),
@@ -234,33 +226,38 @@ class _MapCardState extends State<_MapCard> {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(6),
+                  color: Colors.black.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(3),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: widget.highScore > 0
+                        ? const Color(0xFFBF945C)
+                        : const Color(0xFF223035),
                     width: 1,
                   ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.emoji_events,
-                      size: 12,
-                      color: widget.highScore > 0
-                          ? Colors.amberAccent
-                          : Colors.white.withValues(alpha: 0.3),
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: widget.highScore > 0
+                            ? const Color(0xFFBF945C)
+                            : const Color(0xFF33454B),
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Text(
                       widget.highScore > 0
-                          ? 'BEST: ${widget.highScore}'
-                          : 'BEST: --',
+                          ? 'RECORD: ${widget.highScore}'
+                          : 'RECORD: --',
                       style: TextStyle(
                         color: widget.highScore > 0
-                            ? Colors.white.withValues(alpha: 0.9)
+                            ? const Color(0xFFE5A96A)
                             : Colors.white.withValues(alpha: 0.4),
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1,
                       ),
@@ -274,7 +271,7 @@ class _MapCardState extends State<_MapCard> {
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.6),
-                  fontSize: 12,
+                  fontSize: 11.5,
                   height: 1.4,
                 ),
               ),
@@ -286,15 +283,17 @@ class _MapCardState extends State<_MapCard> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: widget.color,
-                    borderRadius: BorderRadius.circular(8),
+                    color: widget.color.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: widget.color),
                   ),
-                  child: const Text(
-                    'SELECT MAP',
+                  child: Text(
+                    'START',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: widget.color,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
                     ),
                   ),
                 ),

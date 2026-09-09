@@ -51,7 +51,7 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
-                    'RESUME EXPEDITION',
+                    'SAVED GAMES',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.outfit(
                       fontSize: 32,
@@ -75,7 +75,7 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      'BACK TO MISSION CONTROL',
+                      'BACK',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.outfit(
                         fontSize: 12,
@@ -101,42 +101,56 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       width: double.infinity,
-      height: 100,
+      height: 96,
       decoration: BoxDecoration(
+        color: const Color(0xFF10191C),
+        borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
+          color: isEmpty
+              ? const Color(0xFF1F2F33)
+              : const Color(0xFFBF945C).withValues(alpha: 0.6),
+          width: 1.5,
         ),
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
+          borderRadius: BorderRadius.circular(4),
           onTap: isEmpty ? null : () => widget.game.startGame(resume: true, slotIndex: index),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
+                // Status LED
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isEmpty ? const Color(0xFF223035) : const Color(0xFF5AC878),
+                  ),
+                ),
+                const SizedBox(width: 16),
                 // Slot Number
                 Text(
-                  '0${index + 1}',
-                  style: GoogleFonts.outfit(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w200,
+                  'SLOT ${index + 1}',
+                  style: GoogleFonts.shareTechMono(
+                    fontSize: 14,
+                    letterSpacing: 2,
                     color: Colors.white.withValues(alpha: isEmpty ? 0.2 : 0.6),
                   ),
                 ),
-                const SizedBox(width: 32),
+                const SizedBox(width: 24),
                 
                 // Content
                 Expanded(
                   child: isEmpty 
                     ? Text(
-                        'VACANT STORAGE SLOT',
-                        style: GoogleFonts.outfit(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w300,
-                          letterSpacing: 4,
-                          color: Colors.white.withValues(alpha: 0.15),
+                        'EMPTY SLOT',
+                        style: GoogleFonts.shareTechMono(
+                          fontSize: 12,
+                          letterSpacing: 2,
+                          color: Colors.white.withValues(alpha: 0.2),
                         ),
                         overflow: TextOverflow.ellipsis,
                       )
@@ -149,20 +163,20 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
                             child: Text(
                               MapType.values[data['mapType']].name.toUpperCase(),
                               style: GoogleFonts.outfit(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w500,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
                                 letterSpacing: 2,
                                 color: Colors.white,
                               ),
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 3),
                           Text(
-                            'WEEK ${data['week']} • SCORE ${data['score']}',
-                            style: GoogleFonts.outfit(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w400,
-                              color: Colors.blueAccent.withValues(alpha: 0.7),
+                            'WEEK ${data['week']}  ·  SCORE ${data['score']}',
+                            style: GoogleFonts.shareTechMono(
+                              fontSize: 11,
+                              letterSpacing: 1,
+                              color: const Color(0xFFE5A96A),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -170,10 +184,9 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
                           const SizedBox(height: 2),
                           Text(
                             DateFormat('yyyy-MM-dd HH:mm').format(DateTime.fromMillisecondsSinceEpoch(data['saveTime'])),
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.shareTechMono(
                               fontSize: 10,
-                              fontWeight: FontWeight.w300,
-                              color: Colors.white.withValues(alpha: 0.4),
+                              color: Colors.white.withValues(alpha: 0.35),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -184,7 +197,7 @@ class _SaveSlotOverlayState extends State<SaveSlotOverlay> {
                 
                 if (!isEmpty)
                   IconButton(
-                    icon: Icon(Icons.delete_outline, color: Colors.white.withValues(alpha: 0.3)),
+                    icon: Icon(Icons.delete_outline, color: Colors.white.withValues(alpha: 0.3), size: 20),
                     onPressed: () async {
                       await SaveManager.clearSave(slotIndex: index);
                       _loadSlots();

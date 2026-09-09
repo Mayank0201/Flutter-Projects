@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../game/flow_grid_game.dart';
@@ -38,106 +37,102 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
     // Determine map name to display
     final mapName = widget.game.selectedMapType.name.toUpperCase();
 
-    return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-      child: DefaultTextStyle(
-        style: GoogleFonts.outfit(decoration: TextDecoration.none),
-        // Fade the scrim in on the same timeline as the card below, instead
-        // of the backdrop popping in a frame before the card starts
-        // animating — a calmer, single unified entrance.
-        child: TweenAnimationBuilder<double>(
-          duration: const Duration(milliseconds: 400),
-          tween: Tween<double>(begin: 0.0, end: 1.0),
-          curve: Curves.easeOut,
-          builder: (context, scrimValue, child) => Container(
-            color: Colors.black.withValues(
-              alpha: 0.75 * scrimValue.clamp(0.0, 1.0),
-            ),
-            child: child,
+    return DefaultTextStyle(
+      style: GoogleFonts.outfit(decoration: TextDecoration.none),
+      child: TweenAnimationBuilder<double>(
+        duration: const Duration(milliseconds: 300),
+        tween: Tween<double>(begin: 0.0, end: 1.0),
+        curve: Curves.easeOut,
+        builder: (context, scrimValue, child) => Container(
+          color: Colors.black.withValues(
+            alpha: 0.85 * scrimValue.clamp(0.0, 1.0),
           ),
-          child: Center(
-            child: TweenAnimationBuilder<double>(
-              duration: const Duration(milliseconds: 500),
-              tween: Tween<double>(begin: 0.0, end: 1.0),
-              curve: Curves.easeOut,
-              builder: (context, value, child) {
-                return Opacity(
-                  opacity: value.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: 0.8 + (value * 0.2),
-                    child: child,
-                  ),
-                );
-              },
-              child: SingleChildScrollView(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 400),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 24),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF13151A).withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(32),
-                      border: Border.all(
-                        color: const Color(0xFF7C8591).withValues(alpha: 0.3),
-                        width: 1.5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(
-                            0xFF7C8591,
-                          ).withValues(alpha: 0.15),
-                          blurRadius: 30,
-                          spreadRadius: 2,
-                        ),
-                      ],
+          child: child,
+        ),
+        child: Center(
+          child: TweenAnimationBuilder<double>(
+            duration: const Duration(milliseconds: 400),
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            curve: Curves.easeOut,
+            builder: (context, value, child) {
+              return Opacity(
+                opacity: value.clamp(0.0, 1.0),
+                child: Transform.scale(
+                  scale: 0.9 + (value * 0.1),
+                  child: child,
+                ),
+              );
+            },
+            child: SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10191C),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: const Color(0xFFE0736A).withValues(alpha: 0.7),
+                      width: 1.5,
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(31),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Top Accent bar
-                          Container(
-                            height: 6,
-                            width: double.infinity,
-                            color: const Color(0xFF7C8591),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
-                              vertical: 40,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 36,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Status header badge
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF381E22),
+                                borderRadius: BorderRadius.circular(3),
+                                border: Border.all(
+                                  color: const Color(0xFFE0736A),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                'GAME OVER',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: const Color(0xFFE0736A),
+                                  letterSpacing: 2,
+                                ),
+                              ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                // Title / Icon
-                                const Icon(
-                                  Icons.error_outline,
-                                  color: Color(0xFF7C8591),
-                                  size: 48,
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'CITY OVERFLOW',
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 30,
-                                    fontWeight: FontWeight.w300,
-                                    color: const Color(0xFF7C8591),
-                                    letterSpacing: 4,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Grid infrastructure limit exceeded.',
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    color: Colors.white.withValues(alpha: 0.4),
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Container(
+                            const SizedBox(height: 16),
+                            Text(
+                              'GRIDLOCK!',
+                              style: GoogleFonts.outfit(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 3,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'A destination overflowed — the grid couldn\'t keep up.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: Colors.white.withValues(alpha: 0.5),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 10,
                                     vertical: 4,
@@ -249,8 +244,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                 ),
 
                                 const SizedBox(height: 40),
-
-                                // Action Buttons
+                                 // Action Buttons
                                 GestureDetector(
                                   onTap: () {
                                     widget.game.overlays.remove('gameOver');
@@ -262,35 +256,26 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                   child: Container(
                                     width: double.infinity,
                                     padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
+                                      vertical: 14,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(12),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.1,
-                                          ),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ],
+                                      color: const Color(0xFFBF945C),
+                                      borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Center(
                                       child: Text(
-                                        'RETRY SIMULATION',
+                                        'TRY AGAIN',
                                         style: GoogleFonts.outfit(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w700,
-                                          color: Colors.black,
+                                          color: const Color(0xFF10191C),
                                           letterSpacing: 2,
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 10),
                                 GestureDetector(
                                   onTap: () {
                                     widget.game.overlays.remove('gameOver');
@@ -300,15 +285,13 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                   child: Container(
                                     width: double.infinity,
                                     padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
+                                      vertical: 12,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
+                                      color: const Color(0xFF141D20),
+                                      borderRadius: BorderRadius.circular(4),
                                       border: Border.all(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.12,
-                                        ),
+                                        color: const Color(0xFF2E3F44),
                                       ),
                                     ),
                                     child: Center(
@@ -317,9 +300,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                                         style: GoogleFonts.outfit(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
-                                          color: Colors.white.withValues(
-                                            alpha: 0.6,
-                                          ),
+                                          color: Colors.white70,
                                           letterSpacing: 2,
                                         ),
                                       ),
@@ -337,9 +318,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
               ),
             ),
           ),
-        ),
-      ),
-    );
+        );
   }
 
   Widget _buildStatCard(
@@ -349,18 +328,14 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
     bool isHighScore = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
       decoration: BoxDecoration(
-        color: isPrimary
-            ? const Color(0xFF7C8591).withValues(alpha: 0.08)
-            : Colors.white.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF141D20),
+        borderRadius: BorderRadius.circular(4),
         border: Border.all(
           color: isHighScore
-              ? Colors.amber.withValues(alpha: 0.3)
-              : isPrimary
-              ? const Color(0xFF7C8591).withValues(alpha: 0.2)
-              : Colors.white.withValues(alpha: 0.05),
+              ? const Color(0xFFBF945C)
+              : const Color(0xFF1F2F33),
           width: 1,
         ),
       ),
@@ -373,22 +348,20 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
               fontSize: 9,
               fontWeight: FontWeight.w600,
               color: isHighScore
-                  ? Colors.amber.withValues(alpha: 0.7)
-                  : Colors.white.withValues(alpha: 0.3),
+                  ? const Color(0xFFE5A96A)
+                  : Colors.white.withValues(alpha: 0.4),
               letterSpacing: 1.5,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             value,
             textAlign: TextAlign.center,
             style: GoogleFonts.outfit(
-              fontSize: 26,
-              fontWeight: isPrimary ? FontWeight.w700 : FontWeight.w500,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
               color: isHighScore
-                  ? Colors.amber
-                  : isPrimary
-                  ? const Color(0xFF7C8591)
+                  ? const Color(0xFFBF945C)
                   : Colors.white,
             ),
           ),

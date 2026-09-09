@@ -196,8 +196,8 @@ class GameConstants {
   static const int shopBays = 3;
   static const double shopCorridorAlong = 0.16;
   static const double shopBayAlong = -0.22;
-  static const double shopBayFirst = 0.35; // strip offset of bay 0
-  static const double shopBayPitch = 0.40; // each further bay is one pitch on
+  static const double shopBayFirst = 0.36; // strip offset of bay 0
+  static const double shopBayPitch = 0.36; // each further bay is one pitch on
   static const double carPivotRate = 20.0; // rad/s, max heading change
   // Drone disc radius as a fraction of the vehicle size (0.34 tile), so a
   // drone is about 0.4 tile across: clearly readable at phone zoom.

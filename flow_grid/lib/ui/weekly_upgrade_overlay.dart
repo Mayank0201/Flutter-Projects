@@ -91,25 +91,25 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
     }
   }
 
-  String _resultEmoji() {
+  IconData _resultIcon() {
     switch (_gambleResult) {
-      case 'jackpot':  return '🎰';
-      case 'bigwin':   return '🎉';
-      case 'win':      return '✅';
-      case 'bust':     return '💨';
-      case 'disaster': return '💀';
-      default:         return '?';
+      case 'jackpot':  return Icons.bolt;
+      case 'bigwin':   return Icons.memory;
+      case 'win':      return Icons.check_circle_outline;
+      case 'bust':     return Icons.warning_amber_rounded;
+      case 'disaster': return Icons.error_outline;
+      default:         return Icons.help_outline;
     }
   }
 
   String _resultTitle() {
     switch (_gambleResult) {
       case 'jackpot':  return 'JACKPOT!';
-      case 'bigwin':   return 'BIG WIN!';
-      case 'win':      return 'WIN';
-      case 'bust':     return 'BUST';
-      case 'disaster': return 'DISASTER';
-      default:         return '?';
+      case 'bigwin':   return 'GREAT ROLL';
+      case 'win':      return 'DECENT ROLL';
+      case 'bust':     return 'MEH...';
+      case 'disaster': return 'BUSTED!';
+      default:         return 'UNKNOWN';
     }
   }
 
@@ -120,7 +120,7 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
       case 'bigwin':   return '+${b + 15} PATHS  ·  +1 HUB';
       case 'win':      return '+$b PATHS  ·  +1 TRAFFIC LIGHT';
       case 'bust':     return '+5 PATHS ONLY';
-      case 'disaster': return '-10 PATHS  ·  +1 EXPRESS LANE (consolation)';
+      case 'disaster': return '-10 PATHS  ·  +1 EXPRESS LANE (safety net)';
       default:         return '';
     }
   }
@@ -208,12 +208,12 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
         color = const Color(0xFF4DD0E1);
       case 'trafficLights':
         title = '+$base PATHS  +  1 TRAFFIC LIGHT';
-        sub   = 'regulate high-load intersections';
+        sub   = 'manage busy intersections';
         icon  = Icons.traffic;
         color = const Color(0xFF66BB6A);
       case 'smartJunction':
         title = '+$base PATHS  +  1 HUB';
-        sub   = 'auto-balances multi-way crossings';
+        sub   = 'keeps roundabout traffic flowing';
         icon  = Icons.hub;
         color = const Color(0xFFAB47BC);
       case 'expressLane':
@@ -239,9 +239,9 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
+              color: const Color(0xFF141D20),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: color.withValues(alpha: 0.35)),
             ),
             child: Row(
               children: [
@@ -249,7 +249,8 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                   width: 40, height: 40,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: color.withValues(alpha: 0.25)),
                   ),
                   child: Icon(icon, color: color, size: 22),
                 ),
@@ -290,11 +291,11 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF2A1500),
-            borderRadius: BorderRadius.circular(16),
+            color: const Color(0xFF221A0C),
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: Colors.deepOrangeAccent.withValues(alpha: 0.8),
-              width: 2.0,
+              color: Colors.amber.withValues(alpha: 0.8),
+              width: 1.5,
             ),
           ),
           child: Column(
@@ -302,12 +303,12 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
             children: [
               Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.deepOrangeAccent, size: 24),
+                  const Icon(Icons.bolt, color: Colors.amber, size: 24),
                   const SizedBox(width: 10),
                   Text(
-                    'GO ALL IN?',
+                    'FEELING LUCKY?',
                     style: GoogleFonts.outfit(
-                      color: Colors.deepOrangeAccent,
+                      color: Colors.amber,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       decoration: TextDecoration.none,
@@ -317,7 +318,7 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
               ),
               const SizedBox(height: 8),
               Text(
-                'If you choose to gamble, you cannot select the other options. Do you accept?',
+                'Skip the safe pick and gamble for something bigger — or risk losing it all. Ready?',
                 style: GoogleFonts.outfit(
                   color: Colors.white.withValues(alpha: 0.87),
                   fontSize: 12,
@@ -342,16 +343,16 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                   const SizedBox(width: 12),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepOrangeAccent,
-                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.amber,
+                      foregroundColor: Colors.black,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(4),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     ),
                     onPressed: _confirmGamble,
                     child: Text(
-                      'ACCEPT',
+                      'ROLL',
                       style: GoogleFonts.outfit(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -375,14 +376,12 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 18),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF2A1F00), Color(0xFF130F00)],
-            ),
-            borderRadius: BorderRadius.circular(16),
+            color: const Color(0xFF1E170A),
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: _gambleRolling
                   ? Colors.amber.withValues(alpha: 0.9)
-                  : const Color(0xFFFFD700).withValues(alpha: 0.55),
+                  : const Color(0xFFBF945C).withValues(alpha: 0.7),
               width: _gambleRolling ? 2.0 : 1.5,
             ),
           ),
@@ -395,11 +394,11 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                         animation: _spinCtrl,
                         builder: (context2, child2) => Transform.rotate(
                           angle: _spinCtrl.value * 2 * pi,
-                          child: const Icon(Icons.casino, color: Colors.amber, size: 28),
+                          child: const Icon(Icons.bolt, color: Colors.amber, size: 28),
                         ),
                       )
-                    : const Icon(Icons.casino,
-                        color: Color(0xFFFFD700), size: 28),
+                    : const Icon(Icons.bolt,
+                        color: Color(0xFFBF945C), size: 28),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -407,9 +406,9 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _gambleRolling ? 'ROLLING...' : '??? GAMBLE',
+                      _gambleRolling ? 'ROLLING...' : '⚡ LUCKY WARP',
                       style: GoogleFonts.outfit(
-                        color: const Color(0xFFFFD700),
+                        color: const Color(0xFFE5A96A),
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                         decoration: TextDecoration.none,
@@ -417,10 +416,10 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                     ),
                     Text(
                       _gambleRolling
-                          ? 'fate is deciding your future...'
-                          : 'jackpot or disaster — do you dare?',
+                          ? 'let\'s see what you get...'
+                          : 'big reward or total bust — your call',
                       style: GoogleFonts.outfit(
-                        color: Colors.amber.withValues(alpha: 0.5),
+                        color: Colors.amber.withValues(alpha: 0.6),
                         fontSize: 10,
                         decoration: TextDecoration.none,
                       ),
@@ -430,7 +429,7 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
               ),
               if (!_gambleRolling)
                 Icon(Icons.chevron_right_rounded,
-                    color: const Color(0xFFFFD700).withValues(alpha: 0.5),
+                    color: const Color(0xFFBF945C).withValues(alpha: 0.7),
                     size: 18),
             ],
           ),
@@ -442,7 +441,6 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
   // ── Gamble card (post-reveal) ─────────────────────────────────────────────
   Widget _buildRevealCard() {
     final col   = _resultColor();
-    final emoji = _resultEmoji();
     final title = _resultTitle();
     final desc  = _resultDesc();
 
@@ -455,20 +453,24 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 18),
             decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [
-                col.withValues(alpha: 0.18),
-                col.withValues(alpha: 0.05),
-              ]),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: col.withValues(alpha: 0.75), width: 2),
+              color: const Color(0xFF141D20),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: col.withValues(alpha: 0.8), width: 1.5),
             ),
             child: Column(
               children: [
                 Row(
                   children: [
-                    Text(emoji,
-                        style: const TextStyle(
-                            fontSize: 28, decoration: TextDecoration.none)),
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: col.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: col.withValues(alpha: 0.4)),
+                      ),
+                      child: Icon(_resultIcon(), color: col, size: 22),
+                    ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -477,7 +479,7 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                           Text(title,
                               style: GoogleFonts.outfit(
                                   color: col,
-                                  fontSize: 18,
+                                  fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                   decoration: TextDecoration.none)),
                           const SizedBox(height: 2),
@@ -497,11 +499,11 @@ class _WeeklyUpgradeOverlayState extends State<WeeklyUpgradeOverlay>
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   decoration: BoxDecoration(
                     color: col.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(4),
                     border: Border.all(color: col.withValues(alpha: 0.4)),
                   ),
                   child: Text(
-                    'TAP TO COLLECT',
+                    'CLAIM REWARD',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.outfit(
                       color: col,

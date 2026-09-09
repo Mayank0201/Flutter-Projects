@@ -1680,29 +1680,51 @@ class GridRenderer extends PositionComponent
     _drawDiamondChip(canvas, Offset(bx, by), size, color, side);
   }
 
-  /// House glyph: a small chip set on the diagonal with a darker rim and a
-  /// dark drilled centre, so it reads as a component, not a block.
+  /// House glyph: a sleek UFO dome base with a metallic rim, inner dome highlight,
+  /// center beacon, and a launch portal where drones depart.
   void _drawDiamondChip(Canvas canvas, Offset c, double size, Color color, Color rim) {
-    final s = size * 0.74;
-    final rr = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset.zero, width: s, height: s),
-      Radius.circular(s * 0.16),
-    );
+    final r = size * 0.38;
     canvas.save();
     canvas.translate(c.dx, c.dy);
-    canvas.rotate(math.pi / 4);
-    // Shadow still falls straight down on screen: rotate the offset back.
-    final len = s * GameConstants.buildingShadowLength;
-    _drawLongShadowAt(canvas, Path()..addRRect(rr), Offset(len * 0.7071, len * 0.7071));
-    canvas.drawRRect(rr, Paint()..color = color);
-    canvas.drawRRect(
-      rr,
+    final len = r * 2.0 * GameConstants.buildingShadowLength;
+    _drawLongShadowAt(canvas, Path()..addOval(Rect.fromCircle(center: Offset.zero, radius: r)), Offset(0, len));
+
+    // Outer saucer hull
+    canvas.drawCircle(Offset.zero, r, Paint()..color = color);
+    // Metallic / darker outer rim
+    canvas.drawCircle(
+      Offset.zero,
+      r,
       Paint()
         ..color = rim
         ..style = PaintingStyle.stroke
-        ..strokeWidth = s * 0.11,
+        ..strokeWidth = r * 0.22,
     );
-    canvas.drawCircle(Offset.zero, s * 0.13, Paint()..color = _mapBackgroundColor);
+    // Inner dome highlight (subtle elevated dome)
+    final domeRadius = r * 0.62;
+    canvas.drawCircle(
+      Offset(0, -r * 0.08),
+      domeRadius,
+      Paint()..color = Color.lerp(color, Colors.white, 0.28)!,
+    );
+    // Center glowing beacon
+    canvas.drawCircle(
+      Offset(0, -r * 0.08),
+      r * 0.18,
+      Paint()..color = Colors.white.withValues(alpha: 0.9),
+    );
+    // Hangar launch portal (dark slit where drones launch from)
+    final portalW = r * 0.50;
+    final portalH = r * 0.20;
+    final portalRect = Rect.fromCenter(
+      center: Offset(0, r * 0.35),
+      width: portalW,
+      height: portalH,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(portalRect, Radius.circular(portalH * 0.5)),
+      Paint()..color = _mapBackgroundColor,
+    );
     canvas.restore();
   }
 
@@ -1823,22 +1845,26 @@ class GridRenderer extends PositionComponent
         ? GameConstants.getBuildingDarkColor(idx)
         : _bevelShade(color);
 
-    // Two painted parking stalls on the open strip by the driveway; cars
+    // Painted parking stalls on the open strip by the driveway; cars
     // pull into exactly these (CarComponent.stallCenter).
     final stallPaint = Paint()
-      ..color = GameConstants.roadEdgeColor.withValues(alpha: 0.6)
-      ..strokeWidth = cellSize * 0.04
+      ..color = GameConstants.roadEdgeColor.withValues(alpha: 0.65)
+      ..strokeWidth = cellSize * 0.035
       ..strokeCap = StrokeCap.round;
     // Bay markings: one stroke along the entry axis between each pair of
     // bays (CarComponent.stallFor), plus a head line across their deep ends
-    // that the drones nose up to, so the strip reads as a marked-out lot
-    // rather than a few loose ticks.
-    final len = cellSize * 0.42;
+    // that the drones nose up to, so the strip reads as a marked-out lot.
+    // Length is kept inside the paved forecourt so it never touches or cuts
+    // into the UFO landing complex hull.
+    final len = cellSize * 0.28;
     final half = GameConstants.shopBayPitch / 2;
     final deep = GameConstants.shopBayAlong - 0.5 * len / cellSize;
     final shallow = GameConstants.shopBayAlong + 0.5 * len / cellSize;
     Offset lotPt(double along, double strip) => CarComponent.shopPoint(
         gridX, gridY, entry, cellSize, offsetX, offsetY, along, strip);
+
+    canvas.save();
+    canvas.clipRRect(lotRRect.deflate(edgeW * 0.5));
     for (int k = 0; k <= GameConstants.shopBays; k++) {
       final strip = CarComponent.bayStrip(0) - half + k * GameConstants.shopBayPitch;
       canvas.drawLine(lotPt(deep, strip), lotPt(shallow, strip), stallPaint);
@@ -1846,6 +1872,7 @@ class GridRenderer extends PositionComponent
     final headFrom = CarComponent.bayStrip(0) - half;
     final headTo = headFrom + GameConstants.shopBays * GameConstants.shopBayPitch;
     canvas.drawLine(lotPt(deep, headFrom), lotPt(deep, headTo), stallPaint);
+    canvas.restore();
 
     final vertical = entry == Direction.north || entry == Direction.south;
     _drawIcChip(
@@ -1868,9 +1895,9 @@ class GridRenderer extends PositionComponent
     );
   }
 
-  /// Shop glyph: an IC package. Body in the district colour with a darker
-  /// inset line, a dark pin-1 dot, and short copper legs along the two sides
-  /// parallel to the driveway.
+  /// Destination glyph: a UFO Landing Pad complex.
+  /// Circular landing platform in district color with concentric tractor beam rings,
+  /// perimeter docking runway lights, and an emitter core.
   void _drawIcChip(
     Canvas canvas,
     Rect body,
@@ -1879,42 +1906,73 @@ class GridRenderer extends PositionComponent
     bool vertical, {
     bool mature = false,
   }) {
-    final r = Radius.circular(body.width * 0.10);
-    final rr = RRect.fromRectAndRadius(body, r);
-    final legW = body.width * 0.07;
-    final legL = body.width * 0.13;
-    final leg = Paint()..color = GameConstants.roadEdgeColor;
-    // A matured shop is a denser package: six legs a side instead of four.
-    // It is the same silhouette, just visibly busier, which reads at a glance
-    // without another colour or badge on the board.
-    final pins = mature ? 6 : 4;
-    for (int i = 0; i < pins; i++) {
-      final t = (i + 0.5) / pins;
-      if (vertical) {
-        // driveway runs north-south: legs on the east and west sides
-        final y = body.top + body.height * t;
-        canvas.drawRect(Rect.fromLTWH(body.left - legL, y - legW / 2, legL + 2, legW), leg);
-        canvas.drawRect(Rect.fromLTWH(body.right - 2, y - legW / 2, legL + 2, legW), leg);
-      } else {
-        final x = body.left + body.width * t;
-        canvas.drawRect(Rect.fromLTWH(x - legW / 2, body.top - legL, legW, legL + 2), leg);
-        canvas.drawRect(Rect.fromLTWH(x - legW / 2, body.bottom - 2, legW, legL + 2), leg);
-      }
-    }
-    _drawLongShadow(canvas, Path()..addRRect(rr), body.width * GameConstants.buildingShadowLength);
-    canvas.drawRRect(rr, Paint()..color = color);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(body.deflate(body.width * 0.12), Radius.circular(body.width * 0.05)),
+    final radius = body.width * 0.44;
+    final center = body.center;
+    final padPath = Path()..addOval(Rect.fromCircle(center: center, radius: radius));
+
+    // Drop shadow
+    _drawLongShadow(canvas, padPath, body.width * GameConstants.buildingShadowLength);
+
+    // Platform hull base
+    canvas.drawCircle(center, radius, Paint()..color = color);
+
+    // Outer metallic rim border
+    canvas.drawCircle(
+      center,
+      radius,
       Paint()
         ..color = inset
         ..style = PaintingStyle.stroke
-        ..strokeWidth = body.width * 0.035,
+        ..strokeWidth = radius * 0.12,
+    );
+
+    // Concentric tractor beam rings
+    final ring1 = radius * 0.72;
+    final ring2 = radius * 0.45;
+    canvas.drawCircle(
+      center,
+      ring1,
+      Paint()
+        ..color = inset.withValues(alpha: 0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = radius * 0.06,
     );
     canvas.drawCircle(
-      Offset(body.right - body.width * 0.18, body.bottom - body.width * 0.18),
-      body.width * 0.05,
-      Paint()..color = _mapBackgroundColor,
+      center,
+      ring2,
+      Paint()
+        ..color = Color.lerp(color, Colors.white, 0.45)!
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = radius * 0.05,
     );
+
+    // Center tractor emitter core
+    canvas.drawCircle(
+      center,
+      radius * 0.22,
+      Paint()..color = Color.lerp(color, Colors.white, 0.30)!,
+    );
+    canvas.drawCircle(
+      center,
+      radius * 0.10,
+      Paint()..color = Colors.white.withValues(alpha: 0.95),
+    );
+
+    // Perimeter runway / docking beacon lights (replacing rectangular IC pins)
+    // 6 runway lights for normal pads, 8 when mature.
+    final lights = mature ? 8 : 6;
+    final lightDist = radius * 0.84;
+    final lightR = radius * 0.075;
+    final lightPaint = Paint()..color = GameConstants.roadEdgeColor;
+    final lightGlow = Paint()..color = Colors.white.withValues(alpha: 0.9);
+
+    for (int i = 0; i < lights; i++) {
+      final angle = (i * 2 * math.pi) / lights;
+      final lx = center.dx + math.cos(angle) * lightDist;
+      final ly = center.dy + math.sin(angle) * lightDist;
+      canvas.drawCircle(Offset(lx, ly), lightR, lightPaint);
+      canvas.drawCircle(Offset(lx, ly), lightR * 0.45, lightGlow);
+    }
   }
 
   /// LED glyph: a small lit dot with a soft halo, standing on [base]

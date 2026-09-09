@@ -53,7 +53,7 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'SIMULATION ENGINE',
+                  'A MINIMALIST FLOW PUZZLE',
                   style: GoogleFonts.outfit(
                     fontSize: 12, // Reduced slightly
                     fontWeight: FontWeight.w400,
@@ -65,7 +65,7 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                 
                 if (_hasSave) ...[
                   _menuButton(
-                    label: 'RESUME CITY',
+                    label: 'CONTINUE',
                     onPressed: () {
                       widget.game.overlays.remove('mainMenu');
                       widget.game.overlays.add('saveSlot');
@@ -76,7 +76,7 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                 ],
                 
                 _menuButton(
-                  label: _hasSave ? 'NEW EXPEDITION' : 'START SIMULATION',
+                  label: _hasSave ? 'NEW GAME' : 'PLAY',
                   onPressed: () {
                     widget.game.overlays.remove('mainMenu');
                     widget.game.overlays.add('mapSelection');
@@ -85,7 +85,7 @@ class _MainMenuOverlayState extends State<MainMenuOverlay> {
                 ),
                 const SizedBox(height: 16),
                 _menuButton(
-                  label: 'LEARN TO FLOW',
+                  label: 'HOW TO PLAY',
                   onPressed: () {
                     widget.game.overlays.remove('mainMenu');
                     widget.game.overlays.add('tutorial');

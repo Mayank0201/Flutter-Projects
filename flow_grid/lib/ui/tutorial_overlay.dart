@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../game/flow_grid_game.dart';
@@ -27,8 +26,8 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       icon: Icons.add_road,
     ),
     TutorialStep(
-      title: "PATH HIERARCHY",
-      description: "Paths automatically upgrade as they carry more traffic. Local paths become Avenues, and heavily used routes upgrade to Arteries with higher speeds and capacity.",
+      title: "ROAD UPGRADES",
+      description: "Roads automatically upgrade as they carry more traffic. Local roads become Avenues, and busy corridors upgrade to Arteries with higher speeds and capacity.",
       icon: Icons.route,
     ),
     TutorialStep(
@@ -42,8 +41,8 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       icon: Icons.traffic,
     ),
     TutorialStep(
-      title: "SMART JUNCTIONS",
-      description: "Need higher throughput? Place a Hub (a ring junction). Drones flow continuously in a clockwise direction, greatly reducing wait times.",
+      title: "ROUNDABOUTS",
+      description: "Need smoother traffic flow? Place a Roundabout hub. Drones flow in a continuous loop, reducing intersection waiting times.",
       icon: Icons.sync,
     ),
     TutorialStep(
@@ -62,18 +61,18 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       icon: Icons.speed,
     ),
     TutorialStep(
-      title: "TRANSPORT LAYERS",
-      description: "Efficiency is key. Surface paths (Grey) handle local 'last-mile' trips. Highways (Green) and Metros (Purple) are high-speed, high-capacity layers that bypass local intersections. They only connect to the surface at specific interchanges to maintain high velocity.",
+      title: "EXPRESSWAYS",
+      description: "Build elevated express roads that fly over ground traffic. Use them to connect distant districts directly and avoid busy intersections.",
       icon: Icons.account_tree_outlined,
     ),
     TutorialStep(
-      title: "MULTI-LAYER NETWORKS",
-      description: "Manage a complex ecosystem. Use Highways for long-distance drone travel and Metros for massive passenger throughput. Since these layers can overlap, you can build dense networks without creating surface-level gridlock.",
+      title: "LAYERED ROADS",
+      description: "Expressways and tunnels let routes cross each other without colliding. Build multi-layer networks to keep heavy traffic moving smoothly.",
       icon: Icons.layers,
     ),
     TutorialStep(
-      title: "INFRASTRUCTURE OWNERSHIP",
-      description: "Not all paths are equal. Player paths cost resources and can be refunded. System driveways and auto-generated stubs are free but do not provide refunds when deleted.",
+      title: "ROAD REFUNDS",
+      description: "Roads you place cost resources and give them back when removed. Driveways and auto-built connectors are free, but cannot be removed for refunds.",
       icon: Icons.assignment_ind_outlined,
     ),
     TutorialStep(
@@ -108,14 +107,11 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // Glass Background
+          // Background Scrim
           Positioned.fill(
             child: GestureDetector(
-               onTap: _close,
-               child: BackdropFilter(
-                 filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                 child: Container(color: Colors.black.withValues(alpha: 0.6)),
-               ),
+              onTap: _close,
+              child: Container(color: Colors.black.withValues(alpha: 0.85)),
             ),
           ),
           Center(
@@ -124,16 +120,12 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
               child: Container(
                 margin: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E24).withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(32),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      blurRadius: 60,
-                      spreadRadius: 10,
-                    )
-                  ],
+                  color: const Color(0xFF10191C),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: const Color(0xFFBF945C).withValues(alpha: 0.45),
+                    width: 1.5,
+                  ),
                 ),
                 child: Stack(
                   children: [
@@ -150,34 +142,62 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                const SizedBox(height: 12),
+                                // Datasheet Step Badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF182428),
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(
+                                      color: const Color(0xFFBF945C).withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'STEP ${index + 1} OF ${_steps.length}',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: const Color(0xFFE5A96A),
+                                      letterSpacing: 2,
+                                    ),
+                                  ),
+                                ),
                                 const SizedBox(height: 20),
                                 Container(
-                                  padding: const EdgeInsets.all(20),
+                                  width: 52,
+                                  height: 52,
                                   decoration: BoxDecoration(
-                                    color: Colors.blueAccent.withValues(alpha: 0.1),
-                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF182428),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: const Color(0xFFBF945C).withValues(alpha: 0.5),
+                                    ),
                                   ),
-                                  child: Icon(step.icon, color: Colors.blueAccent, size: 56),
+                                  child: Icon(step.icon, color: const Color(0xFFE5A96A), size: 28),
                                 ),
-                                const SizedBox(height: 32),
+                                const SizedBox(height: 24),
                                 Text(
                                   step.title,
                                   textAlign: TextAlign.center,
                                   style: GoogleFonts.outfit(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w600,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
                                     color: Colors.white,
-                                    letterSpacing: 1.2,
+                                    letterSpacing: 2,
                                   ),
                                 ),
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 14),
                                 Text(
                                   step.description,
                                   textAlign: TextAlign.center,
                                   style: GoogleFonts.outfit(
-                                    fontSize: 16,
+                                    fontSize: 14,
                                     height: 1.6,
-                                    color: Colors.white.withValues(alpha: 0.7),
+                                    color: Colors.white.withValues(alpha: 0.65),
                                   ),
                                 ),
                                 const SizedBox(height: 100), // Space for controls
@@ -193,7 +213,7 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                       right: 12,
                       child: IconButton(
                         onPressed: _close,
-                        icon: const Icon(Icons.close, color: Colors.white30, size: 28),
+                        icon: const Icon(Icons.close, color: Colors.white30, size: 22),
                       ),
                     ),
                     // Navigation Overlay (Bottom)
@@ -204,7 +224,7 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Page Indicators
+                          // Page Indicators (LED Array)
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: AnimatedBuilder(
@@ -223,13 +243,17 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                                     return GestureDetector(
                                       onTap: () => _pageController.animateToPage(index, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut),
                                       child: AnimatedContainer(
-                                        duration: const Duration(milliseconds: 300),
-                                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                                        width: isActive ? 24 : 8,
+                                        duration: const Duration(milliseconds: 200),
+                                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                                        width: 8,
                                         height: 8,
                                         decoration: BoxDecoration(
-                                          color: isActive ? Colors.blueAccent : Colors.white24,
-                                          borderRadius: BorderRadius.circular(4),
+                                          color: isActive ? const Color(0xFFBF945C) : const Color(0xFF1F2F33),
+                                          borderRadius: BorderRadius.circular(1.5),
+                                          border: Border.all(
+                                            color: isActive ? const Color(0xFFE5A96A) : const Color(0xFF283B40),
+                                            width: 1,
+                                          ),
                                         ),
                                       ),
                                     );
@@ -238,24 +262,24 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                               },
                             ),
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 20),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               if (_currentStep > 0)
                                 TextButton(
                                   onPressed: () => _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut),
-                                  child: Text("PREVIOUS", style: GoogleFonts.outfit(color: Colors.white30, letterSpacing: 1)),
+                                  child: Text("PREVIOUS", style: GoogleFonts.outfit(color: Colors.white54, letterSpacing: 1, fontSize: 11)),
                                 )
                               else
                                 const SizedBox(width: 80),
                               
                               ElevatedButton(
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blueAccent,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  backgroundColor: const Color(0xFFBF945C),
+                                  foregroundColor: const Color(0xFF10191C),
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                                 ),
                                 onPressed: () {
                                   if (_currentStep < _steps.length - 1) {
@@ -264,8 +288,8 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                                     _close();
                                   }
                                 },
-                                child: Text(_currentStep == _steps.length - 1 ? "FINISH" : "NEXT", 
-                                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, letterSpacing: 1)),
+                                child: Text(_currentStep == _steps.length - 1 ? "GOT IT" : "NEXT", 
+                                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, letterSpacing: 1.5, fontSize: 11)),
                               ),
                             ],
                           ),

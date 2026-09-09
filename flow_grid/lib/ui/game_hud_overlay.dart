@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../game/flow_grid_game.dart';
@@ -49,40 +48,31 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
               child: RepaintBoundary(
                 child: SizedBox(
                   width: g.hudPanelWidth,
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.horizontal(
-                      left: Radius.circular(24),
-                    ),
-                    child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFF14161B,
-                            ).withValues(alpha: 0.85),
-                            borderRadius: const BorderRadius.horizontal(
-                              left: Radius.circular(24),
-                            ),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.08),
-                            ),
-                          ),
-                          child: SingleChildScrollView(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _topSection(),
-                                _previewSection(),
-                                _toolGrid(),
-                                _actionSection(),
-                                _speedSection(),
-                                const SizedBox(height: 12),
-                              ],
-                            ),
-                          ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10191C),
+                        borderRadius: const BorderRadius.horizontal(
+                          left: Radius.circular(6),
+                        ),
+                        border: Border.all(
+                          color: const Color(0xFFBF945C).withValues(alpha: 0.35),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _topSection(),
+                            _previewSection(),
+                            _toolGrid(),
+                            _actionSection(),
+                            _speedSection(),
+                            const SizedBox(height: 12),
+                          ],
                         ),
                       ),
                     ),
@@ -357,7 +347,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         children: [
           _divider(),
           const SizedBox(height: 12),
-          _miniLabel('MISSION'),
+          _miniLabel('GAME'),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -365,7 +355,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                 g.saveGame();
                 ScaffoldMessenger.of(
                   context,
-                ).showSnackBar(const SnackBar(content: Text('State Cached')));
+                ).showSnackBar(const SnackBar(content: Text('Game Saved')));
               }),
               _actionBtn(
                 Icons.menu_outlined,
@@ -509,18 +499,18 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.03),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            color: const Color(0xFF141D20),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFF1F2F33)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: col, size: 16),
-              const SizedBox(height: 4),
+              Icon(icon, color: col, size: 15),
+              const SizedBox(height: 3),
               Text(
                 label,
                 style: GoogleFonts.outfit(
@@ -540,17 +530,18 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
 
   Widget _speedSection() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 12),
       child: Column(
         children: [
           _miniLabel('SPEED'),
           const SizedBox(height: 6),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _speedDot(0.0, Icons.pause, Colors.redAccent),
-              _speedDot(1.0, Icons.play_arrow, Colors.white70),
-              _speedDot(2.0, Icons.fast_forward, Colors.blueAccent),
+              _speedDot(0.0, Icons.pause_rounded, 'PAUSE', const Color(0xFFE0736A)),
+              const SizedBox(width: 4),
+              _speedDot(1.0, Icons.play_arrow_rounded, '1X', const Color(0xFFBF945C)),
+              const SizedBox(width: 4),
+              _speedDot(2.0, Icons.fast_forward_rounded, '2X', const Color(0xFF6FB3BE)),
             ],
           ),
         ],
@@ -565,7 +556,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
       child: Column(
         children: [
-          _miniLabel('VIEWPORT'),
+          _miniLabel('OVERVIEW'),
           const SizedBox(height: 6),
           GestureDetector(
             onTap: () {
@@ -578,12 +569,12 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
               curve: Curves.easeOutCubic,
               height: 36,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(4),
                 color: active
                     ? color.withValues(alpha: 0.15)
-                    : Colors.white.withValues(alpha: 0.03),
+                    : const Color(0xFF141D20),
                 border: Border.all(
-                  color: active ? color : Colors.white.withValues(alpha: 0.08),
+                  color: active ? color : const Color(0xFF1F2F33),
                   width: active ? 1.5 : 1,
                 ),
               ),
@@ -614,38 +605,55 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
     );
   }
 
-  Widget _speedDot(double val, IconData icon, Color col) {
+  Widget _speedDot(double val, IconData icon, String label, Color col) {
     final active = g.timeScale == val;
-    return GestureDetector(
-      onTap: () => setState(() => g.timeScale = val),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: active
-              ? col.withValues(alpha: 0.15)
-              : Colors.white.withValues(alpha: 0.03),
-          border: Border.all(
-            color: active ? col : Colors.white.withValues(alpha: 0.08),
-            width: active ? 1.5 : 1,
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => g.timeScale = val),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          decoration: BoxDecoration(
+            color: active
+                ? col.withValues(alpha: 0.18)
+                : const Color(0xFF141D20),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: active ? col : const Color(0xFF1F2F33),
+              width: active ? 1.5 : 1,
+            ),
           ),
-          boxShadow: active
-              ? [
-                  BoxShadow(
-                    color: col.withValues(alpha: 0.2),
-                    blurRadius: 6,
-                    spreadRadius: 0.5,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: active ? col : const Color(0xFF33454B),
+                    ),
                   ),
-                ]
-              : null,
-        ),
-        child: Icon(
-          icon,
-          color: active ? col : Colors.white.withValues(alpha: 0.4),
-          size: 16,
+                  const SizedBox(width: 3),
+                  Text(
+                    label,
+                    style: GoogleFonts.outfit(
+                      color: active ? col : Colors.white54,
+                      fontSize: 8.5,
+                      fontWeight: active ? FontWeight.bold : FontWeight.w600,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -720,15 +728,19 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
   Widget _badge(int val) {
     final hasStock = val > 0;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
       decoration: BoxDecoration(
-        color: hasStock ? const Color(0xFF27AE60) : const Color(0xFFEB5757),
-        borderRadius: BorderRadius.circular(8),
+        color: hasStock ? const Color(0xFF162E22) : const Color(0xFF331B1E),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(
+          color: hasStock ? const Color(0xFF5AC878) : const Color(0xFFF04A5E),
+          width: 1,
+        ),
       ),
       child: Text(
         '$val',
         style: GoogleFonts.outfit(
-          color: Colors.white,
+          color: hasStock ? const Color(0xFF8CEAB2) : const Color(0xFFFF8B9A),
           fontSize: 8,
           fontWeight: FontWeight.bold,
         ),
@@ -754,29 +766,20 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
         child: GestureDetector(
           onTap: onTapOverride ?? () => setState(() => g.activeTool = tool),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
+            duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               color: isSelected
-                  ? const Color(0xFF2F80ED).withValues(alpha: 0.15)
-                  : Colors.white.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(16),
+                  ? const Color(0xFF262016)
+                  : const Color(0xFF141D20),
+              borderRadius: BorderRadius.circular(5),
               border: Border.all(
                 color: isSelected
-                    ? const Color(0xFF2F80ED)
-                    : Colors.white.withValues(alpha: 0.08),
+                    ? const Color(0xFFBF945C)
+                    : const Color(0xFF1F2F33),
                 width: isSelected ? 1.5 : 1,
               ),
-              boxShadow: isSelected
-                  ? [
-                      BoxShadow(
-                        color: const Color(0xFF2F80ED).withValues(alpha: 0.25),
-                        blurRadius: 10,
-                        spreadRadius: 0.5,
-                      ),
-                    ]
-                  : null,
             ),
             child: Stack(
               clipBehavior: Clip.none,
@@ -790,7 +793,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                       Icon(
                         icon,
                         color: isSelected
-                            ? Colors.white
+                            ? const Color(0xFFE5A96A)
                             : Colors.white.withValues(alpha: 0.5),
                         size: 20,
                       ),
@@ -799,7 +802,7 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
                         label,
                         style: GoogleFonts.outfit(
                           color: isSelected
-                              ? Colors.white
+                              ? const Color(0xFFE5A96A)
                               : Colors.white.withValues(alpha: 0.5),
                           fontSize: 8.5,
                           fontWeight: isSelected
@@ -838,164 +841,157 @@ class _GameHudOverlayState extends State<GameHudOverlay> {
           g.paused = false;
         }),
         child: Container(
-          color: Colors.black54,
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child: Center(
-              child: Container(
-                constraints: const BoxConstraints(
-                  maxWidth: 480,
-                  maxHeight: 520,
+          color: Colors.black.withValues(alpha: 0.8),
+          child: Center(
+            child: Container(
+              constraints: const BoxConstraints(
+                maxWidth: 480,
+                maxHeight: 520,
+              ),
+              margin: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10191C),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: const Color(0xFFBF945C).withValues(alpha: 0.45),
+                  width: 1.5,
                 ),
-                margin: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E24).withValues(alpha: 0.95),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white10),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black45,
-                      blurRadius: 40,
-                      spreadRadius: 10,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                g.selectedMapType.name.toUpperCase(),
-                                style: GoogleFonts.outfit(
-                                  color: Colors.blueAccent,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                              Text(
-                                'MISSION INTELLIGENCE',
-                                style: GoogleFonts.outfit(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            onPressed: () => setState(() {
-                              showInfoPanel = false;
-                              g.paused = false;
-                            }),
-                            icon: const Icon(
-                              Icons.close,
-                              color: Colors.white38,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Column(
+              ),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _infoSectionTitle('CITY STATISTICS'),
-                            _infoStatRow('SCORE', '${g.score}', Colors.amber),
-                            _infoStatRow('WEEK', '${g.week}', Colors.white70),
-                            _infoStatRow(
-                              'SATISFACTION',
-                              '${(g.gridManager!.regionalSatisfaction * 100).toInt()}%',
-                              g.gridManager!.regionalSatisfaction < 0.4
-                                  ? Colors.redAccent
-                                  : Colors.lightGreenAccent,
+                            Text(
+                              'CITY INFRASTRUCTURE',
+                              style: GoogleFonts.outfit(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.5,
+                              ),
                             ),
-                            const SizedBox(height: 16),
-                            _infoSectionTitle('RESOURCES'),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _resourceChip(
-                                  Icons.add_road,
-                                  'PATHS: ${g.gridManager!.roads}',
-                                ),
-                                _resourceChip(
-                                  Icons.terrain,
-                                  'TUNNELS: ${g.gridManager!.tunnels}',
-                                ),
-                                _resourceChip(
-                                  Icons.water,
-                                  'BRIDGES: ${g.gridManager!.bridges}',
-                                ),
-                              ],
+                            Text(
+                              'CITY OVERVIEW',
+                              style: GoogleFonts.outfit(
+                                color: const Color(0xFFE5A96A),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1.2,
+                              ),
                             ),
-                            const SizedBox(height: 24),
-                            _infoSectionTitle('TERRAIN INTEL'),
-                            _mapIntelSection(),
-                            const SizedBox(height: 24),
-                            _infoSectionTitle('GAMEPLAY HANDBOOK'),
-                            _helpItem(
-                              'TRAFFIC SIGNALS',
-                              'Place on intersections to cycle priority. Essential for 4-way junctions.',
-                            ),
-                            _helpItem(
-                              'SMART JUNCTIONS',
-                              'Circular flow prevents stopping. High throughput for busy districts.',
-                            ),
-                            _helpItem(
-                              'EXPRESS LANES',
-                              'High-speed overpasses that bypass surface traffic. Connecting long distances.',
-                            ),
-                            _helpItem(
-                              'CRITICAL DEMAND',
-                              'A timer ring appears around a destination that\'s about to go unmet. Prioritize delivery!',
-                            ),
-                            _helpItem(
-                              'OWNERSHIP',
-                              'Player paths give refunds. System paths (driveways) are free but fixed.',
-                            ),
-                            const SizedBox(height: 24),
                           ],
                         ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white38),
                           onPressed: () => setState(() {
                             showInfoPanel = false;
                             g.paused = false;
                           }),
-                          child: Text(
-                            'RETURN TO MISSION',
-                            style: GoogleFonts.outfit(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _divider(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _infoSectionTitle('CITY STATISTICS'),
+                          _infoStatRow('SCORE', '${g.score}', const Color(0xFFBF945C)),
+                          _infoStatRow('WEEK', '${g.week}', Colors.white70),
+                          _infoStatRow(
+                            'SATISFACTION',
+                            '${((g.gridManager?.regionalSatisfaction ?? 1.0) * 100).toInt()}%',
+                            (g.gridManager?.regionalSatisfaction ?? 1.0) < 0.4
+                                ? Colors.redAccent
+                                : const Color(0xFF5AC878),
+                          ),
+                          const SizedBox(height: 16),
+                          _infoSectionTitle('INVENTORY'),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _resourceChip(
+                                Icons.add_road,
+                                'PATHS: ${g.gridManager?.roads ?? 0}',
+                              ),
+                              _resourceChip(
+                                Icons.terrain,
+                                'TUNNELS: ${g.gridManager?.tunnels ?? 0}',
+                              ),
+                              _resourceChip(
+                                Icons.water,
+                                'BRIDGES: ${g.gridManager?.bridges ?? 0}',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          _infoSectionTitle('MAP INFO'),
+                          _mapIntelSection(),
+                          const SizedBox(height: 24),
+                          _infoSectionTitle('HOW THINGS WORK'),
+                          _helpItem(
+                            'TRAFFIC SIGNALS',
+                            'Controls busy intersections. Switches between directions automatically.',
+                          ),
+                          _helpItem(
+                            'ROUNDABOUTS',
+                            'Keeps traffic moving smoothly in a loop — no stopping required.',
+                          ),
+                          _helpItem(
+                            'EXPRESS LANES',
+                            'Elevated roads that fly over ground traffic for fast direct travel.',
+                          ),
+                          _helpItem(
+                            'CRITICAL DEMAND',
+                            'Warning indicators flash when a destination is getting overwhelmed. Connect routes quickly!',
+                          ),
+                          _helpItem(
+                            'ROAD REFUNDS',
+                            'Roads you build give resources back when removed; auto-generated roads are permanent.',
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFBF945C),
+                          foregroundColor: const Color(0xFF10191C),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        onPressed: () => setState(() {
+                          showInfoPanel = false;
+                          g.paused = false;
+                        }),
+                        child: Text(
+                          'BACK TO GAME',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
                           ),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

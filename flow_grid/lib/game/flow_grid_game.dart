@@ -1092,23 +1092,30 @@ class FlowGridGame extends FlameGame
     return used.length % GameConstants.homeParkingSlots;
   }
 
-  /// Outbound drones currently heading to [dest] (not yet parked there).
+  /// Drones currently committed to [dest]: all outbound drones heading to or
+  /// parked at [dest], plus returning drones that have not yet cleared the lot.
   int _outboundTo(GridPosition dest) {
     int n = 0;
     for (final c in _cars) {
-      if (c.arrived || c.isReturning) continue;
-      if (c.targetDest.x == dest.x && c.targetDest.y == dest.y) n++;
+      if (c.arrived) continue;
+      if (c.targetDest.x == dest.x && c.targetDest.y == dest.y) {
+        if (!c.isReturning || c.isInsideShopLot) {
+          n++;
+        }
+      }
     }
     return n;
   }
 
-  /// Lowest shop stall no outbound car heading to [dest] has claimed.
+  /// Lowest shop stall no car heading to [dest] or still in its lot has claimed.
   int _freeStallSlot(GridPosition dest) {
     final used = <int>{};
     for (final c in _cars) {
-      if (c.arrived || c.isReturning) continue;
+      if (c.arrived) continue;
       if (c.targetDest.x == dest.x && c.targetDest.y == dest.y) {
-        used.add(c.stallSlot);
+        if (!c.isReturning || c.isInsideShopLot) {
+          used.add(c.stallSlot);
+        }
       }
     }
     for (int s = 0; s < GameConstants.shopBays; s++) {
