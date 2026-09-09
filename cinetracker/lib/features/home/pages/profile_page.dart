@@ -11,12 +11,14 @@ import '../../../provider/wishlist_provider.dart';
 import '../../../model/user_profile_model.dart';
 import 'credits_page.dart';
 import 'package:cinetracker/core/utils/content_moderator.dart';
-import 'wishlist_page.dart';
+import 'shows_library_page.dart';
 import 'challenges_page.dart';
-import 'my_reviews_page.dart';
-import '../../../model/review_model.dart';
-import 'review_detail_page.dart';
-import '../widgets/movie_resolver.dart';
+import 'my_show_reviews_page.dart';
+import 'show_details_page.dart';
+import '../../../model/show_model.dart';
+import '../../../service/show_service.dart';
+import '../widgets/poster_image.dart';
+import '../widgets/star_rating.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -27,11 +29,14 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   final SocialService _socialService = SocialService();
+  final ShowService _showService = ShowService();
 
   String _username = 'User';
   String _nickname = 'Movie Enthusiast';
 
   UserProfile? _profile;
+  // null means we could not read them, so the section stays hidden
+  List<MyRating>? _recentRatings;
   bool _isLoading = true;
 
   @override
@@ -81,10 +86,20 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     }
 
+    // ratings come from /ratings now, the same source the ratings page reads
+    List<MyRating>? recentRatings;
+    try {
+      final paged = await _showService.getMyRatings(page: 1, size: 3);
+      recentRatings = paged.items;
+    } catch (_) {
+      // secondary content, so drop the section instead of shouting about it
+    }
+
     if (mounted) {
       setState(() {
         _username = decodedUsername;
         _profile = profile;
+        _recentRatings = recentRatings;
         if (savedNickname != null && savedNickname.isNotEmpty) {
           _nickname = savedNickname;
         }
@@ -327,7 +342,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           scrollDirection: Axis.horizontal,
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           itemCount: _profile!.badges.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (_, _) =>
                               const SizedBox(width: 14),
                           itemBuilder: (context, index) {
                             final badge = _profile!.badges[index];
@@ -370,7 +385,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                         ? Image.network(
                                             badge.iconUrl,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) =>
+                                            errorBuilder: (_, _, _) =>
                                                 _buildBadgeIcon(badge.name),
                                           )
                                         : _buildBadgeIcon(badge.name),
@@ -399,26 +414,26 @@ class _ProfilePageState extends State<ProfilePage> {
                   _buildSectionHeader(context, 'Account'),
                   _buildListTile(
                     context,
-                    icon: Icons.bookmark_rounded,
-                    title: 'Watchlist',
+                    icon: Icons.video_library_rounded,
+                    title: 'My shows',
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const WishlistPage()),
+                      MaterialPageRoute(builder: (_) => const ShowsLibraryPage()),
                     ),
                   ),
                   _buildListTile(
                     context,
                     icon: Icons.rate_review_rounded,
-                    title: 'My Reviews',
+                    title: 'My ratings',
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const MyReviewsPage()),
+                      MaterialPageRoute(builder: (_) => const MyShowReviewsPage()),
                     ),
                   ),
                   _buildListTile(
                     context,
                     icon: Icons.emoji_events_rounded,
-                    title: 'Challenges & Quests',
+                    title: 'Challenges',
                     trailing: _profile != null
                         ? _buildXpBadge('${_profile!.xp} XP', colorScheme)
                         : null,
@@ -431,39 +446,17 @@ class _ProfilePageState extends State<ProfilePage> {
                   const SizedBox(height: 20),
 
                   // ── Recent reviews ─────────────────────────────────
-                  if (_profile != null) ...[
+                  if (_recentRatings != null) ...[
                     _buildSectionHeader(context, 'Recent Reviews'),
-                    if (_profile!.reviews.isNotEmpty) ...[
-                      ...(() {
-                        final commentReviews = _profile!.reviews
-                            .where((r) => r.comment != null && r.comment!.isNotEmpty)
-                            .toList();
-                        if (commentReviews.isNotEmpty) {
-                          return commentReviews.take(5).map<Widget>((r) => _OwnRecentReviewItem(
-                                review: r,
-                                onTap: () async {
-                                  await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => ReviewDetailPage(review: r),
-                                    ),
-                                  );
-                                  _loadProfile();
-                                },
-                              ));
-                        } else {
-                          return <Widget>[
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                              child: Text(
-                                'No reviews with comments yet.',
-                                style: theme.textTheme.bodySmall
-                                    ?.copyWith(color: colorScheme.onSurfaceVariant),
-                              ),
-                            )
-                          ];
-                        }
-                      })(),
+                    if (_recentRatings!.isNotEmpty) ...[
+                      ..._recentRatings!.take(3).map(
+                            (rating) => _RecentRatingItem(
+                              rating: rating,
+                              onTap: rating.canOpen
+                                  ? () => _openRating(rating)
+                                  : null,
+                            ),
+                          ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                         child: SizedBox(
@@ -474,7 +467,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) => const MyReviewsPage(),
+                                  builder: (_) => const MyShowReviewsPage(),
                                 ),
                               );
                             },
@@ -487,7 +480,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                         child: Text(
-                          'No reviews yet.',
+                          'No ratings yet',
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
@@ -517,6 +510,21 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
     );
+  }
+
+  // a season rating still opens the show it belongs to
+  Future<void> _openRating(MyRating rating) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ShowDetailsPage(
+          showTmdbId: rating.showTmdbId!,
+          initialTitle: rating.title,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    _loadProfile();
   }
 
   Widget _buildSectionHeader(BuildContext context, String title) {
@@ -776,182 +784,126 @@ Widget _buildBadgeIcon(String badgeName) {
 
   return Icon(icon, color: color.withValues(alpha: 0.9), size: 30);
 }
+const _ratingMonths = <String>[
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
 
-class _OwnRecentReviewItem extends StatelessWidget {
-  final Review review;
-  final VoidCallback onTap;
+// one row of the recent ratings block. onTap is null when we have no show to open
+class _RecentRatingItem extends StatelessWidget {
+  final MyRating rating;
+  final VoidCallback? onTap;
 
-  const _OwnRecentReviewItem({required this.review, required this.onTap});
+  const _RecentRatingItem({required this.rating, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final comment = rating.comment;
+    final date = _formatDate(rating.createdAt);
 
-    String formattedDate = '';
-    try {
-      final dt = DateTime.parse(review.createdAt);
-      formattedDate =
-          '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
-    } catch (_) {
-      formattedDate = review.createdAt;
-    }
-
-    return MovieResolver(
-      movieId: review.movieId,
-      initialTitle: review.movieTitle,
-      initialPosterUrl: review.moviePosterUrl,
-      initialReleaseYear: review.movieReleaseYear,
-      initialGenre: review.movieGenre,
-      builder: (context, title, posterUrl, releaseYear, genre, isLoading) {
-        final hasPoster = posterUrl != null && posterUrl.isNotEmpty;
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-          child: Container(
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: colorScheme.outline.withValues(alpha: 0.12)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.02),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
+    final content = Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PosterImage(url: rating.posterUrl, width: 60, height: 90, radius: 8),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        rating.title,
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (date != null)
+                      Text(
+                        date,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.6),
+                        ),
+                      ),
+                  ],
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  rating.subtitle,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    StarRating(value: rating.score, size: 15),
+                    const SizedBox(width: 6),
+                    Text(
+                      rating.score.toStringAsFixed(1),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                if (comment != null && comment.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    comment,
+                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onTap,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: hasPoster
-                              ? Image.network(
-                                  posterUrl,
-                                  width: 60,
-                                  height: 90,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => _buildPosterPlaceholder(colorScheme),
-                                )
-                              : _buildPosterPlaceholder(colorScheme),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      title,
-                                      style: theme.textTheme.titleSmall?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (formattedDate.isNotEmpty)
-                                    Text(
-                                      formattedDate,
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: colorScheme.onSurfaceVariant
-                                            .withValues(alpha: 0.6),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  if (releaseYear != null) ...[
-                                    Text(
-                                      '$releaseYear',
-                                      style: theme.textTheme.bodySmall?.copyWith(
-                                        color: colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  if (genre != null && genre.isNotEmpty)
-                                    Expanded(
-                                      child: Text(
-                                        genre,
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: colorScheme.primary,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  ...List.generate(5, (i) {
-                                    final filled = review.rating >= i + 1;
-                                    return Icon(
-                                      filled ? Icons.star_rounded : Icons.star_outline_rounded,
-                                      size: 14,
-                                      color: filled
-                                          ? const Color(0xFFFFB800)
-                                          : colorScheme.onSurface.withValues(alpha: 0.2),
-                                    );
-                                  }),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    review.rating.toStringAsFixed(1),
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color: colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (review.comment != null &&
-                                  review.comment!.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  review.comment!,
-                                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ),
-        );
-      },
+        ],
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+      child: Container(
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border:
+              Border.all(color: colorScheme.outline.withValues(alpha: 0.12)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          // a row we cannot open should not look like a button
+          child: onTap == null
+              ? content
+              : Material(
+                  color: Colors.transparent,
+                  child: InkWell(onTap: onTap, child: content),
+                ),
+        ),
+      ),
     );
   }
 
-  Widget _buildPosterPlaceholder(ColorScheme cs) {
-    return Container(
-      width: 60,
-      height: 90,
-      color: cs.surfaceContainerHighest,
-      child: const Icon(Icons.movie_rounded, size: 24),
-    );
+  // short date, no intl dependency in this project
+  String? _formatDate(DateTime? date) {
+    if (date == null) return null;
+    return '${date.day} ${_ratingMonths[date.month - 1]} ${date.year}';
   }
 }

@@ -192,3 +192,128 @@ class Episode {
     );
   }
 }
+// a show in your own library, with the status you gave it
+class LibraryItem {
+  final int showId;
+  final int tmdbId;
+  final String title;
+  final String? posterPath;
+  final String? genre;
+  final String? tmdbStatus;
+  final String status;
+  final int episodesWatched;
+  final int totalEpisodes;
+  final int percentComplete;
+  final int? nextSeasonNumber;
+  final int? nextEpisodeNumber;
+
+  LibraryItem({
+    required this.showId,
+    required this.tmdbId,
+    required this.title,
+    this.posterPath,
+    this.genre,
+    this.tmdbStatus,
+    required this.status,
+    required this.episodesWatched,
+    required this.totalEpisodes,
+    required this.percentComplete,
+    this.nextSeasonNumber,
+    this.nextEpisodeNumber,
+  });
+
+  String? get posterUrl => (posterPath != null && posterPath!.isNotEmpty)
+      ? "https://image.tmdb.org/t/p/w500$posterPath"
+      : null;
+
+  bool get hasNext => nextSeasonNumber != null && nextEpisodeNumber != null;
+
+  String get nextLabel =>
+      hasNext ? "S$nextSeasonNumber E$nextEpisodeNumber" : "Caught up";
+
+  factory LibraryItem.fromJson(Map<String, dynamic> json) {
+    return LibraryItem(
+      showId: (json["showId"] ?? 0) as int,
+      tmdbId: (json["tmdbId"] ?? 0) as int,
+      title: (json["title"] ?? "Unknown") as String,
+      posterPath: json["posterPath"] as String?,
+      genre: json["genre"] as String?,
+      tmdbStatus: json["tmdbStatus"] as String?,
+      status: (json["status"] ?? "WATCHLIST") as String,
+      episodesWatched: (json["episodesWatched"] ?? 0) as int,
+      totalEpisodes: (json["totalEpisodes"] ?? 0) as int,
+      percentComplete: (json["percentComplete"] ?? 0) as int,
+      nextSeasonNumber: json["nextSeasonNumber"] as int?,
+      nextEpisodeNumber: json["nextEpisodeNumber"] as int?,
+    );
+  }
+}
+
+// one rating you left, on a show, a season or an episode
+class MyRating {
+  final int ratingId;
+  final String targetType;
+  final int targetId;
+  final String title;
+  final String? posterPath;
+  final int? showTmdbId;
+  final int? seasonNumber;
+  final double score;
+  final String? comment;
+  final int helpfulCount;
+  final DateTime? createdAt;
+
+  MyRating({
+    required this.ratingId,
+    required this.targetType,
+    required this.targetId,
+    required this.title,
+    this.posterPath,
+    this.showTmdbId,
+    this.seasonNumber,
+    required this.score,
+    this.comment,
+    this.helpfulCount = 0,
+    this.createdAt,
+  });
+
+  String? get posterUrl => (posterPath != null && posterPath!.isNotEmpty)
+      ? "https://image.tmdb.org/t/p/w500$posterPath"
+      : null;
+
+  // "Season 2" reads better than the show title twice over
+  String get subtitle {
+    if (targetType == "SEASON" && seasonNumber != null) return "Season $seasonNumber";
+    if (targetType == "EPISODE") return "Episode";
+    if (targetType == "MOVIE") return "Film";
+    return "Show";
+  }
+
+  bool get canOpen => showTmdbId != null;
+
+  factory MyRating.fromJson(Map<String, dynamic> json) {
+    return MyRating(
+      ratingId: (json["ratingId"] ?? 0) as int,
+      targetType: (json["targetType"] ?? "SHOW") as String,
+      targetId: (json["targetId"] ?? 0) as int,
+      title: (json["title"] ?? "Unknown") as String,
+      posterPath: json["posterPath"] as String?,
+      showTmdbId: json["showTmdbId"] as int?,
+      seasonNumber: json["seasonNumber"] as int?,
+      score: ((json["score"] ?? 0) as num).toDouble(),
+      comment: json["comment"] as String?,
+      helpfulCount: ((json["helpfulCount"] ?? 0) as num).toInt(),
+      createdAt: json["createdAt"] != null
+          ? DateTime.tryParse(json["createdAt"].toString())
+          : null,
+    );
+  }
+}
+
+// one page of a spring Page<T> response
+class Paged<T> {
+  final List<T> items;
+  final bool last;
+
+  Paged({required this.items, required this.last});
+}

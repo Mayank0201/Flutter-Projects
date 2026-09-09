@@ -3,7 +3,9 @@ import 'package:flutter/widgets.dart';
 import '../core/network/api_service.dart';
 import '../model/user_profile_model.dart';
 
-/// Matches ChallengeService.Challenge record from the backend.
+/// Matches ChallengeService.Challenge from the backend.
+/// Weekly challenges and lifetime quests share this shape: progress counts
+/// toward target, and only quests carry a badge.
 class Challenge {
   final String id;
   final String title;
@@ -11,8 +13,8 @@ class Challenge {
   final int rewardXp;
   final bool isCompleted;
   final bool canClaim;
-  final List<int> requiredMovieIds;
-  final List<int> completedMovieIds;
+  final int progress;
+  final int target;
   final String? badgeName;
 
   const Challenge({
@@ -22,19 +24,18 @@ class Challenge {
     required this.rewardXp,
     required this.isCompleted,
     required this.canClaim,
-    this.requiredMovieIds = const [],
-    this.completedMovieIds = const [],
+    this.progress = 0,
+    this.target = 0,
     this.badgeName,
   });
 
-  factory Challenge.fromJson(Map<String, dynamic> json) {
-    List<int> toIntList(dynamic raw) {
-      if (raw is List) {
-        return raw.map((e) => (e as num).toInt()).toList();
-      }
-      return [];
-    }
+  /// 0..1, safe when the backend sends a target of 0.
+  double get fraction {
+    if (target <= 0) return 0;
+    return (progress / target).clamp(0.0, 1.0);
+  }
 
+  factory Challenge.fromJson(Map<String, dynamic> json) {
     return Challenge(
       id: (json['id'] ?? '').toString(),
       title: (json['title'] ?? '').toString(),
@@ -42,8 +43,8 @@ class Challenge {
       rewardXp: (json['rewardXp'] as num?)?.toInt() ?? 0,
       isCompleted: json['completed'] == true || json['isCompleted'] == true,
       canClaim: json['canClaim'] == true,
-      requiredMovieIds: toIntList(json['requiredMovieIds']),
-      completedMovieIds: toIntList(json['completedMovieIds']),
+      progress: (json['progress'] as num?)?.toInt() ?? 0,
+      target: (json['target'] as num?)?.toInt() ?? 0,
       badgeName: json['badgeName']?.toString(),
     );
   }
@@ -119,6 +120,17 @@ class SocialService {
       return (raw['message'] ?? 'Quest claimed!').toString();
     }
     return 'Quest claimed!';
+  }
+
+  /// POST /social/challenges/{challengeId}/claim
+  Future<String> claimChallenge(String challengeId) async {
+    final response = await _dio.post("/social/challenges/$challengeId/claim");
+    debugPrint("CLAIM CHALLENGE RESPONSE: ${response.data}");
+    final dynamic raw = response.data;
+    if (raw is Map<String, dynamic>) {
+      return (raw['message'] ?? 'Challenge claimed!').toString();
+    }
+    return 'Challenge claimed!';
   }
 
   List<Challenge> _parseChallengeList(dynamic raw) {

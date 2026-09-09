@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../model/show_model.dart';
 import '../../../service/show_service.dart';
+import 'poster_image.dart';
 import '../pages/show_details_page.dart';
 
 // the row of shows you are partway through. the backend already knows the next
@@ -12,6 +13,10 @@ class ContinueWatchingRow extends StatefulWidget {
   @override
   State<ContinueWatchingRow> createState() => ContinueWatchingRowState();
 }
+
+const double _cardWidth = 118;
+const double _posterHeight = 150;
+const double _rowHeight = 208;
 
 class ContinueWatchingRowState extends State<ContinueWatchingRow> {
   final ShowService _service = ShowService();
@@ -42,8 +47,9 @@ class ContinueWatchingRowState extends State<ContinueWatchingRow> {
 
   @override
   Widget build(BuildContext context) {
-    // nothing in progress yet, so do not take up space
-    if (_loading || _shows.isEmpty) return const SizedBox.shrink();
+    // hold the height on first load so the home screen does not jump,
+    // but stay out of the way once we know there is nothing in progress
+    if (!_loading && _shows.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,17 +65,41 @@ class ContinueWatchingRowState extends State<ContinueWatchingRow> {
           ),
         ),
         SizedBox(
-          height: 208,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _shows.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) => _card(_shows[i]),
-          ),
+          height: _rowHeight,
+          child: _loading
+              ? ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: 4,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (_, _) => _skeletonCard(),
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _shows.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (_, i) => _card(_shows[i]),
+                ),
         ),
         const SizedBox(height: 8),
       ],
+    );
+  }
+
+  Widget _skeletonCard() {
+    return const SizedBox(
+      width: _cardWidth,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonBox(width: _cardWidth, height: _posterHeight),
+          SizedBox(height: 7),
+          SkeletonBox(width: 92, height: 11, radius: 4),
+          SizedBox(height: 6),
+          SkeletonBox(width: 56, height: 10, radius: 4),
+        ],
+      ),
     );
   }
 
@@ -77,9 +107,9 @@ class ContinueWatchingRowState extends State<ContinueWatchingRow> {
     final theme = Theme.of(context);
 
     return SizedBox(
-      width: 118,
+      width: _cardWidth,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         onTap: () async {
           await Navigator.push(
             context,
@@ -96,30 +126,29 @@ class ContinueWatchingRowState extends State<ContinueWatchingRow> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: show.posterUrl != null
-                  ? Image.network(
-                      show.posterUrl!,
-                      width: 118,
-                      height: 150,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _fallback(),
-                    )
-                  : _fallback(),
+            PosterImage(
+              url: show.posterUrl,
+              width: _cardWidth,
+              height: _posterHeight,
+              radius: 10,
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 7),
             Text(
               show.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             Text(
               show.nextLabel,
-              style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
@@ -134,11 +163,4 @@ class ContinueWatchingRowState extends State<ContinueWatchingRow> {
       ),
     );
   }
-
-  Widget _fallback() => Container(
-        width: 118,
-        height: 150,
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: const Icon(Icons.tv_rounded),
-      );
 }

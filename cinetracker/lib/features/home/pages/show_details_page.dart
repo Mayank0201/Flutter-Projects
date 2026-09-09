@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../model/show_model.dart';
 import '../../../service/show_service.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/poster_image.dart';
+import '../widgets/star_rating.dart';
 
 // a show with its seasons. expand a season to tick off episodes.
 class ShowDetailsPage extends StatefulWidget {
@@ -36,6 +39,7 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
   // which season to open once the page has loaded, used by "up next"
   int? _expandSeason;
   double? _myRating;
+  String? _myComment;
   double _averageRating = 0;
   int _ratingCount = 0;
 
@@ -61,7 +65,7 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = "Could not load this show. Pull to retry.";
+        _error = "Could not load this show";
         _loading = false;
       });
     }
@@ -88,7 +92,8 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
 
   String _key(int season, int episode) => "$season-$episode";
 
-  Future<void> _toggleEpisode(int seasonNumber, int episodeNumber, bool watched) async {
+  Future<void> _toggleEpisode(
+      int seasonNumber, int episodeNumber, bool watched) async {
     final key = _key(seasonNumber, episodeNumber);
     if (_pendingEpisodes.contains(key)) return;
 
@@ -110,7 +115,7 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _pendingEpisodes.remove(key));
-      _snack("Could not update that episode.");
+      _snack("Could not update that episode");
     }
   }
 
@@ -131,7 +136,7 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _pendingSeasons.remove(seasonNumber));
-      _snack("Could not update that season.");
+      _snack("Could not update that season");
     }
   }
 
@@ -145,7 +150,7 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
       _snack("Moved to ${_statusLabel(status)}");
     } catch (e) {
       if (!mounted) return;
-      _snack("Could not change the status.");
+      _snack("Could not change the status");
     }
   }
 
@@ -157,61 +162,47 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
         _averageRating = summary.average;
         _ratingCount = summary.count;
         _myRating = summary.mine;
+        // pull the review back too, otherwise re-rating overwrites it with nothing
+        _myComment = summary.myComment;
       });
     } catch (e) {
       // a missing rating summary should not stop the page rendering
     }
   }
 
-  Future<void> _rate(double score) async {
+  void _openRatingSheet() {
     final progress = _progress;
     if (progress == null) return;
-    try {
-      await _service.rate(
-        targetType: "SHOW",
-        targetId: progress.showId,
-        score: score,
-      );
-      await _loadRating(progress.showId);
-      if (!mounted) return;
-      _snack("Rated $score");
-    } catch (e) {
-      if (!mounted) return;
-      _snack("Could not save that rating.");
-    }
-  }
 
-  // half stars, same 0.5 steps the backend enforces
-  void _openRatingSheet() {
     showModalBottomSheet<void>(
       context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Rate this show",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 14),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 4,
-                children: List.generate(10, (i) {
-                  final score = (i + 1) * 0.5;
-                  return ChoiceChip(
-                    label: Text(score.toString()),
-                    selected: _myRating == score,
-                    onSelected: (_) {
-                      Navigator.pop(sheetContext);
-                      _rate(score);
-                    },
-                  );
-                }),
-              ),
-            ],
-          ),
-        ),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => RatingSheet(
+        title: progress.title,
+        initialScore: _myRating,
+        initialComment: _myComment,
+        onSubmit: (score, comment) async {
+          await _service.rate(
+            targetType: "SHOW",
+            targetId: progress.showId,
+            score: score,
+            comment: comment,
+          );
+          _myComment = comment;
+          await _loadRating(progress.showId);
+        },
+        onClear: () async {
+          await _service.deleteRating("SHOW", progress.showId);
+          if (!mounted) return;
+          setState(() {
+            _myRating = null;
+            _myComment = null;
+          });
+          await _loadRating(progress.showId);
+        },
       ),
     );
   }
@@ -228,11 +219,15 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(progress?.title ?? widget.initialTitle ?? "Show"),
+        title: Text(
+          progress?.title ?? widget.initialTitle ?? "Show",
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.bookmark_border_rounded),
-            tooltip: "Set status",
+            icon: const Icon(Icons.more_horiz_rounded),
+            tooltip: "Status",
             onSelected: _setStatus,
             itemBuilder: (_) => const [
               PopupMenuItem(value: "WATCHLIST", child: Text("Watchlist")),
@@ -247,22 +242,24 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: _loading
-            ? ListView(children: const [
-                SizedBox(height: 160),
-                Center(child: CircularProgressIndicator()),
-              ])
+            ? ListView(children: const [_DetailsSkeleton()])
             : progress == null
                 ? ListView(
                     children: [
-                      const SizedBox(height: 120),
-                      Center(child: Text(_error ?? "Nothing here.")),
+                      const SizedBox(height: 80),
+                      EmptyState(
+                        icon: Icons.wifi_off_rounded,
+                        title: _error ?? "Nothing here",
+                        actionLabel: "Try again",
+                        onAction: _load,
+                      ),
                     ],
                   )
                 : ListView(
                     padding: const EdgeInsets.only(bottom: 32),
                     children: [
                       _header(progress),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       ...progress.seasons.map((s) => _seasonTile(s)),
                     ],
                   ),
@@ -272,109 +269,123 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
 
   Widget _header(ShowProgress progress) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    final meta = [
+      if (progress.genre != null && progress.genre!.isNotEmpty) progress.genre!,
+      if (progress.tmdbStatus != null) _airingLabel(progress.tmdbStatus!),
+    ].join("  ·  ");
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: progress.posterUrl != null
-                    ? Image.network(
-                        progress.posterUrl!,
-                        width: 110,
-                        height: 165,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _posterFallback(),
-                      )
-                    : _posterFallback(),
+              PosterImage(
+                url: progress.posterUrl,
+                width: 104,
+                height: 156,
+                radius: 12,
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(progress.title,
-                        style: theme.textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    if (progress.genre != null)
-                      Text(progress.genre!, style: theme.textTheme.bodySmall),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        if (progress.status != null) _chip(_statusLabel(progress.status!)),
-                        if (progress.tmdbStatus != null) _chip(progress.tmdbStatus!),
-                      ],
+                    Text(progress.title, style: theme.textTheme.headlineMedium),
+                    if (meta.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(meta, style: theme.textTheme.bodySmall),
+                    ],
+                    const SizedBox(height: 12),
+                    if (progress.status != null)
+                      _statusPill(_statusLabel(progress.status!)),
+                    const SizedBox(height: 12),
+                    // your own score sits with the title, the way it does on a
+                    // shelf. tap the stars to change it
+                    InkWell(
+                      onTap: _openRatingSheet,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            StarRating(value: _myRating ?? 0, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              _myRating == null
+                                  ? "Rate"
+                                  : _myRating!.toStringAsFixed(1),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
+                    if (_ratingCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          "$_averageRating average from $_ratingCount",
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          // overall progress across every season
-          Text(
-            "${progress.episodesWatched} of ${progress.totalEpisodes} episodes",
-            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Text(
+                "${progress.episodesWatched} of ${progress.totalEpisodes} episodes",
+                style: theme.textTheme.labelLarge,
+              ),
+              const Spacer(),
+              Text("${progress.percentComplete}%",
+                  style: theme.textTheme.labelMedium),
+            ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
               value: progress.totalEpisodes == 0
                   ? 0
                   : progress.episodesWatched / progress.totalEpisodes,
-              minHeight: 8,
+              minHeight: 5,
+              backgroundColor: cs.onSurfaceVariant.withValues(alpha: 0.15),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           // what to watch next, straight from the backend pointer
           if (progress.hasNext)
-            FilledButton.icon(
-              onPressed: () => _jumpToNext(progress),
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: Text("Up next  ${progress.nextLabel}"),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _jumpToNext(progress),
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: Text("Up next  ·  ${progress.nextLabel}"),
+              ),
             )
           else if (progress.episodesWatched > 0)
-            const Row(
+            Row(
               children: [
-                Icon(Icons.check_circle_rounded, size: 18),
-                SizedBox(width: 6),
-                Text("All caught up"),
+                Icon(Icons.check_rounded, size: 16, color: cs.primary),
+                const SizedBox(width: 6),
+                Text("All caught up", style: theme.textTheme.bodySmall),
               ],
             ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              OutlinedButton.icon(
-                onPressed: _openRatingSheet,
-                icon: Icon(
-                  _myRating == null ? Icons.star_border_rounded : Icons.star_rounded,
-                  size: 18,
-                ),
-                label: Text(_myRating == null ? "Rate" : "Your rating  $_myRating"),
-              ),
-              const SizedBox(width: 12),
-              if (_ratingCount > 0)
-                Text(
-                  "$_averageRating  ($_ratingCount)",
-                  style: theme.textTheme.bodySmall,
-                ),
-            ],
-          ),
           if (progress.overview.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            Text("Overview", style: theme.textTheme.titleSmall),
-            const SizedBox(height: 4),
+            const SizedBox(height: 20),
             Text(progress.overview, style: theme.textTheme.bodySmall),
           ],
+          const SizedBox(height: 20),
+          Divider(color: cs.outline, height: 1),
         ],
       ),
     );
@@ -388,18 +399,21 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
     setState(() => _expandSeason = season);
   }
 
-  Widget _posterFallback() => Container(
-        width: 110,
-        height: 165,
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: const Icon(Icons.tv_rounded, size: 36),
-      );
-
-  Widget _chip(String label) => Chip(
-        label: Text(label, style: const TextStyle(fontSize: 11)),
-        visualDensity: VisualDensity.compact,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      );
+  Widget _statusPill(String label) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+            fontSize: 11, fontWeight: FontWeight.w600, color: cs.primary),
+      ),
+    );
+  }
 
   String _statusLabel(String status) {
     switch (status) {
@@ -420,125 +434,251 @@ class _ShowDetailsPageState extends State<ShowDetailsPage> {
     }
   }
 
-  // one season. collapsed it is just a progress row, expanding loads the episodes.
+  // tmdb writes these for an api, not for someone reading a screen
+  String _airingLabel(String tmdbStatus) {
+    switch (tmdbStatus) {
+      case "Returning Series":
+        return "Airing";
+      case "In Production":
+      case "Planned":
+        return "Coming soon";
+      case "Ended":
+        return "Ended";
+      case "Canceled":
+        return "Cancelled";
+      default:
+        return tmdbStatus;
+    }
+  }
+
+  // one season. collapsed it is a title and a hairline of progress, expanding
+  // loads the episodes.
   Widget _seasonTile(SeasonProgress season) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final episodes = _episodesBySeason[season.seasonNumber];
     final isLoading = _loadingSeasons.contains(season.seasonNumber);
-
     final shouldOpen = _expandSeason == season.seasonNumber;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        key: ValueKey("season-${season.seasonNumber}-$shouldOpen"),
-        initiallyExpanded: shouldOpen,
-        onExpansionChanged: (open) {
-          if (open) _loadSeason(season.seasonNumber);
-        },
-        title: Text(
-          season.displayName,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      children: [
+        Theme(
+          // the divider ExpansionTile draws fights the one we already have
+          data: theme.copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            key: ValueKey("season-${season.seasonNumber}-$shouldOpen"),
+            initiallyExpanded: shouldOpen,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+            onExpansionChanged: (open) {
+              if (open) {
+                _loadSeason(season.seasonNumber);
+                return;
+              }
+              // forget the up next target when it is closed by hand, so the
+              // key changes again on the next tap
+              if (_expandSeason == season.seasonNumber) {
+                setState(() => _expandSeason = null);
+              }
+            },
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(season.displayName,
+                      style: theme.textTheme.titleMedium),
+                ),
+                if (season.complete)
+                  Icon(Icons.check_circle_rounded, size: 16, color: cs.primary),
+              ],
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 7, right: 4),
+              child: Row(
+                children: [
+                  Text(
+                    "${season.watchedCount}/${season.episodeCount}",
+                    style: theme.textTheme.labelSmall,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: LinearProgressIndicator(
+                        value: season.episodeCount == 0
+                            ? 0
+                            : season.watchedCount / season.episodeCount,
+                        minHeight: 3,
+                        backgroundColor:
+                            cs.onSurfaceVariant.withValues(alpha: 0.15),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             children: [
-              Text("${season.watchedCount} / ${season.episodeCount} episodes"),
-              const SizedBox(height: 5),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(
-                  value: season.episodeCount == 0
-                      ? 0
-                      : season.watchedCount / season.episodeCount,
-                  minHeight: 5,
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  // one call marks the whole season, rather than one request per episode
+                  child: TextButton.icon(
+                    onPressed: _pendingSeasons.contains(season.seasonNumber)
+                        ? null
+                        : () => _toggleSeason(
+                            season.seasonNumber, !season.complete),
+                    icon: Icon(
+                      season.complete
+                          ? Icons.remove_done_rounded
+                          : Icons.done_all_rounded,
+                      size: 17,
+                    ),
+                    label: Text(
+                        season.complete ? "Clear season" : "Mark all watched"),
+                  ),
                 ),
               ),
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else if (episodes == null)
+                const SizedBox.shrink()
+              else if (episodes.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Text("No episodes listed",
+                      style: theme.textTheme.bodySmall),
+                )
+              else
+                ...episodes.map((e) => _episodeTile(season, e)),
+              const SizedBox(height: 8),
             ],
           ),
         ),
-        // only override the chevron when the season is done, otherwise let
-        // ExpansionTile keep its rotating one
-        trailing: season.complete ? const Icon(Icons.check_circle_rounded) : null,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                // one call marks the whole season, rather than one request per episode
-                TextButton.icon(
-                  onPressed: _pendingSeasons.contains(season.seasonNumber)
-                      ? null
-                      : () => _toggleSeason(season.seasonNumber, !season.complete),
-                  icon: Icon(
-                    season.complete
-                        ? Icons.remove_done_rounded
-                        : Icons.done_all_rounded,
-                    size: 18,
-                  ),
-                  label: Text(season.complete ? "Clear season" : "Mark season watched"),
-                ),
-              ],
-            ),
-          ),
-          if (isLoading)
-            const Padding(
-              padding: EdgeInsets.all(20),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (episodes == null)
-            const SizedBox.shrink()
-          else if (episodes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text("No episode details available."),
-            )
-          else
-            ...episodes.map((e) => _episodeTile(season, e)),
-          const SizedBox(height: 6),
-        ],
-      ),
+        Divider(color: cs.outline, height: 1, indent: 16, endIndent: 16),
+      ],
     );
   }
 
   Widget _episodeTile(SeasonProgress season, Episode episode) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final watched = season.watchedEpisodes.contains(episode.episodeNumber);
     final pending = _pendingEpisodes.contains(
       _key(season.seasonNumber, episode.episodeNumber),
     );
 
-    return CheckboxListTile(
-      value: watched,
-      onChanged: pending
+    return InkWell(
+      onTap: pending
           ? null
-          : (value) => _toggleEpisode(
-                season.seasonNumber,
-                episode.episodeNumber,
-                value ?? false,
+          : () => _toggleEpisode(
+              season.seasonNumber, episode.episodeNumber, !watched),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              child: pending
+                  ? const SizedBox(
+                      width: 15,
+                      height: 15,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      watched
+                          ? Icons.check_circle_rounded
+                          : Icons.circle_outlined,
+                      size: 19,
+                      color: watched
+                          ? cs.primary
+                          : cs.onSurfaceVariant.withValues(alpha: 0.4),
+                    ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 26,
+              child: Text(
+                "${episode.episodeNumber}",
+                style: theme.textTheme.labelSmall,
               ),
-      dense: true,
-      controlAffinity: ListTileControlAffinity.leading,
-      title: Text(
-        "${episode.episodeNumber}. ${episode.name}",
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 14,
-          decoration: watched ? TextDecoration.lineThrough : null,
+            ),
+            Expanded(
+              child: Text(
+                episode.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: watched ? cs.onSurfaceVariant : cs.onSurface,
+                ),
+              ),
+            ),
+            if (episode.airDate != null) ...[
+              const SizedBox(width: 8),
+              Text(_shortDate(episode.airDate!),
+                  style: theme.textTheme.labelSmall),
+            ],
+          ],
         ),
       ),
-      subtitle: episode.airDate != null
-          ? Text(episode.airDate!, style: const TextStyle(fontSize: 11))
-          : null,
-      secondary: pending
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : null,
+    );
+  }
+
+  // "2024-03-12" is not something anyone wants to read down a list
+  String _shortDate(String raw) {
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return raw;
+    const months = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+    return "${months[parsed.month - 1]} ${parsed.year}";
+  }
+}
+
+// keeps the page shaped like the real thing while it loads
+class _DetailsSkeleton extends StatelessWidget {
+  const _DetailsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBox(width: 104, height: 156, radius: 12),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBox(width: 170, height: 20, radius: 6),
+                    SizedBox(height: 10),
+                    SkeletonBox(width: 110, height: 12, radius: 6),
+                    SizedBox(height: 18),
+                    SkeletonBox(width: 90, height: 22, radius: 20),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 26),
+          SkeletonBox(width: double.infinity, height: 5, radius: 3),
+          SizedBox(height: 24),
+          SkeletonBox(width: double.infinity, height: 44, radius: 10),
+        ],
+      ),
     );
   }
 }

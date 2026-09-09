@@ -83,6 +83,49 @@ class ShowService {
     );
   }
 
+  // spring sends Page<T>, so pull the rows out and note whether this was the last one
+  static Paged<T> _paged<T>(dynamic body, T Function(Map<String, dynamic>) parse) {
+    final data = _unwrap(body);
+    if (data is! Map) return Paged<T>(items: const [], last: true);
+    final rows = (data["content"] as List?) ?? const [];
+    return Paged<T>(
+      items: rows.map((e) => parse(e as Map<String, dynamic>)).toList(),
+      last: data["last"] != false,
+    );
+  }
+
+  // the user's own shows. status null means every status
+  Future<Paged<LibraryItem>> getLibrary({
+    String? status,
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await dio.get("/shows/library", queryParameters: {
+      if (status != null) "status": status,
+      "page": page,
+      "size": size,
+    });
+    return _paged(response.data, LibraryItem.fromJson);
+  }
+
+  Future<void> removeShow(int showTmdbId) async {
+    await dio.delete("/shows/$showTmdbId");
+  }
+
+  // everything this user has rated
+  Future<Paged<MyRating>> getMyRatings({
+    String? targetType,
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await dio.get("/ratings/me", queryParameters: {
+      if (targetType != null) "targetType": targetType,
+      "page": page,
+      "size": size,
+    });
+    return _paged(response.data, MyRating.fromJson);
+  }
+
   Future<List<ShowProgress>> getContinueWatching({int limit = 10}) async {
     final response = await dio.get(
       "/shows/continue-watching",
@@ -152,8 +195,10 @@ class ShowService {
     await dio.delete("/ratings/$targetType/$targetId");
   }
 
-  // average, count, and this user's own score if they left one
-  Future<({double average, int count, double? mine})> ratingSummary(
+  // average, count, and this user's own score and review if they left one.
+  // the comment comes back so re-rating does not wipe what they wrote
+  Future<({double average, int count, double? mine, String? myComment})>
+      ratingSummary(
     String targetType,
     int targetId,
   ) async {
@@ -163,6 +208,7 @@ class ShowService {
       average: ((data["averageRating"] ?? 0) as num).toDouble(),
       count: ((data["ratingCount"] ?? 0) as num).toInt(),
       mine: (data["myRating"] as num?)?.toDouble(),
+      myComment: data["myComment"] as String?,
     );
   }
 }
