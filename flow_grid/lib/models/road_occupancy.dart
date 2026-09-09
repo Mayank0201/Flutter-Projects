@@ -17,7 +17,27 @@ class RoadOccupancy {
 
   // Intersection Reservation
   InfrastructureAxis? reservedAxis;
+  int consecutiveAxisCars = 0;
   final List<CarComponent> activeIntersectionCars = [];
+
+  bool get isIdle =>
+      cars.isEmpty && activeIntersectionCars.isEmpty && reservedBy == null;
+
+  void resetIfIdle() {
+    if (isIdle) {
+      reservedAxis = null;
+      consecutiveAxisCars = 0;
+    }
+  }
+
+  void setReservedAxis(InfrastructureAxis axis) {
+    if (reservedAxis == axis) {
+      consecutiveAxisCars++;
+    } else {
+      reservedAxis = axis;
+      consecutiveAxisCars = 1;
+    }
+  }
 
   // Waiting queue for this cell/intersection
   final List<CarComponent> waitingCars = [];
@@ -70,5 +90,8 @@ class RoadOccupancy {
     if (reservedByOuter == car) {
       reservedByOuter = null;
     }
+    waitingCars.remove(car);
+    activeIntersectionCars.remove(car);
+    resetIfIdle();
   }
 }

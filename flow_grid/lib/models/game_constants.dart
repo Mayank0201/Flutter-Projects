@@ -158,7 +158,7 @@ class GameConstants {
   static const Color roadColor = Color(0xFF7E5F36);
   static const Color roadFillColor = Color(0xFF7E5F36);
   static const Color roadEdgeColor = Color(0xFFBF945C);
-  static const double roadWidth = 0.50; // fill, fraction of a tile
+  static const double roadWidth = 0.60; // fill, fraction of a tile
   static const double roadEdge = 0.045; // edge line, fraction of a tile
   // Smart-junction ring centreline radius, fraction of a tile. Cars drive
   // this circle and the renderer paints one road-width around it, so 0.5

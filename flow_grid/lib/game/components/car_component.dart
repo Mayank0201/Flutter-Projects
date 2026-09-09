@@ -124,6 +124,7 @@ class CarComponent extends PositionComponent
   double _deadlockTimer = 0.0;
   double _lotWaitTimer = 0.0;
   double _lotGateOverride = 0.0;
+  double _signalWaitTimer = 0.0;
 
   // [FIX] Guards against double-unregistering (or, worse, a stale trip's
   // cleanup never running at all). `removeFromParent()` defers `onRemove()`
@@ -230,6 +231,7 @@ class CarComponent extends PositionComponent
     _deadlockTimer = 0.0;
     _lotWaitTimer = 0.0;
     _lotGateOverride = 0.0;
+    _signalWaitTimer = 0.0;
 
     // [FIX] Moved ahead of _rebuildSmoothPath/_updatePosition below so
     // `size` is already set to this trip's vehicleType before
@@ -340,6 +342,13 @@ class CarComponent extends PositionComponent
     _unregisterOccupancy();
   }
 
+  /// Marks this drone arrived and immediately releases its cell occupancy
+  /// and intersection reservations to prevent ghost-car deadlocks.
+  void _markArrived() {
+    arrived = true;
+    _unregisterOccupancyOnce();
+  }
+
   void _registerOccupancy() {
     // A fresh trip is starting (or resuming) for this car instance, so it is
     // safe (and necessary) to allow cleanup to run again the next time this
@@ -354,7 +363,6 @@ class CarComponent extends PositionComponent
         occupancy.cars.add(this);
         _debugLog("[ROAD_OCCUPY] Car $this entered (${pos.x}, ${pos.y})");
       }
-      occupancy.clearReservation(this);
       occupancy.waitingCars.remove(this);
 
       final cellType = cell.type;
@@ -397,7 +405,7 @@ class CarComponent extends PositionComponent
                   (moveDir == Direction.east || moveDir == Direction.west)
                   ? InfrastructureAxis.horizontal
                   : InfrastructureAxis.vertical;
-              occupancy.reservedAxis = axis;
+              occupancy.setReservedAxis(axis);
             }
           }
         }
@@ -406,29 +414,13 @@ class CarComponent extends PositionComponent
   }
 
   void _unregisterOccupancy() {
-    if (path.isNotEmpty && _currentPathIndex < path.length) {
-      final pos = path[_currentPathIndex];
+    for (final pos in path) {
       final RoadOccupancy occupancy = game.getOrCreateOccupancy(pos);
       occupancy.cars.remove(this);
       occupancy.waitingCars.remove(this);
-      _debugLog("[ROAD_RELEASE] Car $this left (${pos.x}, ${pos.y})");
-
       occupancy.activeIntersectionCars.remove(this);
-      if (occupancy.activeIntersectionCars.isEmpty) {
-        occupancy.reservedAxis = null;
-        _debugLog(
-          "[INTERSECTION_RELEASE] Intersection (${pos.x}, ${pos.y}) released",
-        );
-      }
-
       occupancy.clearReservation(this);
-    }
-
-    if (path.isNotEmpty && _currentPathIndex + 1 < path.length) {
-      final nextPos = path[_currentPathIndex + 1];
-      final RoadOccupancy nextOccupancy = game.getOrCreateOccupancy(nextPos);
-      nextOccupancy.waitingCars.remove(this);
-      nextOccupancy.clearReservation(this);
+      occupancy.resetIfIdle();
     }
   }
 
@@ -438,6 +430,14 @@ class CarComponent extends PositionComponent
     } else {
       return InfrastructureAxis.vertical;
     }
+  }
+
+  Direction? _getStepDirection(GridPosition from, GridPosition to) {
+    if (to.x > from.x) return Direction.east;
+    if (to.x < from.x) return Direction.west;
+    if (to.y > from.y) return Direction.south;
+    if (to.y < from.y) return Direction.north;
+    return null;
   }
 
   // [FIX] Smart-junction (roundabout) ring sub-nodes are the only path
@@ -540,6 +540,7 @@ class CarComponent extends PositionComponent
     _deadlockTimer = 0.0;
     _lotWaitTimer = 0.0;
     _lotGateOverride = 0.0;
+    _signalWaitTimer = 0.0;
 
     priority = 10;
     _rebuildSmoothPath();
@@ -766,7 +767,7 @@ class CarComponent extends PositionComponent
   }
 
   /// Spacing between drones queued for the same shop lot.
-  double get _lotFollowGap => cellSize * 0.3;
+  double get _lotFollowGap => cellSize * 0.55;
 
   /// How many other outbound drones bound for the same shop are nearer to it
   /// than this one, so a queue can space itself out along the trace.
@@ -793,8 +794,9 @@ class CarComponent extends PositionComponent
       if (identical(other, this) || other.arrived) continue;
       if (_ignoredObstacles.contains(other)) continue;
       if (other.targetDest.x != targetDest.x ||
-          other.targetDest.y != targetDest.y)
+          other.targetDest.y != targetDest.y) {
         continue;
+      }
       if (other._movingInsideLot) return other;
     }
     return null;
@@ -896,8 +898,13 @@ class CarComponent extends PositionComponent
   /// multiplier — see the restart-jitter note on [_updatePosition]).
   ///
   /// [dt] is the real frame delta, not the speed-scaled one.
-  (double, bool) _advanceCap(double dt, bool hasReservation, bool exitBlocked) {
-    double cap = double.infinity;
+  (double, bool) _advanceCap(
+    double dt,
+    bool hasReservation,
+    bool exitBlocked, {
+    double obstacleGap = double.infinity,
+  }) {
+    double cap = obstacleGap;
 
     // Don't cross into the next cell without a reservation, and don't block
     // the box.
@@ -907,13 +914,8 @@ class CarComponent extends PositionComponent
           (_currentPathIndex + 1 < segmentStartOffsets.length)
           ? segmentStartOffsets[_currentPathIndex + 1]
           : _totalLength;
-      // Only a boundary genuinely ahead of us can hold us. _currentPathIndex
-      // is recomputed AFTER the move, so it can lag a frame and name a
-      // boundary already behind us; capping on that pinned the drone at zero
-      // speed with nothing in front of it, and since it could not move, the
-      // index never caught up and it stayed stuck.
-      if (cellEndProgress > _distanceTraveled) {
-        cap = cellEndProgress - _distanceTraveled;
+      if (cellEndProgress > _distanceTraveled - cellSize * 0.1) {
+        cap = min(cap, max(0.0, cellEndProgress - _distanceTraveled));
       }
     }
 
@@ -940,7 +942,7 @@ class CarComponent extends PositionComponent
               // Sustained override window: allow drone to push through the gate
             } else if (_lotWaitTimer > 2.0) {
               // Deadlock timeout! Grant sustained override to push through gate
-              _lotGateOverride = 1.2;
+              _lotGateOverride = 2.5;
               _lotWaitTimer = 0.0;
               _ignoredObstacles.add(blocker);
               _debugLog(
@@ -948,9 +950,14 @@ class CarComponent extends PositionComponent
               );
             } else {
               _lotWaitTimer += dt;
-              final gate = base - _lotQueueAhead() * _lotFollowGap;
+              final queuePos = _lotQueueAhead().clamp(0, 5);
+              final gate = base - queuePos * _lotFollowGap;
               final room = gate - _distanceTraveled;
-              if (room < reach) cap = min(cap, max(0.0, room));
+              if (room >= 0 && room < reach) {
+                cap = min(cap, room);
+              } else if (room < 0 && _distanceTraveled >= gate - cellSize * 0.15) {
+                cap = 0.0;
+              }
             }
           } else {
             _lotWaitTimer = 0.0;
@@ -966,7 +973,7 @@ class CarComponent extends PositionComponent
             // Sustained override window: allow drone to pull out of bay
           } else if (_lotWaitTimer > 2.0) {
             // Deadlock timeout! Grant sustained override to pull out of bay
-            _lotGateOverride = 1.2;
+            _lotGateOverride = 2.5;
             _lotWaitTimer = 0.0;
             _ignoredObstacles.add(blocker);
             _debugLog(
@@ -1718,66 +1725,22 @@ class CarComponent extends PositionComponent
   // fits) to whatever margin is actually available at the car's current
   // location for its actual rendered width.
   double _safeLaneOffset() {
-    final raw = cellSize * 0.15 * _currentLaneSign;
+    final raw = cellSize * 0.185 * _currentLaneSign;
     final maxMagnitude = _maxSafeLaneOffsetMagnitude();
     if (raw.abs() <= maxMagnitude) return raw;
     return maxMagnitude * raw.sign;
   }
 
   double _maxSafeLaneOffsetMagnitude() {
-    // [FIX] "No lanes system, cars overlap": this used to derive the car's
-    // half-width from `game.vehicleSpriteAspect`, which is just the source
-    // atlas CELL's height/width (currently a perfectly square 32x32 cell,
-    // i.e. aspect == 1.0). That value is right for render()'s destination-
-    // rect scaling (it has to match the cell the sprite is cut from), but it
-    // is the wrong thing to derive the car's *visual* footprint from: the
-    // "Redesign car sprite" / "Bolder, flat-tone car window" artwork paints
-    // a narrow, tall car body centered in that square cell with transparent
-    // padding on the left/right — the actual non-transparent silhouette
-    // measures ~14x26px within each 32x32 cell (aspect ~1.86), not 32x32
-    // (aspect 1.0). Treating the car as square made this method think every
-    // car was roughly *twice* as wide on screen as it's actually rendered,
-    // which by itself was enough to fully collapse the safe lane-offset
-    // margin to 0 on plain roads: two cars travelling in opposite
-    // directions along the same road tile both default to
-    // `_currentLaneSign == 1.0` (drive-on-the-right, see _updatePosition),
-    // so with the margin at 0 they rendered on the exact same centerline
-    // with no left/right split at all — reported live as "cars overlap, no
-    // lane system". The same wrong-width assumption also nearly zeroed the
-    // roundabout inner/outer split (see the "rendering almost exactly on
-    // top of each other" comment on the following-distance check below).
-    //
-    // This is deliberately a separate number from `game.vehicleSpriteAspect`
-    // (left untouched — still drives render()'s destination-rect scaling
-    // from the full atlas cell). Re-measure it if the sprite art changes
-    // again (it already has, twice, since the flat offset this clamp
-    // replaced was first written).
-    const paintedVehicleAspect = 1.86;
-    final vehicleHalfWidth = (size.x / paintedVehicleAspect) / 2;
+    // Vehicles are circular saucers/drones with radius `size.x * GameConstants.droneRadius`.
+    final vehicleRadius = size.x * GameConstants.droneRadius;
 
-    // [ROAD WIDTH 2026-09-01] Must equal half the actual painted width in
-    // grid_renderer.dart: plain road fill is cellSize*0.64 (_roadPaint et
-    // al.) => half-width 0.32 (was 0.24 when fill was 0.48). The junction
-    // ring's radial half-thickness is 0.38 (was 0.30) — see the
-    // `ringHalfThickness` constant in _drawSmartJunctions, which this MUST
-    // stay equal to or the clamp below will use a stale margin and this
-    // widening's extra room silently goes unused (or, if this ever drifted
-    // wider than the real paint, cars would ride past the painted edge).
-    // The ring is painted exactly one road-width wide, so the same clamp
-    // applies on it as on a plain road.
-    final surfaceHalfWidth = cellSize * GameConstants.roadWidth / 2;
+    // Road half-width including the outer edge stroke
+    final surfaceHalfWidth =
+        cellSize * (GameConstants.roadWidth / 2 + GameConstants.roadEdge);
 
-    // Leave a small buffer so the car doesn't visually ride the curb/outline
-    // stroke drawn just outside the painted fill. Was 0.85, sized against
-    // the (wrong, ~2x too wide) vehicleHalfWidth above, which by itself
-    // already consumed the entire available margin regardless of buffer
-    // size. Now that vehicleHalfWidth reflects the actual painted car, the
-    // painted road surface (cellSize*0.64 wide as of 2026-09-01, was 0.48)
-    // only has room for a real two-lane split if most of that margin is
-    // kept — a smaller buffer is enough to avoid curb-riding while leaving
-    // real room for opposing lanes to visually separate.
-    const marginFactor = 0.97;
-    return max(0.0, surfaceHalfWidth * marginFactor - vehicleHalfWidth);
+    const marginFactor = 0.98;
+    return max(0.0, surfaceHalfWidth * marginFactor - vehicleRadius);
   }
 
   /// Sets [_targetLaneSign] to -1 when this car is about to arrive at a
@@ -1931,8 +1894,7 @@ class CarComponent extends PositionComponent
 
     if (newSubPath == null || newSubPath.isEmpty) {
       // Completely stranded
-      _unregisterOccupancy();
-      arrived = true;
+      _markArrived();
       return;
     }
 
@@ -2025,13 +1987,13 @@ class CarComponent extends PositionComponent
       if (routeId != null) {
         game.emergencyManager.resolveEvent(routeId!);
       }
-      arrived = true;
+      _markArrived();
       return;
     }
 
     final gm = game.gridManager;
     if (gm == null) {
-      arrived = true;
+      _markArrived();
       return;
     }
 
@@ -2063,13 +2025,13 @@ class CarComponent extends PositionComponent
     final homeDriveway =
         gm.buildingDriveways['${spawnHousePos.x},${spawnHousePos.y}'];
     if (destDriveway == null || homeDriveway == null) {
-      arrived = true;
+      _markArrived();
       return;
     }
 
     final returnRoadPath = Pathfinder.findPath(gm, destDriveway, homeDriveway);
     if (returnRoadPath == null || returnRoadPath.isEmpty) {
-      arrived = true;
+      _markArrived();
       return;
     }
 
@@ -2090,7 +2052,7 @@ class CarComponent extends PositionComponent
     if (returnPath.length >= 2) {
       startReturnTrip(returnPath);
     } else {
-      arrived = true;
+      _markArrived();
     }
   }
 
@@ -2191,7 +2153,7 @@ class CarComponent extends PositionComponent
     }
 
     if (arrived || path.length < 2) {
-      arrived = true;
+      _markArrived();
       return;
     }
 
@@ -2226,7 +2188,7 @@ class CarComponent extends PositionComponent
         // Outbound non-bus: deliver, then try to head back home before disappearing.
         if (vehicleType != VehicleType.bus) {
           if (isReturning) {
-            arrived = true;
+            _markArrived();
           } else {
             _onArrivedAtDestination();
           }
@@ -2242,7 +2204,7 @@ class CarComponent extends PositionComponent
         _parkAtCurrentEnd();
         return;
       }
-      arrived = true;
+      _markArrived();
       return;
     }
 
@@ -2283,10 +2245,28 @@ class CarComponent extends PositionComponent
                   Vector2(signalWorldX, signalWorldY),
                 ) <
                 cellSize * cellSize) {
-              _waitingAtSignal = true;
+              _signalWaitTimer += dt;
+              if (_signalWaitTimer > 6.0) {
+                // Escape hatch: signal deadlock / prolonged red phase timeout
+                _waitingAtSignal = false;
+                _signalWaitTimer = 0.0;
+                _debugLog(
+                  "[SIGNAL_ESCAPE] Car $this overrode signal hold at (${nextPos.x}, ${nextPos.y})",
+                );
+              } else {
+                _waitingAtSignal = true;
+              }
+            } else {
+              _signalWaitTimer = 0.0;
             }
+          } else {
+            _signalWaitTimer = 0.0;
           }
+        } else {
+          _signalWaitTimer = 0.0;
         }
+      } else {
+        _signalWaitTimer = 0.0;
       }
 
       _congestionMultiplier = 1.0;
@@ -2343,6 +2323,7 @@ class CarComponent extends PositionComponent
     double targetMultiplier = 1.0;
     bool hasReservation = true;
     bool exitBlocked = false;
+    double minObstacleGap = double.infinity;
 
     if (!onExpressLane && !_waitingAtSignal) {
       final myIdx = _currentPathIndex.clamp(0, path.length - 1);
@@ -2500,6 +2481,7 @@ class CarComponent extends PositionComponent
                         : occupancy.lastEntryTimeOuter;
                     if (gameTime - lastEntry < 0.3) {
                       roundaboutEntryAllowed = false;
+                      _closestObstacle ??= occupancy.cars.firstOrNull ?? occupancy.reservedBy;
                       _debugLog(
                         "[ROUNDABOUT_BLOCKED] Car $this entry spacing cooldown active on (${nextNode.x}, ${nextNode.y})",
                       );
@@ -2539,9 +2521,16 @@ class CarComponent extends PositionComponent
                 // Rule 5: Exit Reservation - ensure exit road has space.
                 bool exitAllowed = true;
                 final sameDirectionCars = occupancy.cars
-                    .where((c) => !_isOncomingCar(c))
-                    .length;
-                if (sameDirectionCars >= occupancy.maxCars &&
+                    .where((c) => !_isOncomingCar(c));
+                final hasStalledCarAhead = sameDirectionCars.any(
+                  (c) =>
+                      c.arrived ||
+                      c._currentSpeedMultiplier < 0.2 ||
+                      c.isWaiting,
+                );
+                final isOverCapacity =
+                    sameDirectionCars.length >= occupancy.maxCars;
+                if ((hasStalledCarAhead || isOverCapacity) &&
                     !occupancy.isReservedBy(this, false)) {
                   exitAllowed = false;
                 }
@@ -2591,13 +2580,25 @@ class CarComponent extends PositionComponent
                 }
 
                 if (_intersectionWaitingTimer > _deadlockBreakTimeout) {
-                  final isRoundaboutEntryOrCirc = (nextNode.side != null);
-                  occupancy.setReservation(this, isRoundaboutEntryOrCirc);
-                  hasReservation = true;
-                  _intersectionWaitingTimer = 0.0;
-                  _debugLog(
-                    "[ROUNDABOUT_DEADLOCK_BREAK] Car $this broke deadlock at (${nextNode.x}, ${nextNode.y})",
+                  final hasMovingCarInside = occupancy.cars.any(
+                    (c) =>
+                        !c.arrived &&
+                        c != this &&
+                        c._currentSpeedMultiplier > 0.05,
                   );
+                  if (!hasMovingCarInside) {
+                    final isRoundaboutEntryOrCirc = (nextNode.side != null);
+                    occupancy.setReservation(this, isRoundaboutEntryOrCirc);
+                    hasReservation = true;
+                    _boxDeadlockOverride = true;
+                    if (_closestObstacle != null) {
+                      _ignoredObstacles.add(_closestObstacle!);
+                    }
+                    _intersectionWaitingTimer = 0.0;
+                    _debugLog(
+                      "[ROUNDABOUT_DEADLOCK_BREAK] Car $this broke deadlock at (${nextNode.x}, ${nextNode.y})",
+                    );
+                  }
                 }
               } else {
                 _intersectionWaitingTimer = 0.0;
@@ -2627,16 +2628,21 @@ class CarComponent extends PositionComponent
                       nodeAfterNext,
                     );
                     final sameDirectionCars = occupancyAfter.cars
-                        .where((c) => !_isOncomingCar(c))
-                        .length;
-                    if (sameDirectionCars >= occupancyAfter.maxCars &&
+                        .where((c) => !_isOncomingCar(c));
+                    final hasStalledCarAhead = sameDirectionCars.any(
+                      (c) =>
+                          c.arrived ||
+                          c._currentSpeedMultiplier < 0.2 ||
+                          c.isWaiting,
+                    );
+                    final isOverCapacity =
+                        sameDirectionCars.length >= occupancyAfter.maxCars;
+                    if ((hasStalledCarAhead || isOverCapacity) &&
                         !occupancyAfter.isReservedBy(this, false) &&
                         !_boxDeadlockOverride) {
                       exitBlocked = true;
                       _closestObstacle = occupancyAfter.reservedBy;
-                      _closestObstacle ??= occupancyAfter.cars
-                          .where((c) => !_isOncomingCar(c))
-                          .firstOrNull;
+                      _closestObstacle ??= sameDirectionCars.firstOrNull;
                     }
                   }
                 }
@@ -2661,6 +2667,12 @@ class CarComponent extends PositionComponent
               final progressToNext = cellEndProgress - _distanceTraveled;
               final stopTriggerDist = cellSize * 0.85;
 
+              // Clean dead cars and idle state up front
+              occupancy.waitingCars.removeWhere((c) => c.arrived);
+              occupancy.cars.removeWhere((c) => c.arrived);
+              occupancy.activeIntersectionCars.removeWhere((c) => c.arrived);
+              occupancy.resetIfIdle();
+
               if (isStandardIntersection && progressToNext < stopTriggerDist) {
                 if (!occupancy.waitingCars.contains(this)) {
                   occupancy.waitingCars.add(this);
@@ -2674,24 +2686,72 @@ class CarComponent extends PositionComponent
                 // Check axis allowance if standard intersection
                 bool axisAllowed = true;
                 if (isStandardIntersection && occupancy.reservedAxis != null) {
-                  final myAxis = _getMoveAxis(myNode, nextNode);
-                  axisAllowed = occupancy.reservedAxis == myAxis;
+                  final hasActiveTraffic = occupancy.activeIntersectionCars
+                          .any((c) => !c.arrived) ||
+                      (occupancy.reservedBy != null &&
+                          !occupancy.reservedBy!.arrived);
+                  if (!hasActiveTraffic) {
+                    occupancy.resetIfIdle();
+                    axisAllowed = true;
+                  } else {
+                    final myAxis = _getMoveAxis(myNode, nextNode);
+                    if (occupancy.reservedAxis == myAxis) {
+                      bool hasCrossAxisWaiting = false;
+                      for (final c in occupancy.waitingCars) {
+                        if (c == this || c.arrived) continue;
+                        if (c._currentPathIndex + 1 < c.path.length &&
+                            c.path[c._currentPathIndex + 1] == nextNode) {
+                          final cCellEnd =
+                              (c._currentPathIndex + 1 <
+                                      c.segmentStartOffsets.length)
+                                  ? c.segmentStartOffsets[c._currentPathIndex +
+                                      1]
+                                  : c._totalLength;
+                          final cDistToLine = cCellEnd - c._distanceTraveled;
+                          if (cDistToLine < cellSize * 0.45) {
+                            final cAxis = _getMoveAxis(
+                              c.path[c._currentPathIndex],
+                              c.path[c._currentPathIndex + 1],
+                            );
+                            if (cAxis != myAxis) {
+                              hasCrossAxisWaiting = true;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      if (hasCrossAxisWaiting &&
+                          occupancy.consecutiveAxisCars >= 2) {
+                        axisAllowed = false;
+                      }
+                    } else {
+                      axisAllowed = false;
+                    }
+                  }
                 }
 
                 // Check priority rules if standard intersection
                 bool hasPriority = true;
                 if (isStandardIntersection) {
-                  // [PERF] Was a .where().toList() plus two .any() passes,
-                  // allocating a list and three closures per frame per car
-                  // waiting at an intersection. One pass, no allocations.
                   bool hasOutboundCompetitor = false;
                   bool hasReturningCompetitor = false;
                   for (final c in occupancy.waitingCars) {
-                    if (c == this) continue;
-                    if (c.isReturning) {
-                      hasReturningCompetitor = true;
-                    } else {
-                      hasOutboundCompetitor = true;
+                    if (c == this || c.arrived) continue;
+                    if (c._currentPathIndex + 1 < c.path.length &&
+                        c.path[c._currentPathIndex + 1] == nextNode) {
+                      final cCellEnd =
+                          (c._currentPathIndex + 1 <
+                                  c.segmentStartOffsets.length)
+                              ? c.segmentStartOffsets[c._currentPathIndex + 1]
+                              : c._totalLength;
+                      final cDistToLine = cCellEnd - c._distanceTraveled;
+                      if (cDistToLine < cellSize * 0.45) {
+                        if (c.isReturning) {
+                          hasReturningCompetitor = true;
+                        } else {
+                          hasOutboundCompetitor = true;
+                        }
+                      }
                     }
                   }
                   if (hasOutboundCompetitor || hasReturningCompetitor) {
@@ -2709,13 +2769,76 @@ class CarComponent extends PositionComponent
                   }
                 }
 
-                bool canReserve = !occupancy.isReservedBySameLane(this, false);
+                bool intersectionBusy = false;
+                if (isStandardIntersection && occupancy.cars.isNotEmpty) {
+                  final anyStalled = occupancy.cars.any(
+                    (c) =>
+                        c.arrived ||
+                        c._currentSpeedMultiplier < 0.1 ||
+                        c.isWaiting,
+                  );
+                  if (anyStalled) {
+                    intersectionBusy = true;
+                  } else {
+                    final insideCar = occupancy.cars.first;
+                    final myMoveDir = _getStepDirection(myNode, nextNode);
+                    final myNextDir = (myIdx + 2 < path.length)
+                        ? _getStepDirection(nextNode, path[myIdx + 2])
+                        : myMoveDir;
+                    final isMyMoveStraight = myMoveDir == myNextDir;
+
+                    final insideIdx = insideCar._currentPathIndex.clamp(
+                      0,
+                      insideCar.path.length - 1,
+                    );
+                    final insideMoveDir =
+                        (insideIdx + 1 < insideCar.path.length)
+                            ? _getStepDirection(
+                                insideCar.path[insideIdx],
+                                insideCar.path[insideIdx + 1],
+                              )
+                            : null;
+                    final insideNextDir =
+                        (insideIdx + 2 < insideCar.path.length)
+                            ? _getStepDirection(
+                                insideCar.path[insideIdx + 1],
+                                insideCar.path[insideIdx + 2],
+                              )
+                            : insideMoveDir;
+                    final isInsideStraight = insideMoveDir == insideNextDir;
+
+                    final isSameDirection = myMoveDir == insideMoveDir;
+                    final isSamePathPlatoon =
+                        isSameDirection && (myNextDir == insideNextDir);
+                    final isOpposingStraight =
+                        insideCar._isOncomingCar(this) &&
+                        isInsideStraight &&
+                        isMyMoveStraight;
+
+                    if (!isSamePathPlatoon && !isOpposingStraight) {
+                      intersectionBusy = true;
+                    }
+                  }
+                }
+
+                final myAxis = _getMoveAxis(myNode, nextNode);
+                final sameAxisPlatoon = isStandardIntersection &&
+                    occupancy.reservedAxis == myAxis &&
+                    !intersectionBusy;
+
+                bool canReserve =
+                    sameAxisPlatoon ||
+                    (!intersectionBusy &&
+                        !occupancy.isReservedBySameLane(this, false));
 
                 if (axisAllowed &&
                     hasPriority &&
                     canReserve &&
                     occupancy.cars.length < occupancy.maxCars) {
-                  occupancy.setReservation(this, false);
+                  if (occupancy.reservedBy == null ||
+                      occupancy.reservedBy == this) {
+                    occupancy.setReservation(this, false);
+                  }
                   hasReservation = true;
                   _closestObstacle = null;
                   _debugLog(
@@ -2723,7 +2846,7 @@ class CarComponent extends PositionComponent
                   );
 
                   if (isStandardIntersection) {
-                    occupancy.reservedAxis = _getMoveAxis(myNode, nextNode);
+                    occupancy.setReservedAxis(myAxis);
                     _debugLog(
                       "[INTERSECTION_RESERVED] Intersection (${nextNode.x}, ${nextNode.y}) reserved for axis ${occupancy.reservedAxis}",
                     );
@@ -2745,12 +2868,6 @@ class CarComponent extends PositionComponent
                       cell.connectionType == ConnectionNodeType.intersection ||
                       cell.type == CellType.trafficLight ||
                       cell.type == CellType.smartJunction;
-                  // Previously gated on `!hasReservation` alone, so a car that
-                  // already holds its own reservation but is purely
-                  // exitBlocked (downstream cell at capacity) never
-                  // accumulated wait time and had no timeout path at all —
-                  // it could sit here forever if that downstream cell never
-                  // freed up. Now the timer runs for either stalled reason.
                   if (isJunctionOrIntersection &&
                       (!hasReservation || exitBlocked)) {
                     final oldTime = _intersectionWaitingTimer;
@@ -2765,29 +2882,29 @@ class CarComponent extends PositionComponent
                     }
 
                     if (_intersectionWaitingTimer > _deadlockBreakTimeout) {
-                      if (!hasReservation) {
-                        occupancy.setReservation(this, nextNode.side != null);
-                        if (cell.connectionType ==
-                                ConnectionNodeType.intersection ||
-                            cell.type == CellType.trafficLight) {
-                          occupancy.reservedAxis = _getMoveAxis(
-                            myNode,
-                            nextNode,
-                          );
+                      if (occupancy.cars.isEmpty) {
+                        if (!hasReservation) {
+                          occupancy.setReservation(this, nextNode.side != null);
+                          if (cell.connectionType ==
+                                  ConnectionNodeType.intersection ||
+                              cell.type == CellType.trafficLight) {
+                            final axis = _getMoveAxis(
+                              myNode,
+                              nextNode,
+                            );
+                            occupancy.setReservedAxis(axis);
+                          }
                         }
-                      }
-                      if (exitBlocked) {
-                        // Let this car through despite the downstream cell
-                        // being nominally "full" — cleared once it advances.
+                        hasReservation = true;
                         _boxDeadlockOverride = true;
                         if (_closestObstacle != null) {
                           _ignoredObstacles.add(_closestObstacle!);
                         }
+                        _intersectionWaitingTimer = 0.0;
+                        _debugLog(
+                          "[DEADLOCK_BREAK] Car $this broke deadlock at (${nextNode.x}, ${nextNode.y})",
+                        );
                       }
-                      _intersectionWaitingTimer = 0.0;
-                      _debugLog(
-                        "[DEADLOCK_BREAK] Car $this broke deadlock at (${nextNode.x}, ${nextNode.y})",
-                      );
                     }
                   }
                 }
@@ -2805,13 +2922,9 @@ class CarComponent extends PositionComponent
 
       final List<GridPosition> searchNodes = _searchNodesScratch..clear();
       searchNodes.add(myNode);
-      if (myIdx + 1 < path.length) {
-        searchNodes.add(path[myIdx + 1]);
-        // Roundabout lookahead optimization: if inside a roundabout, look ahead 2 nodes
-        // to detect vehicles early and completely eliminate overlaps at high density.
-        if (myNode.side != null && myIdx + 2 < path.length) {
-          searchNodes.add(path[myIdx + 2]);
-        }
+      final lookaheadLimit = min(path.length, myIdx + 4);
+      for (int i = myIdx + 1; i < lookaheadLimit; i++) {
+        searchNodes.add(path[i]);
       }
 
       final Set<GridPosition> queried = _queriedScratch..clear();
@@ -2843,6 +2956,8 @@ class CarComponent extends PositionComponent
       final myFwdX = _headingX;
       final myFwdY = _headingY;
 
+      minObstacleGap = double.infinity;
+
       for (final other in potentialObstacles) {
         if (identical(other, this) || other.onExpressLane || other.arrived) {
           continue;
@@ -2851,23 +2966,35 @@ class CarComponent extends PositionComponent
         // that is merely held (lot gate) or dwelling at a bus stop is still
         // standing on the trace and must still block.
         if (other._isParkedOffTrace) continue;
-        if (_ignoredObstacles.contains(other)) continue;
+        if (_isOncomingCar(other)) {
+          // Head-on traffic stays in its own lane on straight roads. In tight
+          // curves, U-dips, or narrow corners, check if the oncoming car is
+          // physically close to prevent visual overlap/clipping.
+          final toOtherX = other.position.x - myPos.x;
+          final toOtherY = other.position.y - myPos.y;
+          final distSq = toOtherX * toOtherX + toOtherY * toOtherY;
+          final myRadius = size.x * GameConstants.droneRadius;
+          final otherRadius = other.size.x * GameConstants.droneRadius;
+          final minPassClearance = myRadius + otherRadius + 1.5;
 
-        // Oncoming check: if the other car is moving in the opposite direction along our path, ignore it
-        bool isOncoming = false;
-        if (other._currentPathIndex + 1 < other.path.length) {
-          final otherNext = other.path[other._currentPathIndex + 1];
-          for (int i = 0; i <= _currentPathIndex; i++) {
-            final p = path[i];
-            if (p.x == otherNext.x &&
-                p.y == otherNext.y &&
-                p.side == otherNext.side) {
-              isOncoming = true;
-              break;
+          if (distSq < minPassClearance * minPassClearance) {
+            final dist = sqrt(distSq);
+            final ahead = toOtherX * myFwdX + toOtherY * myFwdY;
+            if (ahead > 0) {
+              // Yield deterministically so exactly one car pauses while the other clears the curve
+              final shouldYield = hashCode < other.hashCode;
+              if (shouldYield) {
+                final gap = max(0.0, dist - minPassClearance);
+                if (gap < minObstacleGap) {
+                  minObstacleGap = gap;
+                }
+                targetMultiplier = min(targetMultiplier, 0.0);
+                _closestObstacle = other;
+              }
             }
           }
+          continue;
         }
-        if (isOncoming) continue;
 
         final otherIdx = other._currentPathIndex.clamp(
           0,
@@ -2912,7 +3039,8 @@ class CarComponent extends PositionComponent
 
         // Head-on traffic is separated by the lane offset, never by braking.
         other._refreshHeading();
-        if (myFwdX * other._headingX + myFwdY * other._headingY < -0.5) {
+        final dot = myFwdX * other._headingX + myFwdY * other._headingY;
+        if (dot < -0.5) {
           continue;
         }
 
@@ -2924,24 +3052,44 @@ class CarComponent extends PositionComponent
 
         bool isAhead;
         if (sameCell) {
-          // [FIX] Queueing: this used to compare `_distanceTraveled`, which
-          // is arc length along each drone's OWN path. Two drones that
-          // started at different houses have unrelated arc lengths, so on a
-          // shared tile — exactly what happens where routes converge on a
-          // shop driveway — the comparison was meaningless and the real
-          // leader was regularly classified as "behind", skipped, and driven
-          // through. Project onto my heading instead, which is comparable
-          // between any two drones. The epsilon band plus the deterministic
-          // hashCode tie-break guarantees that if two drones do end up
-          // coincident, exactly one of them yields instead of both
-          // considering the other behind and neither braking.
-          final eps = cellSize * 0.02;
-          isAhead = ahead > eps || (ahead > -eps && other.hashCode > hashCode);
+          final myNext = (_currentPathIndex + 1 < path.length)
+              ? path[_currentPathIndex + 1]
+              : null;
+          final otherNext = (otherIdx + 1 < other.path.length)
+              ? other.path[otherIdx + 1]
+              : null;
+
+          if (myNext != null &&
+              otherNext != null &&
+              myNext.x == otherNext.x &&
+              myNext.y == otherNext.y &&
+              myNext.side == otherNext.side) {
+            // Both cars are exiting to the exact same cell (same path / following).
+            // The one further along the path towards the next cell is ahead.
+            final myDistToNext =
+                _currentPathIndex + 1 < segmentStartOffsets.length
+                ? segmentStartOffsets[_currentPathIndex + 1] - _distanceTraveled
+                : _totalLength - _distanceTraveled;
+            final otherDistToNext =
+                otherIdx + 1 < other.segmentStartOffsets.length
+                ? other.segmentStartOffsets[otherIdx + 1] -
+                    other._distanceTraveled
+                : other._totalLength - other._distanceTraveled;
+            isAhead = otherDistToNext < myDistToNext;
+          } else if (dot.abs() <= 0.5) {
+            // Perpendicular crossing in the same cell
+            if (ahead > cellSize * 0.1) {
+              isAhead = true;
+            } else if (ahead < -cellSize * 0.1) {
+              isAhead = false;
+            } else {
+              isAhead = other.hashCode > hashCode;
+            }
+          } else {
+            final eps = cellSize * 0.02;
+            isAhead = ahead > eps || (ahead > -eps && other.hashCode > hashCode);
+          }
         } else {
-          // A leader that is on a cell ahead of me but geometrically a touch
-          // to the side or behind (mid-corner, or offset into the other
-          // lane) still has to be braked for, so allow a small negative
-          // projection here rather than the old hard `<= 0` rejection.
           isAhead = _isCellAhead(otherNode) && ahead > -cellSize * 0.35;
         }
 
@@ -2950,28 +3098,40 @@ class CarComponent extends PositionComponent
         final distSq = myPos.distanceToSquared(other.position);
         final dist = sqrt(distSq);
 
-        // Roundabout following distances were tight enough (0.28/0.48 cell) that
-        // once 3+ cars backed up waiting to exit a congested roundabout, they'd
-        // render almost exactly on top of each other — there are only 2 discrete
-        // lane positions (inner/outer), so anything beyond "car right in front of
-        // you" has no further room to visually separate. Widened both bands so a
-        // queue actually reads as a queue instead of a single overlapping blob.
-        final safeDist = bothInRoundabout
+        final isIgnored = _ignoredObstacles.contains(other);
+        final baseSafeDist = bothInRoundabout
             ? (isRoundaboutInner ? cellSize * 0.42 : cellSize * 0.55)
             : cellSize * 0.7;
+        final safeDist = isIgnored ? cellSize * 0.40 : baseSafeDist;
         final slowdownStartDist =
             safeDist +
             (bothInRoundabout
                 ? (isRoundaboutInner ? cellSize * 0.15 : cellSize * 0.20)
-                : cellSize * 0.3);
+                : (isIgnored ? cellSize * 0.15 : cellSize * 0.3));
 
-        if (dist < slowdownStartDist) {
-          final mult = ((dist - safeDist) / (slowdownStartDist - safeDist))
-              .clamp(0.0, 1.0);
+        final minBumperDist = bothInRoundabout
+            ? cellSize * 0.38
+            : (isIgnored ? cellSize * 0.38 : cellSize * 0.45);
+        final gap = max(0.0, dist - minBumperDist);
+        if (gap < minObstacleGap) {
+          minObstacleGap = gap;
+        }
+
+        if (dist <= minBumperDist) {
+          targetMultiplier = 0.0;
+          _closestObstacle = other;
+        } else if (dist < slowdownStartDist) {
+          double mult;
+          if (dist <= safeDist) {
+            mult = isIgnored ? 0.15 : 0.0;
+          } else {
+            mult = ((dist - safeDist) / (slowdownStartDist - safeDist))
+                .clamp(0.0, 1.0);
+          }
           // If the leader is actively moving, smoothly pace behind them rather than
           // slamming to a dead stop in place, preventing open-road stop-and-go stutter.
           final smoothedMult =
-              (other._currentSpeedMultiplier > 0.15 && dist > safeDist * 0.6)
+              (other._currentSpeedMultiplier > 0.15 && dist > safeDist * 0.65)
               ? max(mult, other._currentSpeedMultiplier * 0.6)
               : mult;
           if (smoothedMult < targetMultiplier) {
@@ -2980,10 +3140,127 @@ class CarComponent extends PositionComponent
           }
         }
       }
+
+      // --- Universal 2D Physical Collision Guard ---
+      // Regardless of grid occupancy maps, path lookaheads, or junction states,
+      // no two drones may ever penetrate each other in 2D world space.
+      final myRadius = size.x * GameConstants.droneRadius;
+      final guardRadiusSq = (cellSize * 0.95) * (cellSize * 0.95);
+
+      for (final other in game.cars) {
+        if (identical(other, this) ||
+            other.arrived ||
+            other._isParkedOffTrace ||
+            _ignoredObstacles.contains(other)) {
+          continue;
+        }
+        final dx = other.position.x - myPos.x;
+        final dy = other.position.y - myPos.y;
+        final distSq = dx * dx + dy * dy;
+        if (distSq > guardRadiusSq) continue;
+
+        final otherRadius = other.size.x * GameConstants.droneRadius;
+        final dot = myFwdX * other._headingX + myFwdY * other._headingY;
+        final isOncoming = dot < -0.3 || _isOncomingCar(other);
+
+        if (isOncoming) {
+          // Oncoming cars stay in their respective right-hand lanes.
+          // Only guard against collision if they are encroaching on each other in curves.
+          final passClearance = myRadius + otherRadius + 1.5;
+          if (distSq < passClearance * passClearance) {
+            final ahead = dx * myFwdX + dy * myFwdY;
+            if (ahead > 0) {
+              final shouldYield = hashCode < other.hashCode;
+              if (shouldYield) {
+                final dist = sqrt(distSq);
+                final gap = max(0.0, dist - passClearance);
+                if (gap < minObstacleGap) minObstacleGap = gap;
+                targetMultiplier = 0.0;
+                _closestObstacle = other;
+              }
+            }
+          }
+          continue;
+        }
+
+        // Check if both cars are in roundabout and on different lanes
+        final otherIdx =
+            other._currentPathIndex.clamp(0, other.path.length - 1);
+        final otherNode = other.path[otherIdx];
+        final myNextNode = myIdx + 1 < path.length ? path[myIdx + 1] : null;
+        final otherNextNode = otherIdx + 1 < other.path.length
+            ? other.path[otherIdx + 1]
+            : null;
+        final myInOrNearRoundabout =
+            myNode.side != null ||
+            (myNextNode != null && myNextNode.side != null);
+        final otherInOrNearRoundabout =
+            otherNode.side != null ||
+            (otherNextNode != null && otherNextNode.side != null);
+        final myIsExiting =
+            myNode.side != null &&
+            (myNextNode == null || myNextNode.side == null);
+        final otherIsExiting =
+            otherNode.side != null &&
+            (otherNextNode == null || otherNextNode.side == null);
+
+        if (myInOrNearRoundabout &&
+            otherInOrNearRoundabout &&
+            !myIsExiting &&
+            !otherIsExiting) {
+          if (myNode.side != null || otherNode.side != null) {
+            if (isRoundaboutInner != other.isRoundaboutInner) {
+              continue;
+            }
+          }
+        }
+
+        // For same-direction or converging/merging traffic:
+        final ahead = dx * myFwdX + dy * myFwdY;
+        if (ahead > 0.5) {
+          // Check lateral cross-track distance. If the other vehicle is in an adjacent lane,
+          // parking bay, or driveway off to the side, it does not block my forward path.
+          final lateral = (dx * (-myFwdY) + dy * myFwdX).abs();
+          final maxInLaneLateral = (myRadius + otherRadius) * 0.65; // ~7.8 px
+          if (lateral > maxInLaneLateral) {
+            continue;
+          }
+
+          final otherFwdX = other._headingX;
+          final otherFwdY = other._headingY;
+          final otherSeesMeAhead = (-dx * otherFwdX - dy * otherFwdY) > 0.5;
+          if (otherSeesMeAhead && hashCode > other.hashCode) {
+            // Tie-break: exactly one car proceeds while the other yields
+            continue;
+          }
+
+          final requiredDist = myRadius + otherRadius + 1.5;
+          final dist = sqrt(distSq);
+          final physicalGap = max(0.0, dist - requiredDist);
+          if (physicalGap < minObstacleGap) {
+            minObstacleGap = physicalGap;
+          }
+          if (dist <= requiredDist) {
+            targetMultiplier = 0.0;
+            _closestObstacle = other;
+          } else if (dist < requiredDist + cellSize * 0.20) {
+            final slowFactor =
+                ((dist - requiredDist) / (cellSize * 0.20)).clamp(0.0, 1.0);
+            if (slowFactor < targetMultiplier) {
+              targetMultiplier = slowFactor;
+              _closestObstacle = other;
+            }
+          }
+        }
+      }
+
       _lastTargetMultiplier = targetMultiplier;
     }
 
-    if (_waitingAtSignal) {
+    if (onExpressLane) {
+      _lastTargetMultiplier = 1.0;
+      targetMultiplier = 1.0;
+    } else if (_waitingAtSignal) {
       targetMultiplier = 0.0;
     } else {
       targetMultiplier = _lastTargetMultiplier;
@@ -3008,7 +3285,7 @@ class CarComponent extends PositionComponent
                 path[_currentPathIndex + 1].side != null));
     final laneRate = nearRoundabout
         ? (dt * 12.0)
-        : (dt * 2.5); // Fast swap near/inside roundabout
+        : (dt * 6.0); // Fast swap near/inside roundabout, responsive return on road
     final laneDiff = _targetLaneSign - _currentLaneSign;
     if (laneDiff.abs() <= laneRate) {
       _currentLaneSign = _targetLaneSign;
@@ -3017,12 +3294,13 @@ class CarComponent extends PositionComponent
     }
 
     // --- Hard stop lines, resolved before anything is integrated ---
-    // (unreserved next cell, blocked box, shop-lot gate). `heldAtLine` means
-    // the drone is standing on the line right now.
+    // (unreserved next cell, blocked box, shop-lot gate, obstacle bumper gap).
+    // `heldAtLine` means the drone is standing on the line right now.
     final (double maxAdvance, bool heldAtLine) = _advanceCap(
       dt,
       hasReservation,
       exitBlocked,
+      obstacleGap: minObstacleGap,
     );
 
     // --- Acceleration/Deceleration ---
@@ -3079,7 +3357,7 @@ class CarComponent extends PositionComponent
         if (isJunctionOrIntersection) {
           final occupancy = game.getOrCreateOccupancy(nextNode);
           final isRoundabout = cell.type == CellType.smartJunction;
-          if (!occupancy.isReservedBy(this, isRoundabout)) {
+          if (!occupancy.isReservedBy(this, isRoundabout) && !hasReservation) {
             canStop = true;
           }
         }
@@ -3111,7 +3389,12 @@ class CarComponent extends PositionComponent
     _currentPathIndex = _calculatePathIndex(_distanceTraveled);
 
     if (_currentPathIndex != oldPathIndex) {
-      _ignoredObstacles.clear();
+      _ignoredObstacles.removeWhere(
+        (o) =>
+            o.arrived ||
+            position.distanceToSquared(o.position) >
+                (cellSize * 1.6) * (cellSize * 1.6),
+      );
       // The car has moved past the node the override applied to; the next
       // "don't block the box" check is against a different downstream cell
       // and should be evaluated fresh rather than staying force-overridden.
@@ -3119,11 +3402,14 @@ class CarComponent extends PositionComponent
         path[_currentPathIndex].x,
         path[_currentPathIndex].y,
       );
+      final currentPos = path[_currentPathIndex];
       final stillInJunction =
-          currentCell != null &&
-          (currentCell.connectionType == ConnectionNodeType.intersection ||
-              currentCell.type == CellType.trafficLight ||
-              currentCell.type == CellType.smartJunction);
+          currentPos.side != null ||
+          (currentCell != null &&
+              (currentCell.connectionType == ConnectionNodeType.intersection ||
+                  currentCell.type == CellType.trafficLight ||
+                  currentCell.type == CellType.smartJunction ||
+                  currentCell.isTunnel));
       if (!stillInJunction) {
         _boxDeadlockOverride = false;
       }
@@ -3149,42 +3435,50 @@ class CarComponent extends PositionComponent
         final pos = path[oldPathIndex];
         final RoadOccupancy occupancy = game.getOrCreateOccupancy(pos);
         occupancy.cars.remove(this);
+        occupancy.clearReservation(this);
         _debugLog("[ROAD_RELEASE] Car $this left (${pos.x}, ${pos.y})");
 
         occupancy.activeIntersectionCars.remove(this);
         if (occupancy.activeIntersectionCars.isEmpty) {
           occupancy.reservedAxis = null;
+          occupancy.consecutiveAxisCars = 0;
           _debugLog(
             "[INTERSECTION_RELEASE] Intersection (${pos.x}, ${pos.y}) released",
           );
         }
       }
 
-      // Clear reservation/waiting state on the old next cell since we moved past/entered it
+      // Clear waiting state on the old next cell since we moved past/entered it
       if (path.isNotEmpty && oldPathIndex + 1 < path.length) {
         final oldNextPos = path[oldPathIndex + 1];
         final RoadOccupancy oldNextOccupancy = game.getOrCreateOccupancy(
           oldNextPos,
         );
         oldNextOccupancy.waitingCars.remove(this);
-        oldNextOccupancy.clearReservation(this);
       }
 
       _registerOccupancy();
     }
 
     if (_currentSpeedMultiplier > 0.6) {
-      _ignoredObstacles.clear();
+      _ignoredObstacles.removeWhere(
+        (o) =>
+            o.arrived ||
+            position.distanceToSquared(o.position) >
+                (cellSize * 1.6) * (cellSize * 1.6),
+      );
     }
 
     // --- Deadlock Cycle Detection & Resolution ---
-    if (_currentSpeedMultiplier < 0.05 && _isInDeadlockCycle()) {
+    final isStuck = _currentSpeedMultiplier < 0.05 && !isWaiting && !arrived;
+    if (isStuck &&
+        (_isInDeadlockCycle() || _deadlockTimer > _deadlockBreakTimeout * 1.5)) {
       _deadlockTimer += dt;
       if (_deadlockTimer > _deadlockBreakTimeout) {
         if (_closestObstacle != null) {
           _ignoredObstacles.add(_closestObstacle!);
           _debugLog(
-            "[DEADLOCK_BREAK] Car $this ignoring obstacle $_closestObstacle to break deadlock cycle",
+            "[DEADLOCK_BREAK] Car $this ignoring obstacle $_closestObstacle to break deadlock",
           );
         }
         if (_currentPathIndex + 1 < path.length) {
@@ -3194,13 +3488,16 @@ class CarComponent extends PositionComponent
             final occupancy = game.getOrCreateOccupancy(nextNode);
             final isRoundabout = cell.type == CellType.smartJunction;
             occupancy.setReservation(this, isRoundabout);
+            _boxDeadlockOverride = true;
             _debugLog(
-              "[DEADLOCK_BREAK] Car $this forcing reservation on (${nextNode.x}, ${nextNode.y}) to break cycle",
+              "[DEADLOCK_BREAK] Car $this forcing reservation on (${nextNode.x}, ${nextNode.y}) to break deadlock",
             );
           }
         }
         _deadlockTimer = 0.0;
       }
+    } else if (isStuck) {
+      _deadlockTimer += dt;
     } else {
       _deadlockTimer = 0.0;
     }
@@ -3259,18 +3556,30 @@ class CarComponent extends PositionComponent
     return false;
   }
 
+  @visibleForTesting
+  bool isOncomingCar(CarComponent other) => _isOncomingCar(other);
+
   bool _isOncomingCar(CarComponent other) {
     if (other.arrived) return false;
 
-    // 1. Path history check: if other's next node is our current node, it's oncoming.
+    // 1. Path history check: if other is traversing the same segment in reverse
+    // (I am going A -> B, other is going B -> A).
     final myIdx = _currentPathIndex.clamp(0, path.length - 1);
     final myNode = path[myIdx];
+    final myNext = (myIdx + 1 < path.length) ? path[myIdx + 1] : null;
 
-    if (other._currentPathIndex + 1 < other.path.length) {
-      final otherNext = other.path[other._currentPathIndex + 1];
+    final otherIdx = other._currentPathIndex.clamp(0, other.path.length - 1);
+    final otherNode = other.path[otherIdx];
+    final otherNext =
+        (otherIdx + 1 < other.path.length) ? other.path[otherIdx + 1] : null;
+
+    if (myNext != null && otherNext != null) {
       if (otherNext.x == myNode.x &&
           otherNext.y == myNode.y &&
-          otherNext.side == myNode.side) {
+          otherNext.side == myNode.side &&
+          otherNode.x == myNext.x &&
+          otherNode.y == myNext.y &&
+          otherNode.side == myNext.side) {
         return true;
       }
     }
@@ -3285,7 +3594,7 @@ class CarComponent extends PositionComponent
     // classified as oncoming. Facing comes from the path tangent now.
     _refreshHeading();
     other._refreshHeading();
-    if (_headingX * other._headingX + _headingY * other._headingY < -0.5) {
+    if (_headingX * other._headingX + _headingY * other._headingY < -0.3) {
       return true;
     }
 
